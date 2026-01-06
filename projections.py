@@ -29,4 +29,21 @@ def get_player_data():
 
 
 def cover_rate(game_points, vegas_line):
-    covered= 0
+    over_hits=0
+    under_hits=0
+    push=0
+
+    for points in game_points:
+        if points > vegas_line:
+            over_hits += 1
+        elif points < vegas_line:
+            under_hits += 1
+        elif points == vegas_line:
+            push += 1
+
+    total_games= len(game_points)
+    over_rate = round((over_hits / total_games) * 100, 1)
+    under_rate = round((under_hits / total_games) * 100, 1)
+    push_rate = round((push / total_games) * 100, 1)
+
+    return over_rate, under_rate, push_rate
