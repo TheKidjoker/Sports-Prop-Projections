@@ -34,6 +34,54 @@ header h1 {
     font-size: 0.95rem;
 }
 
+/* Sport toggle */
+.sport-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 1.25rem;
+}
+
+.sport-btn {
+    padding: 0.6rem 2rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border: 1px solid #2a2a2a;
+    background: #111;
+    color: #555;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.sport-btn:first-child {
+    border-radius: 8px 0 0 8px;
+    border-right: none;
+}
+
+.sport-btn:not(:first-child):not(:last-child) {
+    border-radius: 0;
+    border-right: none;
+}
+
+.sport-btn:last-child {
+    border-radius: 0 8px 8px 0;
+}
+
+.sport-btn.active {
+    background: #cc0000;
+    color: #fff;
+    border-color: #cc0000;
+    box-shadow: 0 0 15px rgba(204, 0, 0, 0.4), 0 0 30px rgba(204, 0, 0, 0.15);
+}
+
+.sport-btn:not(.active):hover {
+    background: #1a1a1a;
+    color: #aaa;
+    border-color: #333;
+}
+
 /* Quick Generate button */
 #scan-btn {
     display: block;
@@ -436,6 +484,15 @@ button[type="submit"]:disabled {
     margin-bottom: 0.5rem;
 }
 
+/* Venue display (NHL) */
+.scan-venue {
+    color: #888;
+    font-size: 0.8rem;
+    font-style: italic;
+    margin-bottom: 0.4rem;
+    padding-left: 0.15rem;
+}
+
 /* Action text (scan cards) */
 .scan-action {
     font-size: 1rem;
@@ -469,6 +526,196 @@ button[type="submit"]:disabled {
 .rec-monitor {
     background: rgba(255, 255, 255, 0.04);
     color: #555;
+}
+
+/* Parlay section */
+.parlays-section {
+    margin-top: 2rem;
+}
+
+.parlay-card {
+    background: #111111;
+    border: 1px solid #1f1f1f;
+    border-radius: 10px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s;
+}
+
+.parlay-card:hover {
+    box-shadow: 0 0 20px rgba(204, 0, 0, 0.15), 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.parlay-safety {
+    border-left: 4px solid #4caf50;
+}
+
+.parlay-normal {
+    border-left: 4px solid #ffc107;
+}
+
+.parlay-yolo {
+    border-left: 4px solid #ff1a1a;
+}
+
+.parlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.parlay-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.parlay-odds {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #ff1a1a;
+    text-shadow: 0 0 8px rgba(255, 26, 26, 0.3);
+}
+
+.parlay-prob {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 0.75rem;
+}
+
+.parlay-legs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.parlay-leg {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.6rem;
+    background: #0d0d0d;
+    border-radius: 6px;
+    border: 1px solid #1a1a1a;
+}
+
+.parlay-leg-pick {
+    flex: 1;
+    font-size: 0.85rem;
+    color: #ccc;
+    font-weight: 500;
+}
+
+.parlay-leg-odds {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #ff9800;
+    margin: 0 0.75rem;
+    min-width: 50px;
+    text-align: right;
+}
+
+.parlay-leg-pct {
+    font-size: 0.8rem;
+    color: #666;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* CFB Slot type badges */
+.scan-slot {
+    display: inline-block;
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+}
+
+.slot-public {
+    background: rgba(76, 175, 80, 0.12);
+    color: #4caf50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.slot-trap {
+    background: rgba(255, 87, 34, 0.15);
+    color: #ff5722;
+    border: 1px solid rgba(255, 87, 34, 0.35);
+}
+
+.slot-scan {
+    background: rgba(255, 193, 7, 0.12);
+    color: #ffc107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.slot-caution {
+    background: rgba(255, 152, 0, 0.12);
+    color: #ff9800;
+    border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.slot-unknown {
+    background: rgba(255, 255, 255, 0.05);
+    color: #555;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Rank numbers in matchup */
+.scan-rank {
+    color: #bb86fc;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+/* Rank Scam badge */
+.scan-rank-scam {
+    background: rgba(123, 31, 162, 0.15);
+    border: 1px solid rgba(156, 39, 176, 0.4);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 0 10px rgba(156, 39, 176, 0.15);
+}
+
+.rank-scam-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #ce93d8;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.rank-scam-detail {
+    font-size: 0.85rem;
+    color: #bb86fc;
+}
+
+/* Spread Discrepancy badge */
+.scan-spread-disc {
+    background: rgba(33, 150, 243, 0.12);
+    border: 1px solid rgba(33, 150, 243, 0.35);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.12);
+}
+
+.spread-disc-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #64b5f6;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.spread-disc-detail {
+    font-size: 0.85rem;
+    color: #90caf9;
 }
 
 /* Ticker bar */
@@ -566,5 +813,19 @@ body {
 
     .scan-matchup {
         font-size: 0.95rem;
+    }
+
+    .sport-btn {
+        padding: 0.5rem 1.5rem;
+        font-size: 0.85rem;
+    }
+
+    .parlay-leg {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .parlay-leg-pick {
+        flex-basis: 100%;
     }
 }

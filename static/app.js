@@ -11,17 +11,44 @@ document.addEventListener("DOMContentLoaded", function () {
     var teamDropdown = document.getElementById("team-dropdown");
 
     var todaysGames = [];
+    var currentSport = "nba";
 
-    // Fetch today's games on page load for autocomplete + ticker
-    fetch("/api/games")
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-            todaysGames = data.games || [];
-            buildTicker(todaysGames);
-        })
-        .catch(function () {
-            todaysGames = [];
+    // Sport toggle
+    var sportBtns = document.querySelectorAll(".sport-btn");
+    sportBtns.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var newSport = btn.getAttribute("data-sport");
+            if (newSport === currentSport) return;
+
+            currentSport = newSport;
+            sportBtns.forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+
+            // Clear existing results
+            scanResults.classList.add("hidden");
+            scanResults.innerHTML = "";
+            results.classList.add("hidden");
+            errorBanner.classList.add("hidden");
+
+            // Re-fetch games for ticker + autocomplete
+            fetchGames();
         });
+    });
+
+    function fetchGames() {
+        fetch("/api/games?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                todaysGames = data.games || [];
+                buildTicker(todaysGames);
+            })
+            .catch(function () {
+                todaysGames = [];
+            });
+    }
+
+    // Initial fetch
+    fetchGames();
 
     // Team autocomplete
     teamInput.addEventListener("input", function () {
@@ -44,7 +71,13 @@ document.addEventListener("DOMContentLoaded", function () {
         teamDropdown.innerHTML = "";
         matches.forEach(function (g) {
             var li = document.createElement("li");
-            li.textContent = g.away_team + " vs " + g.home_team + " - " + g.game_time_est + " EST";
+            var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
+            var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
+            var text = awayLabel + " vs " + homeLabel + " - " + g.game_time_est + " EST";
+            if ((currentSport === "nhl" || currentSport === "cfb") && g.venue_name) {
+                text += " | " + g.venue_name;
+            }
+            li.textContent = text;
             li.addEventListener("click", function () {
                 if (g.home_team.toLowerCase().indexOf(query) !== -1) {
                     teamInput.value = g.home_team;
@@ -75,7 +108,7 @@ document.addEventListener("DOMContentLoaded", function () {
         fetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({})
+            body: JSON.stringify({ sport: currentSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -107,7 +140,8 @@ document.addEventListener("DOMContentLoaded", function () {
             player_name: document.getElementById("player_name").value,
             vegas_line: parseFloat(document.getElementById("vegas_line").value),
             games: parseInt(document.getElementById("games").value, 10),
-            team_name: document.getElementById("team_name").value
+            team_name: document.getElementById("team_name").value,
+            sport: currentSport
         };
 
         loading.classList.remove("hidden");
@@ -219,7 +253,8 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var html = '<h2 class="scan-title">Today\'s Games</h2>';
+        var sportLabel = currentSport.toUpperCase();
+        var html = '<h2 class="scan-title">Today\'s ' + sportLabel + ' Games</h2>';
         html += '<div class="scan-grid">';
 
         filtered.forEach(function (g) {
@@ -230,13 +265,49 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="scan-card">';
 
             // Header: matchup + cover %
+            var awayLabel = g.away_rank ? '<span class="scan-rank">#' + g.away_rank + '</span> ' + g.away_team : g.away_team;
+            var homeLabel = g.home_rank ? '<span class="scan-rank">#' + g.home_rank + '</span> ' + g.home_team : g.home_team;
             html += '<div class="scan-card-header">';
-            html += '<div class="scan-matchup">' + g.away_team + ' vs ' + g.home_team + '</div>';
+            html += '<div class="scan-matchup">' + awayLabel + ' vs ' + homeLabel + '</div>';
             html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
             html += '</div>';
 
+            // Venue (NHL and CFB)
+            if ((currentSport === "nhl" || currentSport === "cfb") && g.venue_name) {
+                var venueText = g.venue_name;
+                if (g.venue_city) {
+                    venueText += " — " + g.venue_city;
+                    if (g.venue_state) venueText += ", " + g.venue_state;
+                }
+                html += '<div class="scan-venue">' + venueText + '</div>';
+            }
+
             // Time
             html += '<div class="scan-time">' + g.game_time_est + ' EST</div>';
+
+            // Slot type label (CFB)
+            if (currentSport === "cfb" && g.slot_type) {
+                var slotLabel = g.slot_type.toUpperCase();
+                var slotClass = "slot-" + g.slot_type;
+                html += '<div class="scan-slot ' + slotClass + '">' + slotLabel + '</div>';
+            }
+
+            // Rank Scam badge (CFB)
+            if (g.rank_scam && g.rank_scam.is_rank_scam) {
+                var tierLabel = g.rank_scam.tier ? g.rank_scam.tier.toUpperCase() : '';
+                html += '<div class="scan-rank-scam">';
+                html += '<span class="rank-scam-label">RANK SCAM — ' + tierLabel + '</span> ';
+                html += '<span class="rank-scam-detail">' + g.rank_scam.scam_action + '</span>';
+                html += '</div>';
+            }
+
+            // Spread Discrepancy badge (CFB)
+            if (g.spread_discrepancy && g.spread_discrepancy.is_discrepancy) {
+                html += '<div class="scan-spread-disc">';
+                html += '<span class="spread-disc-label">SPREAD ALERT</span> ';
+                html += '<span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span>';
+                html += '</div>';
+            }
 
             // Action — what to do
             if (g.action) {
@@ -253,8 +324,116 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         html += '</div>';
+
+        // Parlays section
+        html += buildParlaySection(filtered);
+
         scanResults.innerHTML = html;
         scanResults.classList.remove("hidden");
+    }
+
+    function buildParlaySection(games) {
+        if (games.length < 2) return "";
+
+        // Sort by cover_pct descending for parlay building
+        var sorted = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
+
+        var html = '<div class="parlays-section">';
+        html += '<h2 class="scan-title">Parlay Suggestions</h2>';
+
+        // Safety Parlay: 2 legs, 80%+ each
+        var safetyLegs = sorted.filter(function (g) { return g.cover_pct >= 80; }).slice(0, 2);
+        if (safetyLegs.length >= 2) {
+            var safetyOdds = calcParlayOdds(safetyLegs);
+            var safetyProb = calcCombinedProb(safetyLegs);
+            html += buildParlayCard("Safety Parlay", safetyLegs, safetyOdds, safetyProb, "parlay-safety");
+        }
+
+        // Normal Parlay: 4-6 legs, 67.5%+ each
+        var normalPool = sorted.filter(function (g) { return g.cover_pct >= 67.5; });
+        var normalLegs = normalPool.slice(0, Math.min(6, Math.max(4, normalPool.length)));
+        if (normalLegs.length >= 4) {
+            var normalOdds = calcParlayOdds(normalLegs);
+            var normalProb = calcCombinedProb(normalLegs);
+            html += buildParlayCard("Normal Parlay", normalLegs, normalOdds, normalProb, "parlay-normal");
+        } else if (normalPool.length >= 2) {
+            // Fallback: use what we have if less than 4
+            var normalOdds = calcParlayOdds(normalPool);
+            var normalProb = calcCombinedProb(normalPool);
+            html += buildParlayCard("Normal Parlay", normalPool, normalOdds, normalProb, "parlay-normal");
+        }
+
+        // YOLO Parlay: all qualifying legs
+        var yoloPool = sorted.filter(function (g) { return g.cover_pct >= 60; });
+        if (yoloPool.length >= 4) {
+            var yoloLegs = yoloPool.slice(0, Math.min(10, yoloPool.length));
+            var yoloOdds = calcParlayOdds(yoloLegs);
+            var yoloProb = calcCombinedProb(yoloLegs);
+            html += buildParlayCard("YOLO Parlay", yoloLegs, yoloOdds, yoloProb, "parlay-yolo");
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function buildParlayCard(title, legs, parlayOdds, combinedProb, cssClass) {
+        var html = '<div class="parlay-card ' + cssClass + '">';
+        html += '<div class="parlay-header">';
+        html += '<span class="parlay-title">' + title + ' (' + legs.length + ' legs)</span>';
+        html += '<span class="parlay-odds">' + parlayOdds + '</span>';
+        html += '</div>';
+        html += '<div class="parlay-prob">Combined probability: ' + combinedProb + '%</div>';
+        html += '<div class="parlay-legs">';
+
+        legs.forEach(function (g) {
+            var legOdds = pctToAmericanOdds(g.cover_pct);
+            var pickLabel = g.action || (g.lean_team ? g.lean_team : g.home_team);
+            html += '<div class="parlay-leg">';
+            html += '<span class="parlay-leg-pick">' + pickLabel + '</span>';
+            html += '<span class="parlay-leg-odds">' + legOdds + '</span>';
+            html += '<span class="parlay-leg-pct">' + g.cover_pct + '%</span>';
+            html += '</div>';
+        });
+
+        html += '</div></div>';
+        return html;
+    }
+
+    function pctToAmericanOdds(pct) {
+        // Convert cover percentage to implied American odds
+        var prob = pct / 100;
+        if (prob >= 0.5) {
+            var odds = -Math.round((prob / (1 - prob)) * 100);
+            return odds.toString();
+        } else {
+            var odds = Math.round(((1 - prob) / prob) * 100);
+            return "+" + odds.toString();
+        }
+    }
+
+    function calcParlayOdds(legs) {
+        // Multiply decimal odds, then convert to American
+        var decimalProduct = 1;
+        legs.forEach(function (g) {
+            var prob = g.cover_pct / 100;
+            var decOdds = 1 / prob;
+            decimalProduct *= decOdds;
+        });
+
+        // Convert decimal parlay odds to American
+        if (decimalProduct >= 2) {
+            return "+" + Math.round((decimalProduct - 1) * 100);
+        } else {
+            return "-" + Math.round(100 / (decimalProduct - 1));
+        }
+    }
+
+    function calcCombinedProb(legs) {
+        var prob = 1;
+        legs.forEach(function (g) {
+            prob *= (g.cover_pct / 100);
+        });
+        return (prob * 100).toFixed(1);
     }
 
     function buildTicker(games) {
@@ -266,8 +445,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
         var items = "";
         games.forEach(function (g) {
+            var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
+            var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
             items += '<span class="ticker-item">' +
-                '<span class="ticker-teams">' + g.away_team + ' @ ' + g.home_team + '</span>' +
+                '<span class="ticker-teams">' + awayLabel + ' @ ' + homeLabel + '</span>' +
                 '<span class="ticker-time">' + g.game_time_est + ' EST</span>' +
                 '</span>';
         });

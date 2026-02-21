@@ -9,6 +9,14 @@ STAR_THRESHOLDS = {
             {"min_ppg": 15, "min_rpg": 8},
         ],
     },
+    "nhl": {
+        "min_ptspg": 0.8,
+        "min_toi": 18,
+        "alt": [
+            {"min_gpg": 0.4, "min_toi": 16},
+            {"min_apg": 0.5, "min_toi": 16},
+        ],
+    },
 }
 
 RECENCY_HOURS = 72
@@ -33,14 +41,19 @@ def is_star_player(player_stats, sport="nba"):
     if not thresholds:
         return False, ""
 
-    ppg = player_stats.get("ppg", 0)
-    mpg = player_stats.get("mpg", 0)
-    apg = player_stats.get("apg", 0)
-    rpg = player_stats.get("rpg", 0)
-
-    # Primary threshold: PPG + MPG
-    if ppg >= thresholds["min_ppg"] and mpg >= thresholds["min_mpg"]:
-        return True, f"PPG: {ppg}, MPG: {mpg}"
+    # Primary threshold: check all min_* keys (excluding alt)
+    primary_keys = {k: v for k, v in thresholds.items() if k.startswith("min_")}
+    if primary_keys:
+        meets_primary = True
+        for key, min_val in primary_keys.items():
+            stat_key = key.replace("min_", "")
+            if player_stats.get(stat_key, 0) < min_val:
+                meets_primary = False
+                break
+        if meets_primary:
+            reason_parts = [f"{k.replace('min_', '').upper()}: {player_stats.get(k.replace('min_', ''), 0)}"
+                            for k in primary_keys]
+            return True, ", ".join(reason_parts)
 
     # Alternative thresholds
     for alt in thresholds.get("alt", []):

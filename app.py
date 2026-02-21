@@ -22,7 +22,11 @@ def index():
 def api_games():
     """Returns today's games list for autocomplete."""
     try:
-        games = get_todays_games()
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb"):
+            sport = "nba"
+
+        games = get_todays_games(sport)
         result = []
         for game in games:
             game_time_est = ""
@@ -38,12 +42,23 @@ def api_games():
                 except (ValueError, TypeError):
                     pass
 
-            result.append({
+            entry = {
                 "home_team": game["home_team"],
                 "away_team": game["away_team"],
                 "game_time_est": game_time_est,
                 "event_id": game["event_id"],
-            })
+            }
+
+            if sport in ("nhl", "cfb"):
+                entry["venue_name"] = game.get("venue_name", "")
+                entry["venue_city"] = game.get("venue_city", "")
+                entry["venue_state"] = game.get("venue_state", "")
+
+            if sport == "cfb":
+                entry["home_rank"] = game.get("home_rank")
+                entry["away_rank"] = game.get("away_rank")
+
+            result.append(entry)
 
         return jsonify({"games": result})
 
@@ -55,7 +70,12 @@ def api_games():
 def api_scan():
     """Scans all today's games, returns ranked results."""
     try:
-        results = scan_all_games()
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb"):
+            sport = "nba"
+
+        results = scan_all_games(sport)
         return jsonify({"success": True, "games": results})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -65,6 +85,9 @@ def api_scan():
 def predict():
     try:
         data = request.get_json()
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb"):
+            sport = "nba"
 
         # Validate required fields
         player_name = data.get("player_name", "").strip()
@@ -99,7 +122,7 @@ def predict():
         matched_game = None
 
         if team_name:
-            todays_games = get_todays_games()
+            todays_games = get_todays_games(sport)
             search = team_name.lower()
 
             for game in todays_games:
@@ -112,23 +135,56 @@ def predict():
                 away_team = matched_game["away_team"]
                 game_date_str = matched_game.get("game_date", "")
 
-                # Check if this is the first game of the day
+                # Sort to determine game index / first game
                 sorted_games = sorted(todays_games, key=lambda g: g.get("game_date", ""))
-                is_first_game = (sorted_games and sorted_games[0].get("event_id") == matched_game["event_id"])
+                total_games = len(sorted_games)
+                game_idx = 0
+                for idx, g in enumerate(sorted_games):
+                    if g.get("event_id") == matched_game["event_id"]:
+                        game_idx = idx
+                        break
+                is_first_game = (game_idx == 0)
 
-                if is_first_game:
-                    slot_type = first_game_slot_override(day_of_week)
-                elif game_date_str:
-                    try:
-                        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-                        pst_dt = game_dt - timedelta(hours=8)
-                        hour, minute = pst_dt.hour, pst_dt.minute
-                        slot_type = classify_slot(day_of_week, hour, minute)
-                    except (ValueError, TypeError):
-                        pass
+                if sport == "cfb":
+                    # CFB: classify using EST (UTC-5)
+                    if game_date_str:
+                        try:
+                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+                            est_dt = game_dt - timedelta(hours=5)
+                            hour, minute = est_dt.hour, est_dt.minute
+                            slot_type = classify_slot(day_of_week, hour, minute, sport="cfb")
+                        except (ValueError, TypeError):
+                            pass
+                elif sport == "nhl":
+                    # NHL: classify using CST (UTC-6)
+                    if game_date_str:
+                        try:
+                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+                            cst_dt = game_dt - timedelta(hours=6)
+                            hour, minute = cst_dt.hour, cst_dt.minute
+                            slot_type = classify_slot(
+                                day_of_week, hour, minute,
+                                sport="nhl",
+                                total_games_on_slate=total_games,
+                                game_index=game_idx,
+                            )
+                        except (ValueError, TypeError):
+                            pass
+                else:
+                    # NBA: first-game override or PST classification
+                    if is_first_game:
+                        slot_type = first_game_slot_override(day_of_week)
+                    elif game_date_str:
+                        try:
+                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+                            pst_dt = game_dt - timedelta(hours=8)
+                            hour, minute = pst_dt.hour, pst_dt.minute
+                            slot_type = classify_slot(day_of_week, hour, minute)
+                        except (ValueError, TypeError):
+                            pass
 
                 # Line movement check
-                opening, current = get_game_spread(matched_game["event_id"])
+                opening, current = get_game_spread(matched_game["event_id"], sport)
 
                 if opening is not None and current is not None:
                     current_spread = current
@@ -142,7 +198,7 @@ def predict():
                         moneyline_spread = current
 
                 # Trell Rule evaluation
-                all_injuries = get_all_injuries()
+                all_injuries = get_all_injuries(sport)
                 injured_stars = []
 
                 for t_name in [home_team, away_team]:
@@ -155,9 +211,9 @@ def predict():
                         star = False
                         star_reason = ""
                         if player_id:
-                            player_stats = get_player_season_averages(player_id)
+                            player_stats = get_player_season_averages(player_id, sport)
                             if player_stats:
-                                star, star_reason = is_star_player(player_stats)
+                                star, star_reason = is_star_player(player_stats, sport)
                         injured_stars.append({
                             "player_name": injury["player_name"],
                             "is_star": star,
@@ -176,13 +232,13 @@ def predict():
                     elif slot_type == "vegas":
                         lean_team = away_team if current_spread < 0 else home_team
 
-        # Fetch player data (only if player name provided)
+        # Fetch player data (only if player name provided and NBA)
         recent_games = None
         player_avg = None
         prediction_data = None
         cover_rates_data = None
 
-        if player_name:
+        if player_name and sport not in ("nhl", "cfb"):
             recent_games = get_player_recent_points(player_name, games)
 
             if not recent_games or len(recent_games) == 0:
@@ -215,7 +271,7 @@ def predict():
                 action = ("Take " + lean_team + " " + fs(lean_spread) +
                           " or better — don't take past " + fs(limit))
 
-        return jsonify({
+        response_data = {
             "success": True,
             "player_name": player_name or None,
             "recent_games": recent_games,
@@ -224,7 +280,15 @@ def predict():
             "action": action,
             "prediction": prediction_data,
             "cover_rates": cover_rates_data,
-        })
+        }
+
+        # Include venue for NHL and CFB
+        if sport in ("nhl", "cfb") and matched_game:
+            response_data["venue_name"] = matched_game.get("venue_name", "")
+            response_data["venue_city"] = matched_game.get("venue_city", "")
+            response_data["venue_state"] = matched_game.get("venue_state", "")
+
+        return jsonify(response_data)
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
