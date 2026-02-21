@@ -16,6 +16,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var gradeBtn = document.getElementById("grade-btn");
     var dashboardSportFilter = document.getElementById("dashboard-sport-filter");
     var dashboardLoading = document.getElementById("dashboard-loading");
+    var lottoBtn = document.getElementById("lotto-btn");
+    var lottoLoading = document.getElementById("lotto-loading");
+    var lottoResults = document.getElementById("lotto-results");
 
     var todaysGames = [];
     var currentSport = "nba";
@@ -40,6 +43,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
     document.addEventListener("keydown", function (e) {
         if (e.key === "Escape") closeSidebar();
+    });
+
+    // Home button — reset to welcome hero
+    document.getElementById("nav-home-btn").addEventListener("click", function () {
+        scanResults.classList.add("hidden");
+        scanResults.innerHTML = "";
+        scanResultsVisible = false;
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
+        welcomeHero.classList.remove("hidden");
+        closeSidebar();
     });
 
     // Hero sport card clicks
@@ -81,6 +99,8 @@ document.addEventListener("DOMContentLoaded", function () {
             errorBanner.classList.add("hidden");
             dashboardSection.classList.add("hidden");
             dashboardVisible = false;
+            lottoResults.classList.add("hidden");
+            lottoResults.innerHTML = "";
             welcomeHero.classList.remove("hidden");
 
             // Hide manual form when ALL is selected (it's sport-specific)
@@ -188,6 +208,8 @@ document.addEventListener("DOMContentLoaded", function () {
         scanResults.classList.add("hidden");
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
 
         fetch("/api/scan", {
             method: "POST",
@@ -228,6 +250,8 @@ document.addEventListener("DOMContentLoaded", function () {
         errorBanner.classList.add("hidden");
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
 
         var payload = {
             player_name: document.getElementById("player_name").value,
@@ -695,6 +719,123 @@ document.addEventListener("DOMContentLoaded", function () {
         return num.toFixed(1);
     }
 
+    // ─── Joker's Lotto (Cross-Sport Mega Parlay) ─────────────────────
+    lottoBtn.addEventListener("click", function () {
+        lottoBtn.disabled = true;
+        lottoLoading.classList.remove("hidden");
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
+
+        fetch("/api/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: "all" })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            lottoLoading.classList.add("hidden");
+            lottoBtn.disabled = false;
+
+            if (!data.success || !data.all_sports) {
+                showError(data.error || "Lotto scan failed.");
+                return;
+            }
+
+            renderLottoResults(data.all_sports);
+
+            if (window.innerWidth <= 768) closeSidebar();
+        })
+        .catch(function () {
+            lottoLoading.classList.add("hidden");
+            lottoBtn.disabled = false;
+            showError("Gotham's signal went dark.");
+        });
+    });
+
+    function renderLottoResults(allSports) {
+        welcomeHero.classList.add("hidden");
+        var sportOrder = ["nba", "nhl", "cfb", "nfl", "cbb"];
+        var sportNames = { nba: "NBA", nhl: "NHL", cfb: "CFB", nfl: "NFL", cbb: "CBB" };
+        var picks = [];
+
+        sportOrder.forEach(function (sport) {
+            var games = allSports[sport] || [];
+            // Filter: >= 72% cover, not skip
+            var eligible = games.filter(function (g) {
+                return g.cover_pct >= 72 && !g.skip;
+            });
+            if (eligible.length === 0) return;
+
+            // Sort by cover_pct desc, tiebreak by confirmation_score desc
+            eligible.sort(function (a, b) {
+                if (b.cover_pct !== a.cover_pct) return b.cover_pct - a.cover_pct;
+                return (b.confirmation_score || 0) - (a.confirmation_score || 0);
+            });
+
+            var best = eligible[0];
+            best._sport = sport;
+            picks.push(best);
+        });
+
+        if (picks.length < 2) {
+            lottoResults.innerHTML = '<div class="scan-empty-state">' +
+                '<div class="scan-empty-headline">The Joker keeps his cards close.</div>' +
+                '<div class="scan-empty-sub">Not enough high-confidence cross-sport picks tonight. Need at least 2 sports with a 72%+ play — check back later.</div>' +
+                '</div>';
+            lottoResults.classList.remove("hidden");
+            return;
+        }
+
+        // Build parlay card
+        var parlayOdds = calcParlayOdds(picks);
+        var combinedProb = calcCombinedProb(picks);
+
+        var html = '<h2 class="scan-title">Joker\'s Lotto — Cross-Sport Mega Parlay</h2>';
+        html += '<p class="lotto-subtitle">' + picks.length + ' sports, 1 ticket. The best pick from each sport at 72%+ cover.</p>';
+
+        // Parlay summary card
+        html += '<div class="parlay-card parlay-lotto">';
+        html += '<div class="parlay-header">';
+        html += '<span class="parlay-title">Joker\'s Lotto (' + picks.length + ' legs)</span>';
+        html += '<span class="parlay-odds">' + parlayOdds + '</span>';
+        html += '</div>';
+        html += '<div class="parlay-prob">Combined probability: ' + combinedProb + '%</div>';
+        html += '<div class="parlay-legs">';
+
+        picks.forEach(function (g) {
+            var legOdds = pctToAmericanOdds(g.cover_pct);
+            var pickLabel = g.action || (g.lean_team ? g.lean_team : g.home_team);
+            html += '<div class="parlay-leg">';
+            html += '<span class="lotto-sport-badge lotto-badge-' + g._sport + '">' + sportNames[g._sport] + '</span>';
+            html += '<span class="parlay-leg-pick">' + pickLabel + '</span>';
+            html += '<span class="parlay-leg-odds">' + legOdds + '</span>';
+            html += '<span class="parlay-leg-pct">' + g.cover_pct + '%</span>';
+            html += '</div>';
+        });
+
+        html += '</div></div>';
+
+        // Detail cards for each leg
+        html += '<h3 class="lotto-detail-header">Leg Breakdown</h3>';
+        html += '<div class="scan-grid">';
+        picks.forEach(function (g) {
+            html += '<div class="lotto-leg-wrapper">';
+            html += '<div class="lotto-sport-badge lotto-badge-' + g._sport + ' lotto-badge-inline">' + sportNames[g._sport] + '</div>';
+            html += buildScanCard(g, g._sport);
+            html += '</div>';
+        });
+        html += '</div>';
+
+        lottoResults.innerHTML = html;
+        lottoResults.classList.remove("hidden");
+    }
+
     // ─── Dashboard (The Ledger) ─────────────────────────────────────
     ledgerBtn.addEventListener("click", function () {
         welcomeHero.classList.add("hidden");
@@ -702,6 +843,8 @@ document.addEventListener("DOMContentLoaded", function () {
         scanResultsVisible = false;
         results.classList.add("hidden");
         errorBanner.classList.add("hidden");
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
         dashboardSection.classList.remove("hidden");
         dashboardVisible = true;
         fetchDashboard();

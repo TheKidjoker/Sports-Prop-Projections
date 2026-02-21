@@ -25,7 +25,7 @@
     --radius-lg: 12px;
     --nav-height: 56px;
     --ticker-height: 44px;
-    --sidebar-width: 320px;
+    --sidebar-width: 380px;
     --z-ticker: 200;
     --z-nav: 300;
     --z-overlay: 400;
@@ -107,6 +107,28 @@ body {
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: 0.3px;
+}
+
+.nav-home-btn {
+    background: none;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 1.25rem;
+    line-height: 1;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.nav-home-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--text-muted);
+    color: var(--text-primary);
 }
 
 .nav-sport-badge {
@@ -1533,6 +1555,113 @@ button[type="submit"]:disabled {
 .dash-recent-pct {
     font-size: 0.75rem;
     color: var(--text-muted);
+}
+
+/* =========================================
+   Joker's Lotto
+   ========================================= */
+#lotto-btn {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: linear-gradient(135deg, #b71c1c, var(--accent-red));
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s;
+    letter-spacing: 0.5px;
+}
+
+#lotto-btn:hover {
+    background: linear-gradient(135deg, var(--accent-red), var(--accent-red-hover));
+    box-shadow: 0 0 12px rgba(230, 57, 70, 0.3);
+}
+
+#lotto-btn:disabled {
+    background: #2d1215;
+    color: #6b3a3d;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.lotto-results {
+    margin-bottom: 1.5rem;
+}
+
+.lotto-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.25rem;
+}
+
+.parlay-lotto {
+    border-left: 3px solid var(--accent-red);
+    background: linear-gradient(135deg, var(--bg-surface), rgba(230, 57, 70, 0.04));
+}
+
+.lotto-sport-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    margin-right: 0.4rem;
+    flex-shrink: 0;
+}
+
+.lotto-badge-nba {
+    background: rgba(255, 152, 0, 0.15);
+    color: var(--accent-orange);
+    border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.lotto-badge-nhl {
+    background: rgba(88, 166, 255, 0.12);
+    color: var(--accent-blue);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+}
+
+.lotto-badge-cfb {
+    background: rgba(76, 175, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+
+.lotto-badge-nfl {
+    background: rgba(230, 57, 70, 0.12);
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+.lotto-badge-cbb {
+    background: rgba(187, 134, 252, 0.12);
+    color: var(--accent-purple);
+    border: 1px solid rgba(187, 134, 252, 0.25);
+}
+
+.lotto-badge-inline {
+    margin-bottom: 0.4rem;
+}
+
+.lotto-detail-header {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    padding-bottom: 0.4rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.lotto-leg-wrapper {
+    position: relative;
 }
 
 /* =========================================

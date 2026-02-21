@@ -35,6 +35,12 @@
 
             <button type="button" id="ledger-btn">The Ledger</button>
 
+            <button type="button" id="lotto-btn">Joker's Lotto</button>
+            <div id="lotto-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Scanning all of Gotham...</p>
+            </div>
+
             <div class="sidebar-divider"></div>
 
             <form id="predict-form">
@@ -83,6 +89,7 @@
             <span></span>
         </button>
         <span class="nav-title">Joker's Edge</span>
+        <button type="button" class="nav-home-btn" id="nav-home-btn" aria-label="Go home">&#8962;</button>
         <span class="nav-sport-badge" id="nav-sport-badge">NBA</span>
     </nav>
 
@@ -143,6 +150,8 @@
             <div id="dashboard-breakdowns" class="dashboard-breakdowns"></div>
             <div id="dashboard-recent" class="dashboard-recent"></div>
         </section>
+
+        <div id="lotto-results" class="lotto-results hidden"></div>
 
         <div id="scan-results" class="scan-results hidden"></div>
 

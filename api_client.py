@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 import requests
 from datetime import datetime, timedelta, timezone
 
@@ -6,6 +8,38 @@ BASE_URL = "https://www.balldontlie.io/api/v1"
 
 # How many hours after kickoff before a game is considered stale
 STALE_HOURS = 2
+
+# ─── TTL Response Cache ─────────────────────────────────────────────────────
+CACHE_TTL = 120  # seconds
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def _cached_request(url, params=None, timeout=10):
+    """
+    Thread-safe cached HTTP GET. Returns parsed JSON or None.
+    Cache key = URL + sorted query params. TTL = CACHE_TTL seconds.
+    """
+    key = url + "|" + str(sorted((params or {}).items()))
+    now = time.time()
+
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (now - entry["ts"]) < CACHE_TTL:
+            return entry["data"]
+
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    with _cache_lock:
+        _cache[key] = {"data": data, "ts": time.time()}
+
+    return data
 
 
 def is_game_stale(game_date_str):
@@ -112,11 +146,9 @@ def get_todays_games(sport="nba", date_str=None):
         params = {}
         if date_str:
             params["dates"] = date_str
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, params=params, timeout=10)
+        if data is None:
             return []
-
-        data = response.json()
         games = []
 
         for event in data.get("events", []):
@@ -213,15 +245,10 @@ def get_game_spread(event_id, sport="nba"):
     """
     try:
         url = _espn_url(sport, "summary")
-        response = requests.get(
-            url,
-            params={"event": event_id},
-            timeout=10,
-        )
-        if response.status_code != 200:
+        data = _cached_request(url, params={"event": event_id}, timeout=10)
+        if data is None:
             return None, None
 
-        data = response.json()
         pickcenter = data.get("pickcenter", [])
 
         if not pickcenter:
@@ -276,11 +303,10 @@ def get_all_injuries(sport="nba"):
     """
     try:
         url = _espn_url(sport, "injuries")
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, timeout=10)
+        if data is None:
             return {}
 
-        data = response.json()
         injuries_by_team = {}
 
         for team_entry in data.get("injuries", []):
@@ -328,11 +354,10 @@ def get_player_season_averages(athlete_id, sport="nba"):
     """
     try:
         url = _espn_player_stats_url(sport, athlete_id)
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, timeout=10)
+        if data is None:
             return None
 
-        data = response.json()
         categories = data.get("categories", [])
 
         stats = {}
@@ -410,18 +435,17 @@ def get_game_overunder(event_id, sport="nfl"):
     """
     try:
         url = _espn_url(sport, "summary")
-        response = requests.get(url, params={"event": event_id}, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, params={"event": event_id}, timeout=10)
+        if data is None:
             return None
 
-        data = response.json()
         pickcenter = data.get("pickcenter", [])
         if not pickcenter:
             return None
 
         return float(pickcenter[0].get("overUnder", 0)) or None
 
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+    except (KeyError, IndexError, ValueError, TypeError):
         return None
 
 
@@ -438,11 +462,10 @@ def get_team_recent_results(team_id, count=4):
             f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
             f"teams/{team_id}/schedule"
         )
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, timeout=10)
+        if data is None:
             return []
 
-        data = response.json()
         events = data.get("events", [])
 
         results = []
@@ -488,11 +511,10 @@ def get_game_weather_espn(event_id, sport="nfl"):
     """
     try:
         url = _espn_url(sport, "summary")
-        response = requests.get(url, params={"event": event_id}, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, params={"event": event_id}, timeout=10)
+        if data is None:
             return None
 
-        data = response.json()
         weather = data.get("gameInfo", {}).get("weather", {})
         if not weather:
             return None
@@ -518,11 +540,10 @@ def get_game_final_score(event_id, sport="nba"):
     """
     try:
         url = _espn_url(sport, "summary")
-        response = requests.get(url, params={"event": event_id}, timeout=10)
-        if response.status_code != 200:
+        data = _cached_request(url, params={"event": event_id}, timeout=10)
+        if data is None:
             return None, None, False
 
-        data = response.json()
         header = data.get("header", {})
         competitions = header.get("competitions", [])
         if not competitions:

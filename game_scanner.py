@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from api_client import (
     get_todays_games, get_all_injuries, get_game_spread,
@@ -403,16 +404,18 @@ def scan_all_games(sport="nba", date_str=None):
                 except (ValueError, TypeError):
                     continue
 
-    results = []
-    for i, game in enumerate(sorted_games):
+    def _analyze_game_wrapper(args):
+        i, game = args
         is_first_game = (i == 0)
         is_last_sunday = (i == last_sunday_non_snf_idx) if last_sunday_non_snf_idx is not None else False
-        analysis = _analyze_single_game(
+        return _analyze_single_game(
             game, day_of_week, all_injuries, is_first_game,
             sport=sport, total_games_on_slate=total_games, game_index=i,
             is_last_sunday_game=is_last_sunday,
         )
-        results.append(analysis)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_analyze_game_wrapper, enumerate(sorted_games)))
 
     # Sort by confirmation_score descending
     results.sort(key=lambda r: r.get("confirmation_score", 0), reverse=True)

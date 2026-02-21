@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, jsonify
 from projections import points_prediction, cover_rate
@@ -116,13 +117,17 @@ def api_scan():
         sport = data.get("sport", "nba").lower()
 
         if sport == "all":
+            sports = ("nba", "nhl", "cfb", "nfl", "cbb")
             all_results = {}
-            for s in ("nba", "nhl", "cfb", "nfl", "cbb"):
-                all_results[s] = scan_all_games(s)
-                try:
-                    tracker.save_predictions(all_results[s], s)
-                except Exception:
-                    pass
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {pool.submit(scan_all_games, s): s for s in sports}
+                for future in futures:
+                    s = futures[future]
+                    all_results[s] = future.result()
+                    try:
+                        tracker.save_predictions(all_results[s], s)
+                    except Exception:
+                        pass
             return jsonify({"success": True, "all_sports": all_results})
 
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
