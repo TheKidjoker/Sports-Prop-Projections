@@ -57,14 +57,14 @@ def main():
             opening, current = get_game_spread(event_id)
 
             if opening is not None and current is not None:
-                movement = detect_movement(opening, current)
+                movement, magnitude = detect_movement(opening, current)
                 confirmed = confirms_slot(movement, slot_type)
                 line_confirmed = confirmed
 
                 print(f"\nLine Movement:")
                 print(f"  Opening spread: {opening:+.1f}")
                 print(f"  Current spread: {current:+.1f}")
-                print(f"  Movement: {movement}")
+                print(f"  Movement: {movement} ({magnitude:.1f} pts)")
                 print(f"  Confirms slot: {'YES' if confirmed else 'NO'}")
                 if confirmed:
                     print("  +5 confidence boost applied")

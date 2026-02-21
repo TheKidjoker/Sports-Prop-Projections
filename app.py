@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, jsonify
 from projections import points_prediction, cover_rate
 from api_client import (
     get_player_recent_points, get_todays_games, get_game_spread,
-    get_all_injuries, get_player_season_averages,
+    get_all_injuries, get_player_season_averages, is_game_stale,
 )
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
@@ -11,6 +11,46 @@ from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from game_scanner import scan_all_games
 
 app = Flask(__name__)
+
+
+def _get_games_with_transition(sport):
+    """
+    Fetch today's games. If all are stale/final (or 0 games), fetch tomorrow's.
+    Filter out stale/final games from today's slate.
+
+    Returns:
+        (games_list, slate_info) where slate_info = {showing_tomorrow, game_count}
+    """
+    games = get_todays_games(sport)
+    showing_tomorrow = False
+
+    # Check if all today's games are done
+    all_done = (
+        not games
+        or all(
+            is_game_stale(g.get("game_date", ""))
+            or g.get("game_status") == "STATUS_FINAL"
+            for g in games
+        )
+    )
+
+    if all_done:
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
+        tomorrow_games = get_todays_games(sport, date_str=tomorrow)
+        if tomorrow_games:
+            games = tomorrow_games
+            showing_tomorrow = True
+
+    # Filter out stale/final from today's slate (skip filter for tomorrow — all future)
+    if not showing_tomorrow:
+        games = [
+            g for g in games
+            if not is_game_stale(g.get("game_date", ""))
+            and g.get("game_status") != "STATUS_FINAL"
+        ]
+
+    slate = {"showing_tomorrow": showing_tomorrow, "game_count": len(games)}
+    return games, slate
 
 
 @app.route("/")
@@ -23,10 +63,10 @@ def api_games():
     """Returns today's games list for autocomplete."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
-        games = get_todays_games(sport)
+        games, slate = _get_games_with_transition(sport)
         result = []
         for game in games:
             game_time_est = ""
@@ -49,21 +89,21 @@ def api_games():
                 "event_id": game["event_id"],
             }
 
-            if sport in ("nhl", "cfb", "nfl"):
+            if sport in ("nhl", "cfb", "cbb", "nfl"):
                 entry["venue_name"] = game.get("venue_name", "")
                 entry["venue_city"] = game.get("venue_city", "")
                 entry["venue_state"] = game.get("venue_state", "")
 
-            if sport == "cfb":
+            if sport in ("cfb", "cbb"):
                 entry["home_rank"] = game.get("home_rank")
                 entry["away_rank"] = game.get("away_rank")
 
             result.append(entry)
 
-        return jsonify({"games": result})
+        return jsonify({"games": result, "slate": slate})
 
     except Exception as e:
-        return jsonify({"games": [], "error": str(e)}), 500
+        return jsonify({"games": [], "slate": {"showing_tomorrow": False, "game_count": 0}, "error": str(e)}), 500
 
 
 @app.route("/api/scan", methods=["POST"])
@@ -72,7 +112,14 @@ def api_scan():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl"):
+
+        if sport == "all":
+            all_results = {}
+            for s in ("nba", "nhl", "cfb", "nfl", "cbb"):
+                all_results[s] = scan_all_games(s)
+            return jsonify({"success": True, "all_sports": all_results})
+
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
         results = scan_all_games(sport)
@@ -86,7 +133,7 @@ def predict():
     try:
         data = request.get_json()
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
         # Validate required fields
@@ -131,9 +178,17 @@ def predict():
                     break
 
             if matched_game:
+                # Block predictions on stale/finished games
+                game_date_str = matched_game.get("game_date", "")
+                game_status = matched_game.get("game_status", "")
+                if is_game_stale(game_date_str) or game_status == "STATUS_FINAL":
+                    return jsonify({
+                        "success": False,
+                        "error": "This game has already started or ended.",
+                    }), 400
+
                 home_team = matched_game["home_team"]
                 away_team = matched_game["away_team"]
-                game_date_str = matched_game.get("game_date", "")
 
                 # Sort to determine game index / first game
                 sorted_games = sorted(todays_games, key=lambda g: g.get("game_date", ""))
@@ -178,14 +233,14 @@ def predict():
                             )
                         except (ValueError, TypeError):
                             pass
-                elif sport == "cfb":
-                    # CFB: classify using EST (UTC-5)
+                elif sport in ("cfb", "cbb"):
+                    # CFB/CBB: classify using EST (UTC-5)
                     if game_date_str:
                         try:
                             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
                             est_dt = game_dt - timedelta(hours=5)
                             hour, minute = est_dt.hour, est_dt.minute
-                            slot_type = classify_slot(day_of_week, hour, minute, sport="cfb")
+                            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
                         except (ValueError, TypeError):
                             pass
                 elif sport == "nhl":
@@ -233,12 +288,13 @@ def predict():
 
                 if opening is not None and current is not None:
                     current_spread = current
-                    movement = detect_movement(opening, current)
+                    movement, magnitude = detect_movement(opening, current)
                     confirmed = confirms_slot(movement, slot_type)
                     line_confirmed = confirmed
 
-                    # Moneyline rule
-                    if abs(current) >= 3:
+                    # Sport-specific moneyline thresholds
+                    ml_threshold = {"nba": 6, "nfl": 3, "cfb": 7, "cbb": 7}.get(sport)
+                    if ml_threshold and abs(current) >= ml_threshold:
                         moneyline_recommend = True
                         moneyline_spread = current
 
@@ -283,7 +339,7 @@ def predict():
         prediction_data = None
         cover_rates_data = None
 
-        if player_name and sport not in ("nhl", "cfb", "nfl"):
+        if player_name and sport not in ("nhl", "cfb", "cbb", "nfl"):
             recent_games = get_player_recent_points(player_name, games)
 
             if not recent_games or len(recent_games) == 0:
@@ -327,8 +383,8 @@ def predict():
             "cover_rates": cover_rates_data,
         }
 
-        # Include venue for NHL, CFB, and NFL
-        if sport in ("nhl", "cfb", "nfl") and matched_game:
+        # Include venue for NHL, CFB, CBB, and NFL
+        if sport in ("nhl", "cfb", "cbb", "nfl") and matched_game:
             response_data["venue_name"] = matched_game.get("venue_name", "")
             response_data["venue_city"] = matched_game.get("venue_city", "")
             response_data["venue_state"] = matched_game.get("venue_state", "")

@@ -10,8 +10,48 @@ document.addEventListener("DOMContentLoaded", function () {
     var teamInput = document.getElementById("team_name");
     var teamDropdown = document.getElementById("team-dropdown");
 
+    var welcomeHero = document.getElementById("welcome-hero");
+
     var todaysGames = [];
     var currentSport = "nba";
+    var currentSlate = { showing_tomorrow: false, game_count: 0 };
+    var scanResultsVisible = false;
+
+    // Sidebar toggle
+    var navSportBadge = document.getElementById("nav-sport-badge");
+
+    function openSidebar() {
+        document.body.classList.add("sidebar-open");
+    }
+
+    function closeSidebar() {
+        document.body.classList.remove("sidebar-open");
+    }
+
+    document.getElementById("nav-hamburger").addEventListener("click", openSidebar);
+    document.getElementById("sidebar-overlay").addEventListener("click", closeSidebar);
+    document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
+
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeSidebar();
+    });
+
+    // Hero sport card clicks
+    document.querySelectorAll(".hero-sport-card").forEach(function (card) {
+        card.addEventListener("click", function () {
+            var sport = card.getAttribute("data-sport");
+            currentSport = sport;
+            sportBtns.forEach(function (b) { b.classList.remove("active"); });
+            document.querySelector('.sport-btn[data-sport="' + sport + '"]').classList.add("active");
+            navSportBadge.textContent = sport.toUpperCase();
+            form.classList.remove("hidden");
+            fetchGames();
+            openSidebar();
+        });
+    });
+
+    // Hero CTA button
+    document.getElementById("hero-cta").addEventListener("click", openSidebar);
 
     // Sport toggle
     var sportBtns = document.querySelectorAll(".sport-btn");
@@ -24,14 +64,28 @@ document.addEventListener("DOMContentLoaded", function () {
             sportBtns.forEach(function (b) { b.classList.remove("active"); });
             btn.classList.add("active");
 
-            // Clear existing results
+            // Update nav badge
+            navSportBadge.textContent = newSport.toUpperCase();
+
+            // Clear existing results and show hero
             scanResults.classList.add("hidden");
             scanResults.innerHTML = "";
+            scanResultsVisible = false;
             results.classList.add("hidden");
             errorBanner.classList.add("hidden");
+            welcomeHero.classList.remove("hidden");
+
+            // Hide manual form when ALL is selected (it's sport-specific)
+            if (newSport === "all") {
+                form.classList.add("hidden");
+            } else {
+                form.classList.remove("hidden");
+            }
 
             // Re-fetch games for ticker + autocomplete
-            fetchGames();
+            if (newSport !== "all") {
+                fetchGames();
+            }
         });
     });
 
@@ -40,7 +94,24 @@ document.addEventListener("DOMContentLoaded", function () {
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 todaysGames = data.games || [];
+                currentSlate = data.slate || { showing_tomorrow: false, game_count: 0 };
                 buildTicker(todaysGames);
+
+                // Silent scan re-fetch if scan results are currently visible
+                if (scanResultsVisible && !scanResults.classList.contains("hidden")) {
+                    fetch("/api/scan", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sport: currentSport })
+                    })
+                    .then(function (res) { return res.json(); })
+                    .then(function (scanData) {
+                        if (scanData.success) {
+                            renderScanResults(scanData.games || []);
+                        }
+                    })
+                    .catch(function () { /* silent fail — next tick retries */ });
+                }
             })
             .catch(function () {
                 todaysGames = [];
@@ -49,6 +120,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Initial fetch
     fetchGames();
+
+    // Auto-poll every 3 minutes
+    setInterval(fetchGames, 3 * 60 * 1000);
 
     // Team autocomplete
     teamInput.addEventListener("input", function () {
@@ -74,7 +148,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
             var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
             var text = awayLabel + " vs " + homeLabel + " - " + g.game_time_est + " EST";
-            if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "nfl") && g.venue_name) {
+            if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "cbb" || currentSport === "nfl") && g.venue_name) {
                 text += " | " + g.venue_name;
             }
             li.textContent = text;
@@ -120,12 +194,19 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            renderScanResults(data.games || []);
+            if (currentSport === "all" && data.all_sports) {
+                renderAllSportsResults(data.all_sports);
+            } else {
+                renderScanResults(data.games || []);
+            }
+
+            // Auto-close sidebar on mobile
+            if (window.innerWidth <= 768) closeSidebar();
         })
         .catch(function () {
             scanLoading.classList.add("hidden");
             scanBtn.disabled = false;
-            showError("Network error during scan.");
+            showError("Gotham's signal went dark.");
         });
     });
 
@@ -167,11 +248,14 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             renderResults(result.data);
+
+            // Auto-close sidebar on mobile
+            if (window.innerWidth <= 768) closeSidebar();
         })
         .catch(function (err) {
             loading.classList.add("hidden");
             submitBtn.disabled = false;
-            showError("Network error: could not reach the server.");
+            showError("Lost connection to Gotham.");
         });
     });
 
@@ -181,6 +265,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderResults(data) {
+        welcomeHero.classList.add("hidden");
         // Handle NFL skip response
         if (data.skip) {
             document.getElementById("result-player").textContent = data.home_team + " vs " + data.away_team;
@@ -253,8 +338,12 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderScanResults(games) {
+        welcomeHero.classList.add("hidden");
         if (games.length === 0) {
-            scanResults.innerHTML = '<p class="scan-empty">No games found today.</p>';
+            scanResults.innerHTML = '<div class="scan-empty-state">' +
+                '<div class="scan-empty-headline">Gotham\'s quiet tonight.</div>' +
+                '<div class="scan-empty-sub">No ' + currentSport.toUpperCase() + ' games on the board right now. Check back closer to game time or try another sport.</div>' +
+                '</div>';
             scanResults.classList.remove("hidden");
             return;
         }
@@ -262,139 +351,21 @@ document.addEventListener("DOMContentLoaded", function () {
         var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
 
         if (filtered.length === 0) {
-            scanResults.innerHTML = '<p class="scan-empty">No high-confidence plays found today.</p>';
+            scanResults.innerHTML = '<div class="scan-empty-state">' +
+                '<div class="scan-empty-headline">Even the Joker sits this one out.</div>' +
+                '<div class="scan-empty-sub">No high-confidence ' + currentSport.toUpperCase() + ' plays found. The house has the edge tonight — live to bet another day.</div>' +
+                '</div>';
             scanResults.classList.remove("hidden");
             return;
         }
 
         var sportLabel = currentSport.toUpperCase();
-        var html = '<h2 class="scan-title">Today\'s ' + sportLabel + ' Games</h2>';
+        var dayLabel = currentSlate.showing_tomorrow ? "Tomorrow's" : "Today's";
+        var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
         html += '<div class="scan-grid">';
 
         filtered.forEach(function (g) {
-            var pct = g.cover_pct;
-            var pctClass = "pct-mid";
-            if (pct >= 80) pctClass = "pct-high";
-
-            var cardClass = g.skip ? "scan-card scan-card-skip" : "scan-card";
-            html += '<div class="' + cardClass + '">';
-
-            // Header: matchup + cover %
-            var awayLabel = g.away_rank ? '<span class="scan-rank">#' + g.away_rank + '</span> ' + g.away_team : g.away_team;
-            var homeLabel = g.home_rank ? '<span class="scan-rank">#' + g.home_rank + '</span> ' + g.home_team : g.home_team;
-            html += '<div class="scan-card-header">';
-            html += '<div class="scan-matchup">' + awayLabel + ' vs ' + homeLabel + '</div>';
-            html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
-            html += '</div>';
-
-            // Venue (NHL, CFB, and NFL)
-            if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "nfl") && g.venue_name) {
-                var venueText = g.venue_name;
-                if (g.venue_city) {
-                    venueText += " — " + g.venue_city;
-                    if (g.venue_state) venueText += ", " + g.venue_state;
-                }
-                html += '<div class="scan-venue">' + venueText + '</div>';
-            }
-
-            // Time
-            html += '<div class="scan-time">' + g.game_time_est + ' EST</div>';
-
-            // Slot type label (CFB and NFL)
-            if ((currentSport === "cfb" || currentSport === "nfl") && g.slot_type) {
-                var slotLabel = g.slot_type.toUpperCase();
-                var slotClass = "slot-" + g.slot_type;
-                html += '<div class="scan-slot ' + slotClass + '">' + slotLabel + '</div>';
-            }
-
-            // Rank Scam badge (CFB)
-            if (g.rank_scam && g.rank_scam.is_rank_scam) {
-                var tierLabel = g.rank_scam.tier ? g.rank_scam.tier.toUpperCase() : '';
-                html += '<div class="scan-rank-scam">';
-                html += '<span class="rank-scam-label">RANK SCAM — ' + tierLabel + '</span> ';
-                html += '<span class="rank-scam-detail">' + g.rank_scam.scam_action + '</span>';
-                html += '</div>';
-            }
-
-            // Spread Discrepancy badge (CFB)
-            if (g.spread_discrepancy && g.spread_discrepancy.is_discrepancy) {
-                html += '<div class="scan-spread-disc">';
-                html += '<span class="spread-disc-label">SPREAD ALERT</span> ';
-                html += '<span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span>';
-                html += '</div>';
-            }
-
-            // NFL: Weather badge
-            if (currentSport === "nfl") {
-                if (g.weather_dome) {
-                    html += '<div class="scan-weather-alert dome">';
-                    html += '<span class="weather-label">DOME</span>';
-                    html += '</div>';
-                } else if (g.weather_alerts && g.weather_alerts.length > 0) {
-                    html += '<div class="scan-weather-alert">';
-                    html += '<span class="weather-label">WEATHER ALERT</span> ';
-                    html += '<span class="weather-detail">' + g.weather_alerts.join(" | ") + '</span>';
-                    html += '</div>';
-                } else if (g.weather) {
-                    var weatherParts = [];
-                    if (g.weather.temperature) weatherParts.push(g.weather.temperature + "°F");
-                    if (g.weather.wind_speed) weatherParts.push("Wind " + g.weather.wind_speed + " mph");
-                    if (g.weather.condition) weatherParts.push(g.weather.condition);
-                    if (weatherParts.length > 0) {
-                        html += '<div class="scan-weather-info">';
-                        html += '<span class="weather-detail">' + weatherParts.join(" | ") + '</span>';
-                        html += '</div>';
-                    }
-                }
-            }
-
-            // NFL: Trend Discrepancy badge
-            if (g.trend_discrepancy && g.trend_discrepancy.applies) {
-                var td = g.trend_discrepancy;
-                html += '<div class="scan-trend-disc">';
-                html += '<span class="trend-disc-label">TREND ALERT</span> ';
-                if (td.home_signal) {
-                    var homeClass = td.home_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
-                    html += '<span class="' + homeClass + '">Home (' + td.home_record + '): ' + td.home_signal.toUpperCase() + '</span> ';
-                }
-                if (td.away_signal) {
-                    var awayClass = td.away_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
-                    html += '<span class="' + awayClass + '">Away (' + td.away_record + '): ' + td.away_signal.toUpperCase() + '</span> ';
-                }
-                if (td.strong_contrarian) {
-                    html += '<span class="trend-strong">STRONG CONTRARIAN</span>';
-                }
-                html += '</div>';
-            }
-
-            // NFL: O/U Alert badge
-            if (g.overunder && g.overunder.applies) {
-                var ou = g.overunder;
-                html += '<div class="scan-ou-alert">';
-                html += '<span class="ou-label">O/U ALERT</span> ';
-                ou.flags.forEach(function (flag) {
-                    html += '<span class="ou-detail">' + flag + '</span> ';
-                });
-                html += '</div>';
-            }
-
-            // NFL: Skip badge
-            if (g.skip) {
-                html += '<div class="scan-skip-badge">Sunday Night Football — Do Not Bet</div>';
-            }
-
-            // Action — what to do
-            if (g.action) {
-                html += '<div class="scan-action">' + g.action + '</div>';
-            }
-
-            // Recommendation
-            var recClass = "rec-monitor";
-            if (g.recommendation === "STRONG PLAY") recClass = "rec-strong";
-            else if (g.recommendation === "LEAN") recClass = "rec-lean";
-            html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
-
-            html += '</div>';
+            html += buildScanCard(g, currentSport);
         });
 
         html += '</div>';
@@ -404,6 +375,175 @@ document.addEventListener("DOMContentLoaded", function () {
 
         scanResults.innerHTML = html;
         scanResults.classList.remove("hidden");
+        scanResultsVisible = true;
+    }
+
+    function renderAllSportsResults(allSports) {
+        welcomeHero.classList.add("hidden");
+        var sportNames = { nba: "NBA", nhl: "NHL", cfb: "CFB", nfl: "NFL", cbb: "CBB" };
+        var sportOrder = ["nba", "nhl", "cfb", "nfl", "cbb"];
+        var html = '<h2 class="scan-title">All Sports — Full Deck</h2>';
+        var allFiltered = [];
+
+        sportOrder.forEach(function (sport) {
+            var games = allSports[sport] || [];
+            var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
+
+            html += '<div class="all-sport-section">';
+            html += '<h3 class="all-sport-header">' + sportNames[sport] + '</h3>';
+
+            if (filtered.length === 0) {
+                html += '<p class="scan-empty-inline">The Joker passes on ' + sportNames[sport] + ' tonight — no high-confidence plays.</p>';
+                html += '</div>';
+                return;
+            }
+
+            // Tag each game with its sport for cross-sport parlays
+            filtered.forEach(function (g) { g._sport = sport; });
+            allFiltered = allFiltered.concat(filtered);
+
+            html += '<div class="scan-grid">';
+            filtered.forEach(function (g) {
+                html += buildScanCard(g, sport);
+            });
+            html += '</div></div>';
+        });
+
+        // Cross-sport parlays
+        if (allFiltered.length >= 2) {
+            html += buildParlaySection(allFiltered);
+        }
+
+        scanResults.innerHTML = html;
+        scanResults.classList.remove("hidden");
+        scanResultsVisible = true;
+    }
+
+    function buildScanCard(g, sport) {
+        var pct = g.cover_pct;
+        var pctClass = "pct-mid";
+        if (pct >= 80) pctClass = "pct-high";
+
+        var cardClass = g.skip ? "scan-card scan-card-skip" : "scan-card";
+        var html = '<div class="' + cardClass + '">';
+
+        // Header: matchup + cover %
+        var awayLabel = g.away_rank ? '<span class="scan-rank">#' + g.away_rank + '</span> ' + g.away_team : g.away_team;
+        var homeLabel = g.home_rank ? '<span class="scan-rank">#' + g.home_rank + '</span> ' + g.home_team : g.home_team;
+        html += '<div class="scan-card-header">';
+        html += '<div class="scan-matchup">' + awayLabel + ' vs ' + homeLabel + '</div>';
+        html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
+        html += '</div>';
+
+        // Venue (NHL, CFB, and NFL)
+        if ((sport === "nhl" || sport === "cfb" || sport === "cbb" || sport === "nfl") && g.venue_name) {
+            var venueText = g.venue_name;
+            if (g.venue_city) {
+                venueText += " — " + g.venue_city;
+                if (g.venue_state) venueText += ", " + g.venue_state;
+            }
+            html += '<div class="scan-venue">' + venueText + '</div>';
+        }
+
+        // Time
+        html += '<div class="scan-time">' + g.game_time_est + ' EST</div>';
+
+        // Slot type label (CFB and NFL)
+        if ((sport === "cfb" || sport === "cbb" || sport === "nfl") && g.slot_type) {
+            var slotLabel = g.slot_type.toUpperCase();
+            var slotClass = "slot-" + g.slot_type;
+            html += '<div class="scan-slot ' + slotClass + '">' + slotLabel + '</div>';
+        }
+
+        // Rank Scam badge (CFB)
+        if (g.rank_scam && g.rank_scam.is_rank_scam) {
+            var tierLabel = g.rank_scam.tier ? g.rank_scam.tier.toUpperCase() : '';
+            html += '<div class="scan-rank-scam">';
+            html += '<span class="rank-scam-label">RANK SCAM — ' + tierLabel + '</span> ';
+            html += '<span class="rank-scam-detail">' + g.rank_scam.scam_action + '</span>';
+            html += '</div>';
+        }
+
+        // Spread Discrepancy badge (CFB)
+        if (g.spread_discrepancy && g.spread_discrepancy.is_discrepancy) {
+            html += '<div class="scan-spread-disc">';
+            html += '<span class="spread-disc-label">SPREAD ALERT</span> ';
+            html += '<span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span>';
+            html += '</div>';
+        }
+
+        // NFL: Weather badge
+        if (sport === "nfl") {
+            if (g.weather_dome) {
+                html += '<div class="scan-weather-alert dome">';
+                html += '<span class="weather-label">DOME</span>';
+                html += '</div>';
+            } else if (g.weather_alerts && g.weather_alerts.length > 0) {
+                html += '<div class="scan-weather-alert">';
+                html += '<span class="weather-label">WEATHER ALERT</span> ';
+                html += '<span class="weather-detail">' + g.weather_alerts.join(" | ") + '</span>';
+                html += '</div>';
+            } else if (g.weather) {
+                var weatherParts = [];
+                if (g.weather.temperature) weatherParts.push(g.weather.temperature + "°F");
+                if (g.weather.wind_speed) weatherParts.push("Wind " + g.weather.wind_speed + " mph");
+                if (g.weather.condition) weatherParts.push(g.weather.condition);
+                if (weatherParts.length > 0) {
+                    html += '<div class="scan-weather-info">';
+                    html += '<span class="weather-detail">' + weatherParts.join(" | ") + '</span>';
+                    html += '</div>';
+                }
+            }
+        }
+
+        // NFL: Trend Discrepancy badge
+        if (g.trend_discrepancy && g.trend_discrepancy.applies) {
+            var td = g.trend_discrepancy;
+            html += '<div class="scan-trend-disc">';
+            html += '<span class="trend-disc-label">TREND ALERT</span> ';
+            if (td.home_signal) {
+                var homeClass = td.home_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
+                html += '<span class="' + homeClass + '">Home (' + td.home_record + '): ' + td.home_signal.toUpperCase() + '</span> ';
+            }
+            if (td.away_signal) {
+                var awayClass = td.away_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
+                html += '<span class="' + awayClass + '">Away (' + td.away_record + '): ' + td.away_signal.toUpperCase() + '</span> ';
+            }
+            if (td.strong_contrarian) {
+                html += '<span class="trend-strong">STRONG CONTRARIAN</span>';
+            }
+            html += '</div>';
+        }
+
+        // NFL: O/U Alert badge
+        if (g.overunder && g.overunder.applies) {
+            var ou = g.overunder;
+            html += '<div class="scan-ou-alert">';
+            html += '<span class="ou-label">O/U ALERT</span> ';
+            ou.flags.forEach(function (flag) {
+                html += '<span class="ou-detail">' + flag + '</span> ';
+            });
+            html += '</div>';
+        }
+
+        // NFL: Skip badge
+        if (g.skip) {
+            html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';
+        }
+
+        // Action — what to do
+        if (g.action) {
+            html += '<div class="scan-action">' + g.action + '</div>';
+        }
+
+        // Recommendation
+        var recClass = "rec-monitor";
+        if (g.recommendation === "STRONG PLAY") recClass = "rec-strong";
+        else if (g.recommendation === "LEAN") recClass = "rec-lean";
+        html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
+
+        html += '</div>';
+        return html;
     }
 
     function buildParlaySection(games) {
@@ -413,14 +553,14 @@ document.addEventListener("DOMContentLoaded", function () {
         var sorted = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
 
         var html = '<div class="parlays-section">';
-        html += '<h2 class="scan-title">Parlay Suggestions</h2>';
+        html += '<h2 class="scan-title">The Joker\'s Parlays</h2>';
 
         // Safety Parlay: 2 legs, 80%+ each
         var safetyLegs = sorted.filter(function (g) { return g.cover_pct >= 80; }).slice(0, 2);
         if (safetyLegs.length >= 2) {
             var safetyOdds = calcParlayOdds(safetyLegs);
             var safetyProb = calcCombinedProb(safetyLegs);
-            html += buildParlayCard("Safety Parlay", safetyLegs, safetyOdds, safetyProb, "parlay-safety");
+            html += buildParlayCard("Two-Face's Safe Bet", safetyLegs, safetyOdds, safetyProb, "parlay-safety");
         }
 
         // Normal Parlay: 4-6 legs, 67.5%+ each
@@ -429,12 +569,12 @@ document.addEventListener("DOMContentLoaded", function () {
         if (normalLegs.length >= 4) {
             var normalOdds = calcParlayOdds(normalLegs);
             var normalProb = calcCombinedProb(normalLegs);
-            html += buildParlayCard("Normal Parlay", normalLegs, normalOdds, normalProb, "parlay-normal");
+            html += buildParlayCard("Gotham Gambit", normalLegs, normalOdds, normalProb, "parlay-normal");
         } else if (normalPool.length >= 2) {
             // Fallback: use what we have if less than 4
             var normalOdds = calcParlayOdds(normalPool);
             var normalProb = calcCombinedProb(normalPool);
-            html += buildParlayCard("Normal Parlay", normalPool, normalOdds, normalProb, "parlay-normal");
+            html += buildParlayCard("Gotham Gambit", normalPool, normalOdds, normalProb, "parlay-normal");
         }
 
         // YOLO Parlay: all qualifying legs
@@ -443,7 +583,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var yoloLegs = yoloPool.slice(0, Math.min(10, yoloPool.length));
             var yoloOdds = calcParlayOdds(yoloLegs);
             var yoloProb = calcCombinedProb(yoloLegs);
-            html += buildParlayCard("YOLO Parlay", yoloLegs, yoloOdds, yoloProb, "parlay-yolo");
+            html += buildParlayCard("Gotham Breakout", yoloLegs, yoloOdds, yoloProb, "parlay-yolo");
         }
 
         html += '</div>';
@@ -513,11 +653,17 @@ document.addEventListener("DOMContentLoaded", function () {
     function buildTicker(games) {
         var track = document.getElementById("ticker-track");
         if (!games || games.length === 0) {
-            track.innerHTML = '<span class="ticker-item">No games scheduled today</span>';
+            track.innerHTML = '<span class="ticker-item">Gotham is dark tonight</span>';
             return;
         }
 
         var items = "";
+
+        // Prepend "TOMORROW'S GAMES" label if showing tomorrow's slate
+        if (currentSlate.showing_tomorrow) {
+            items += '<span class="ticker-item ticker-tomorrow">TOMORROW IN GOTHAM</span>';
+        }
+
         games.forEach(function (g) {
             var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
             var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;

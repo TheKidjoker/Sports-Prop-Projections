@@ -3,75 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Sharp Edge</title>
+    <title>Joker's Edge</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>The Sharp Edge</h1>
-            <p class="subtitle">See what the house sees.</p>
-        </header>
+    <!-- Sidebar overlay -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-        <div class="sport-toggle">
-            <button type="button" class="sport-btn active" data-sport="nba">NBA</button>
-            <button type="button" class="sport-btn" data-sport="nhl">NHL</button>
-            <button type="button" class="sport-btn" data-sport="cfb">CFB</button>
-            <button type="button" class="sport-btn" data-sport="nfl">NFL</button>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <span class="sidebar-brand">Joker's Edge</span>
+            <button type="button" class="sidebar-close" id="sidebar-close" aria-label="Close sidebar">&times;</button>
         </div>
+        <div class="sidebar-body">
+            <div class="sport-toggle">
+                <button type="button" class="sport-btn active" data-sport="nba">NBA</button>
+                <button type="button" class="sport-btn" data-sport="nhl">NHL</button>
+                <button type="button" class="sport-btn" data-sport="cfb">CFB</button>
+                <button type="button" class="sport-btn" data-sport="nfl">NFL</button>
+                <button type="button" class="sport-btn" data-sport="cbb">CBB</button>
+                <button type="button" class="sport-btn sport-btn-all" data-sport="all">ALL</button>
+            </div>
 
-        <button type="button" id="scan-btn">Quick Generate</button>
+            <button type="button" id="scan-btn">Deal the Cards</button>
 
-        <div id="scan-loading" class="loading hidden">
-            <div class="spinner"></div>
-            <p>Analyzing all games...</p>
-        </div>
+            <div id="scan-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Shuffling the deck...</p>
+            </div>
 
-        <div id="scan-results" class="scan-results hidden"></div>
+            <div class="sidebar-divider"></div>
 
-        <form id="predict-form">
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="player_name">Player Name</label>
-                    <input type="text" id="player_name" name="player_name" placeholder="e.g., LeBron James">
-                </div>
+            <form id="predict-form">
+                <div class="form-stack">
+                    <div class="form-group">
+                        <label for="player_name">Player Name</label>
+                        <input type="text" id="player_name" name="player_name" placeholder="e.g., LeBron James">
+                    </div>
 
-                <div class="form-group">
-                    <label for="team_name">Team Name</label>
-                    <div class="autocomplete-wrapper">
-                        <input type="text" id="team_name" name="team_name" placeholder="e.g., Lakers" autocomplete="off">
-                        <ul id="team-dropdown" class="autocomplete-dropdown hidden"></ul>
+                    <div class="form-group">
+                        <label for="team_name">Team Name</label>
+                        <div class="autocomplete-wrapper">
+                            <input type="text" id="team_name" name="team_name" placeholder="e.g., Lakers" autocomplete="off">
+                            <ul id="team-dropdown" class="autocomplete-dropdown hidden"></ul>
+                        </div>
+                    </div>
+
+                    <div class="form-row-2">
+                        <div class="form-group">
+                            <label for="vegas_line">Vegas Line</label>
+                            <input type="number" id="vegas_line" name="vegas_line" step="0.5" placeholder="e.g., 25.5" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="games">Recent Games</label>
+                            <input type="number" id="games" name="games" min="1" max="20" value="5" required>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="vegas_line">Vegas Line</label>
-                    <input type="number" id="vegas_line" name="vegas_line" step="0.5" placeholder="e.g., 25.5" required>
-                </div>
+                <button type="submit" id="submit-btn">Play the Hand</button>
+            </form>
 
-                <div class="form-group">
-                    <label for="games">Recent Games</label>
-                    <input type="number" id="games" name="games" min="1" max="20" value="5" required>
-                </div>
-
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Reading Gotham's cards...</p>
             </div>
-
-            <button type="submit" id="submit-btn">Run Projection</button>
-        </form>
-
-        <div id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <p>Fetching data and running model...</p>
         </div>
+    </aside>
+
+    <!-- Top nav bar -->
+    <nav class="nav-bar">
+        <button type="button" class="nav-hamburger" id="nav-hamburger" aria-label="Open menu">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+        <span class="nav-title">Joker's Edge</span>
+        <span class="nav-sport-badge" id="nav-sport-badge">NBA</span>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <section id="welcome-hero" class="welcome-hero">
+            <h1 class="hero-tagline">Why so serious?</h1>
+            <p class="hero-sub">Pick your poison. Get the last laugh.</p>
+            <div class="hero-sport-grid">
+                <button type="button" class="hero-sport-card" data-sport="nba">
+                    <span class="hero-sport-name">NBA</span>
+                    <span class="hero-sport-label">Gotham Court</span>
+                </button>
+                <button type="button" class="hero-sport-card" data-sport="nhl">
+                    <span class="hero-sport-name">NHL</span>
+                    <span class="hero-sport-label">Gotham Ice</span>
+                </button>
+                <button type="button" class="hero-sport-card" data-sport="cfb">
+                    <span class="hero-sport-name">CFB</span>
+                    <span class="hero-sport-label">Saturday Madness</span>
+                </button>
+                <button type="button" class="hero-sport-card" data-sport="nfl">
+                    <span class="hero-sport-name">NFL</span>
+                    <span class="hero-sport-label">Sunday Chaos</span>
+                </button>
+                <button type="button" class="hero-sport-card" data-sport="cbb">
+                    <span class="hero-sport-name">CBB</span>
+                    <span class="hero-sport-label">Gotham Hoops</span>
+                </button>
+            </div>
+            <button type="button" class="hero-cta" id="hero-cta">Deal Me In</button>
+        </section>
 
         <div id="error-banner" class="error-banner hidden"></div>
 
+        <div id="scan-results" class="scan-results hidden"></div>
+
         <div id="results" class="results hidden">
-            <h2>Results for <span id="result-player"></span></h2>
+            <h2>The Joker's Read on <span id="result-player"></span></h2>
 
             <div class="results-grid">
                 <div id="recent-games-card" class="card">
-                    <h3>Recent Games</h3>
+                    <h3>The Rap Sheet</h3>
                     <div id="recent-games-list" class="card-body"></div>
                     <div class="stat-row">
                         <span class="stat-label">Average</span>
@@ -80,12 +132,12 @@
                 </div>
 
                 <div id="lean-card" class="card hidden">
-                    <h3>Recommended Play</h3>
+                    <h3>The Joker's Play</h3>
                     <div id="lean-body" class="card-body"></div>
                 </div>
 
                 <div id="prediction-card" class="card card-prediction">
-                    <h3>Prediction</h3>
+                    <h3>The Verdict</h3>
                     <div class="card-body prediction-body">
                         <span id="decision" class="decision"></span>
                         <span id="confidence" class="confidence"></span>
@@ -93,7 +145,7 @@
                 </div>
 
                 <div id="cover-rates-card" class="card">
-                    <h3>Cover Rates</h3>
+                    <h3>Gotham Odds</h3>
                     <div class="card-body">
                         <div class="stat-row">
                             <span class="stat-label">OVER</span>
@@ -111,8 +163,9 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 
+    <!-- Bottom ticker -->
     <div class="ticker-bar">
         <div class="ticker-track" id="ticker-track"></div>
     </div>

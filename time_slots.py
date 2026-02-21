@@ -74,6 +74,66 @@ CFB_DAY_OVERRIDES = {
 }
 
 
+# ─── CBB SLOT RULES ─────────────────────────────────────────────────────────
+# CBB uses EST (UTC-5) directly — same as CFB.
+# Saturday has time-specific slots; weekdays use day-level overrides.
+
+CBB_SATURDAY_SLOTS = [
+    (12, 0, "public"),     # Sat 12:00 PM ET — public
+    (14, 0, "vegas"),      # Sat 2:00 PM ET — vegas
+    (16, 0, "public"),     # Sat 4:00 PM ET — public
+    (18, 0, "vegas"),      # Sat 6:00 PM ET — vegas
+    (19, 30, "public"),    # Sat 7:30 PM ET — public
+    (21, 0, "vegas"),      # Sat 9:00 PM ET — vegas
+]
+
+CBB_DAY_OVERRIDES = {
+    "monday": "vegas",      # Sharp action, low casual viewership
+    "tuesday": "vegas",     # Sharp action, low casual viewership
+    "wednesday": "public",  # Mid-week casual games
+    "thursday": "public",   # Mid-week casual games
+    "friday": "public",     # Weekend preview
+    "sunday": "public",     # Sunday casual
+}
+
+
+def classify_cbb_slot(day_of_week, hour_est, minute_est):
+    """
+    Classifies a CBB game slot based on day of week and EST time.
+
+    Args:
+        day_of_week: Day name (e.g., 'saturday')
+        hour_est: Game start hour in 24hr EST
+        minute_est: Game start minute
+
+    Returns:
+        'public', 'vegas', or 'unknown'
+    """
+    day = day_of_week.lower()
+
+    # Day-level overrides
+    if day in CBB_DAY_OVERRIDES:
+        return CBB_DAY_OVERRIDES[day]
+
+    # Saturday: time-based slots
+    if day == "saturday":
+        game_time = hour_est * 60 + minute_est
+        best_match = None
+        best_distance = float("inf")
+
+        for slot_hour, slot_minute, slot_type in CBB_SATURDAY_SLOTS:
+            slot_time = slot_hour * 60 + slot_minute
+            distance = abs(game_time - slot_time)
+            if distance < best_distance:
+                best_distance = distance
+                best_match = slot_type
+
+        if best_distance <= 20:
+            return best_match
+
+    return "unknown"
+
+
 # ─── NFL SLOT RULES ─────────────────────────────────────────────────────────
 # NFL uses PST (UTC-8) for classification, display in EST (UTC-5).
 # Thursday = public (sensible outcome 9/10)
@@ -247,6 +307,9 @@ def classify_slot(day_of_week, hour, minute, sport="nba",
 
     if sport == "cfb":
         return classify_cfb_slot(day_of_week, hour, minute)
+
+    if sport == "cbb":
+        return classify_cbb_slot(day_of_week, hour, minute)
 
     if sport == "nhl":
         if total_games_on_slate is not None and game_index is not None:

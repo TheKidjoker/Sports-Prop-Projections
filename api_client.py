@@ -1,7 +1,24 @@
 import os
 import requests
+from datetime import datetime, timedelta, timezone
 
 BASE_URL = "https://www.balldontlie.io/api/v1"
+
+# How many hours after kickoff before a game is considered stale
+STALE_HOURS = 2
+
+
+def is_game_stale(game_date_str):
+    """
+    Returns True if the game's scheduled start was 2+ hours ago (UTC comparison).
+    """
+    if not game_date_str:
+        return False
+    try:
+        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) - game_dt >= timedelta(hours=STALE_HOURS)
+    except (ValueError, TypeError):
+        return False
 
 # ESPN URL builder
 SPORT_MAP = {
@@ -9,6 +26,7 @@ SPORT_MAP = {
     "nhl": {"category": "hockey", "league": "nhl"},
     "cfb": {"category": "football", "league": "college-football"},
     "nfl": {"category": "football", "league": "nfl"},
+    "cbb": {"category": "basketball", "league": "mens-college-basketball"},
 }
 
 
@@ -77,20 +95,24 @@ def get_player_recent_points(player_name, games=5):
     return get_recent_game_points(player_id, games)
 
 
-def get_todays_games(sport="nba"):
+def get_todays_games(sport="nba", date_str=None):
     """
     Fetches today's games from the ESPN scoreboard API.
 
     Args:
-        sport: "nba" or "nhl"
+        sport: "nba", "nhl", "cfb", or "nfl"
+        date_str: Optional YYYYMMDD string to fetch a specific date's games.
 
     Returns:
-        List of dicts: [{event_id, home_team, away_team, ...}, ...]
+        List of dicts: [{event_id, home_team, away_team, game_status, ...}, ...]
         Empty list on failure.
     """
     try:
         url = _espn_url(sport, "scoreboard")
-        response = requests.get(url, timeout=10)
+        params = {}
+        if date_str:
+            params["dates"] = date_str
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code != 200:
             return []
 
@@ -129,6 +151,13 @@ def get_todays_games(sport="nba"):
 
             game_date = event.get("date", "")
 
+            # Extract game status
+            game_status = (
+                competition.get("status", {})
+                .get("type", {})
+                .get("name", "STATUS_SCHEDULED")
+            )
+
             # Extract venue data
             venue_obj = competition.get("venue", {})
             venue_name = venue_obj.get("fullName", "")
@@ -144,6 +173,7 @@ def get_todays_games(sport="nba"):
                     "home_team_id": home_team_id,
                     "away_team_id": away_team_id,
                     "game_date": game_date,
+                    "game_status": game_status,
                     "venue_name": venue_name,
                     "venue_city": venue_city,
                     "venue_state": venue_state,

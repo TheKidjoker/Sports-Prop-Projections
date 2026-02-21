@@ -25,6 +25,14 @@ STAR_THRESHOLDS = {
             {"min_rec_ypg": 65, "min_total_td": 5},
         ],
     },
+    "cbb": {
+        "min_ppg": 16,
+        "min_mpg": 30,
+        "alt": [
+            {"min_ppg": 12, "min_apg": 5},
+            {"min_ppg": 12, "min_rpg": 8},
+        ],
+    },
 }
 
 RECENCY_HOURS = 72

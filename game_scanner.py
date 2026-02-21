@@ -1,12 +1,12 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from api_client import (
     get_todays_games, get_all_injuries, get_game_spread,
     get_player_season_averages, get_game_overunder,
     get_team_recent_results, get_game_weather_espn,
-    get_game_weather_openweather,
+    get_game_weather_openweather, is_game_stale,
 )
 from time_slots import classify_slot, first_game_slot_override
-from line_movement import detect_movement, confirms_slot
+from line_movement import detect_movement, confirms_slot, score_line_movement
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 
 
@@ -45,7 +45,7 @@ def _get_rank_tier(rank):
 
 
 # Expected spread ranges when a ranked team plays an unranked team
-EXPECTED_SPREADS = {
+CFB_EXPECTED_SPREADS = {
     (1, 5): (24, 28),
     (6, 10): (18, 22),
     (11, 15): (14, 18),
@@ -53,10 +53,22 @@ EXPECTED_SPREADS = {
     (21, 25): (7, 10),
 }
 
+CBB_EXPECTED_SPREADS = {
+    (1, 5): (12, 16),
+    (6, 10): (9, 12),
+    (11, 15): (7, 9),
+    (16, 20): (5, 7),
+    (21, 25): (3, 5),
+}
 
-def _get_expected_spread(rank):
+# Keep backward-compatible alias
+EXPECTED_SPREADS = CFB_EXPECTED_SPREADS
+
+
+def _get_expected_spread(rank, sport="cfb"):
     """Returns (low, high) expected spread for a rank tier, or None."""
-    for (lo, hi), spread_range in EXPECTED_SPREADS.items():
+    table = CBB_EXPECTED_SPREADS if sport == "cbb" else CFB_EXPECTED_SPREADS
+    for (lo, hi), spread_range in table.items():
         if lo <= rank <= hi:
             return spread_range
     return None
@@ -122,7 +134,7 @@ def _detect_rank_scam(home_rank, away_rank, current_spread, slot_type):
     return result
 
 
-def _detect_spread_discrepancy(home_rank, away_rank, current_spread, slot_type):
+def _detect_spread_discrepancy(home_rank, away_rank, current_spread, slot_type, sport="cfb"):
     """
     Detect spread discrepancy when a ranked team plays an unranked team.
 
@@ -149,7 +161,7 @@ def _detect_spread_discrepancy(home_rank, away_rank, current_spread, slot_type):
     else:
         return result  # Both ranked or both unranked — not applicable
 
-    expected = _get_expected_spread(rank)
+    expected = _get_expected_spread(rank, sport=sport)
     if expected is None:
         return result
 
@@ -324,17 +336,33 @@ def _analyze_nfl_weather(game, event_id):
     return result
 
 
-def scan_all_games(sport="nba"):
+def scan_all_games(sport="nba", date_str=None):
     """
     Fetch all today's games, analyze each, return ranked list.
 
     Args:
-        sport: "nba" or "nhl"
+        sport: "nba", "nhl", "cfb", or "nfl"
+        date_str: Optional YYYYMMDD to fetch a specific date.
 
     Returns:
         List of analysis dicts sorted by confirmation_score descending.
     """
-    games = get_todays_games(sport)
+    games = get_todays_games(sport, date_str=date_str)
+
+    # Next-day fallback: if no games or all stale/final, try tomorrow
+    if not date_str:
+        all_done = (
+            not games
+            or all(
+                is_game_stale(g.get("game_date", ""))
+                or g.get("game_status") == "STATUS_FINAL"
+                for g in games
+            )
+        )
+        if all_done:
+            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
+            games = get_todays_games(sport, date_str=tomorrow)
+
     if not games:
         return []
 
@@ -342,6 +370,17 @@ def scan_all_games(sport="nba"):
 
     # Sort by game_date to determine first game / game index
     sorted_games = sorted(games, key=lambda g: g.get("game_date", ""))
+
+    # Filter out stale and final games
+    sorted_games = [
+        g for g in sorted_games
+        if not is_game_stale(g.get("game_date", ""))
+        and g.get("game_status") != "STATUS_FINAL"
+    ]
+
+    if not sorted_games:
+        return []
+
     total_games = len(sorted_games)
 
     now = datetime.now()
@@ -401,7 +440,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
 
             # Classification timezone
-            if sport == "cfb":
+            if sport in ("cfb", "cbb"):
                 classify_dt = game_dt - timedelta(hours=5)  # EST (same as display)
             elif sport == "nhl":
                 classify_dt = game_dt - timedelta(hours=6)  # CST
@@ -428,9 +467,9 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             )
         else:
             slot_type = "unknown"
-    elif sport == "cfb":
+    elif sport in ("cfb", "cbb"):
         if hour is not None:
-            slot_type = classify_slot(day_of_week, hour, minute, sport="cfb")
+            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
         else:
             slot_type = "unknown"
     elif sport == "nhl":
@@ -475,9 +514,10 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     opening, current = get_game_spread(event_id, sport)
     line_movement_data = {"available": False}
     line_confirms = False
+    line_magnitude = 0.0
 
     if opening is not None and current is not None:
-        movement = detect_movement(opening, current)
+        movement, line_magnitude = detect_movement(opening, current)
         confirmed = confirms_slot(movement, slot_type)
         line_confirms = confirmed
         line_movement_data = {
@@ -485,6 +525,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "opening_spread": opening,
             "current_spread": current,
             "movement": movement,
+            "magnitude": line_magnitude,
             "confirms_slot": confirmed,
         }
 
@@ -524,15 +565,20 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     home_rank = game.get("home_rank")
     away_rank = game.get("away_rank")
 
-    if sport == "cfb":
+    if sport in ("cfb", "cbb"):
         rank_scam = _detect_rank_scam(home_rank, away_rank, current, slot_type)
-        spread_discrepancy = _detect_spread_discrepancy(home_rank, away_rank, current, slot_type)
+        spread_discrepancy = _detect_spread_discrepancy(home_rank, away_rank, current, slot_type, sport=sport)
 
-    # Moneyline rule
+    # Moneyline rule — sport-specific thresholds
+    # NBA: 6+ (3-5 pt favorites have terrible ML juice)
+    # NFL: 3+ (field goal margin is meaningful)
+    # CFB: 7+ (touchdown margin)
+    # NHL: never (puck line sport, ML doesn't apply the same way)
     moneyline_recommend = False
     current_spread = current
-    if opening is not None and current is not None:
-        if abs(current) >= 3:
+    ml_threshold = {"nba": 6, "nfl": 3, "cfb": 7, "cbb": 7}.get(sport)
+    if opening is not None and current is not None and ml_threshold:
+        if abs(current) >= ml_threshold:
             moneyline_recommend = True
 
     # NFL-specific analyses (vegas/late Sunday only for trend + O/U)
@@ -561,16 +607,18 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     score, _ = _calculate_score(
         slot_type, line_confirms, trell_result.get("applies", False),
+        line_magnitude=line_magnitude,
         rank_scam_applies=rank_scam_applies, spread_disc_applies=spread_disc_applies,
         trend_disc_applies=trend_disc_applies, ou_disc_applies=ou_disc_applies,
         weather_applies=weather_applies,
+        spread_value=current, sport=sport,
     )
     if sport == "nfl":
-        max_score = 35
-    elif sport == "cfb":
-        max_score = 30
+        max_score = 38
+    elif sport in ("cfb", "cbb"):
+        max_score = 33
     else:
-        max_score = 20
+        max_score = 23
     cover_pct = round(50 + (score / max_score) * 45, 1)
 
     # Determine which team to lean towards
@@ -611,14 +659,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "recommendation": recommendation,
     }
 
-    # Include venue for NHL, CFB, and NFL
-    if sport in ("nhl", "cfb", "nfl"):
+    # Include venue for NHL, CFB, CBB, and NFL
+    if sport in ("nhl", "cfb", "cbb", "nfl"):
         result["venue_name"] = game.get("venue_name", "")
         result["venue_city"] = game.get("venue_city", "")
         result["venue_state"] = game.get("venue_state", "")
 
-    # Include rank data and slot info for CFB
-    if sport == "cfb":
+    # Include rank data and slot info for CFB and CBB
+    if sport in ("cfb", "cbb"):
         result["home_rank"] = home_rank
         result["away_rank"] = away_rank
         result["slot_type"] = slot_type
@@ -672,32 +720,36 @@ def _determine_lean(slot_type, home_team, away_team, current_spread):
 
 
 def _calculate_score(slot_type, line_confirms, trell_applies,
+                     line_magnitude=0.0,
                      rank_scam_applies=False, spread_disc_applies=False,
                      trend_disc_applies=False, ou_disc_applies=False,
-                     weather_applies=False):
+                     weather_applies=False,
+                     spread_value=None, sport="nba"):
     """
     Scoring:
       +10  public slot
-      +5   line movement confirms slot
+      +0-8 line movement confirms slot (graduated by magnitude)
       +5   trell rule confirms
       +5   rank scam detected (CFB)
       +5   spread discrepancy detected (CFB)
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
-      = 20 max (NBA/NHL), 30 max (CFB), 35 max (NFL)
+      -3   spread size penalty (large spreads are harder to cover)
+      = 23 max (NBA/NHL), 33 max (CFB), 38 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
     """
     breakdown = {"slot": 0, "line_movement": 0, "trell": 0,
                  "rank_scam": 0, "spread_discrepancy": 0,
-                 "trend_discrepancy": 0, "overunder": 0, "weather": 0}
+                 "trend_discrepancy": 0, "overunder": 0, "weather": 0,
+                 "spread_penalty": 0}
 
     if slot_type == "public":
         breakdown["slot"] = 10
     if line_confirms:
-        breakdown["line_movement"] = 5
+        breakdown["line_movement"] = score_line_movement(line_magnitude)
     if trell_applies:
         breakdown["trell"] = 5
     if rank_scam_applies:
@@ -711,5 +763,16 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if weather_applies:
         breakdown["weather"] = 5
 
+    # Spread size penalty: large spreads are harder to cover
+    if spread_value is not None:
+        spread_abs = abs(spread_value)
+        if sport == "nfl" and spread_abs > 10:
+            breakdown["spread_penalty"] = -3
+        elif sport in ("nba", "nhl") and spread_abs > 8:
+            breakdown["spread_penalty"] = -3
+        elif sport in ("cfb", "cbb") and spread_abs > 14:
+            breakdown["spread_penalty"] = -3
+
     total = sum(breakdown.values())
+    total = max(total, 0)
     return total, breakdown
