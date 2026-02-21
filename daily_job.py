@@ -8,19 +8,6 @@ Two modes:
 Usage:
   python daily_job.py scan
   python daily_job.py grade
-
-Windows Task Scheduler Setup:
-  1. "Joker Scan"  - Daily at 11:00 AM
-     Action: Start a program
-     Program: python
-     Arguments: C:\\Users\\outra\\Desktop\\Sports-Prop-Projections\\daily_job.py scan
-     Start in: C:\\Users\\outra\\Desktop\\Sports-Prop-Projections
-
-  2. "Joker Grade" - Daily at 1:00 AM
-     Action: Start a program
-     Program: python
-     Arguments: C:\\Users\\outra\\Desktop\\Sports-Prop-Projections\\daily_job.py grade
-     Start in: C:\\Users\\outra\\Desktop\\Sports-Prop-Projections
 """
 
 import argparse
@@ -38,27 +25,25 @@ import tracker
 
 SPORTS = ["nba", "nhl", "nfl", "cfb", "cbb"]
 LOG_PATH = os.path.join(PROJECT_DIR, "daily_job.log")
+IS_PRODUCTION = bool(os.environ.get("DATABASE_URL"))
 
 
 def setup_logging():
-    """Configure rotating file + console logging."""
+    """Configure logging. File + console locally, stdout-only in production."""
     logger = logging.getLogger("daily_job")
     logger.setLevel(logging.INFO)
 
-    # Rotating file handler: 1 MB max, keep 30 backups
-    file_handler = RotatingFileHandler(
-        LOG_PATH, maxBytes=1_000_000, backupCount=30
-    )
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    )
-    logger.addHandler(file_handler)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    # Console handler
+    if not IS_PRODUCTION:
+        file_handler = RotatingFileHandler(
+            LOG_PATH, maxBytes=1_000_000, backupCount=30
+        )
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    )
+    console_handler.setFormatter(fmt)
     logger.addHandler(console_handler)
 
     return logger
@@ -126,12 +111,6 @@ def run_grade(logger):
 def main():
     parser = argparse.ArgumentParser(
         description="Joker's Edge - Automated daily scan & grade",
-        epilog=(
-            "Windows Task Scheduler Setup:\n"
-            '  1. "Joker Scan"  - Daily 11:00 AM - python daily_job.py scan\n'
-            '  2. "Joker Grade" - Daily  1:00 AM - python daily_job.py grade\n'
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("scan", help="Scan all sports and save predictions (11 AM)")
