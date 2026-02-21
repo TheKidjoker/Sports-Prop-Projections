@@ -1,49 +1,73 @@
-## this function should take in two parameters: The players avearage points per games the vegas line for said player
-def points_prediction(player_pointsavg, vegas_line):
+def points_prediction(player_avg, vegas_line, slot_type=None):
+    """
+    Determines whether to lean Over, Under, or Pass based on
+    player average vs Vegas line.
 
-    difference = player_pointsavg - vegas_line
+    Args:
+        player_avg: Player's average points
+        vegas_line: Vegas points line
+        slot_type: 'public', 'vegas', or None for no adjustment
+
+    Returns:
+        (decision: str, confidence: float)
+    """
+
+    difference = player_avg - vegas_line
     probability = 0.5 + (difference / vegas_line)
-    probability= max(0, min(probability, 1))
+
+    # Clamp probability between 0 and 1
+    probability = max(0, min(probability, 1))
+
+    confidence = round(probability * 100, 1)
 
     if probability >= 0.55:
-        return "Over", round(probability* 100,1) 
-    
-    if probability <= 0.45:
-        return "Under", round((1 - probability) * 100,1)
-    
-    else: return 'PASS ON THIS BET'
-
-
-    if player_pointsavg > vegas_pointsavg:
-        return "Over"
-    if player_pointsavg < vegas_pointsavg:
-        return "Under"
+        decision = "Over"
+    elif probability <= 0.45:
+        decision = "Under"
+        confidence = round((1 - probability) * 100, 1)
     else:
-        return "PASS", round(probability * 100, 1)
-    
+        decision = "PASS"
 
-def get_player_data():
-    avg=float(input("Enter player average: "))
-    line=float(input("Enter Vegas line: ")) 
-    return avg, line
+    # Apply slot-based confidence adjustment
+    if slot_type == "public":
+        confidence = min(confidence + 10, 100)
+    elif slot_type == "vegas":
+        confidence = max(confidence - 10, 0)
+        # Shift borderline picks toward PASS when Vegas has the edge
+        if confidence < 55 and decision != "PASS":
+            decision = "PASS"
+
+    return decision, confidence
 
 
 def cover_rate(game_points, vegas_line):
-    over_hits=0
-    under_hits=0
-    push=0
+    """
+    Calculates historical Over, Under, and Push rates
+    for a given set of game results and a Vegas line.
+
+    Returns:
+        (over_rate: float, under_rate: float, push_rate: float)
+    """
+
+    over_hits = 0
+    under_hits = 0
+    push_hits = 0
 
     for points in game_points:
         if points > vegas_line:
             over_hits += 1
         elif points < vegas_line:
             under_hits += 1
-        elif points == vegas_line:
-            push += 1
+        else:
+            push_hits += 1
 
-    total_games= len(game_points)
+    total_games = len(game_points)
+
+    if total_games == 0:
+        return 0.0, 0.0, 0.0
+
     over_rate = round((over_hits / total_games) * 100, 1)
     under_rate = round((under_hits / total_games) * 100, 1)
-    push_rate = round((push / total_games) * 100, 1)
+    push_rate = round((push_hits / total_games) * 100, 1)
 
     return over_rate, under_rate, push_rate
