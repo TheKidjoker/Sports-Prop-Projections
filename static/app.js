@@ -211,14 +211,21 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
+        var filtered = games.filter(function (g) { return g.cover_pct >= 68.5; });
+
+        if (filtered.length === 0) {
+            scanResults.innerHTML = '<p class="scan-empty">No high-confidence plays found today.</p>';
+            scanResults.classList.remove("hidden");
+            return;
+        }
+
         var html = '<h2 class="scan-title">Today\'s Games</h2>';
         html += '<div class="scan-grid">';
 
-        games.forEach(function (g) {
+        filtered.forEach(function (g) {
             var pct = g.cover_pct;
-            var pctClass = "pct-low";
+            var pctClass = "pct-mid";
             if (pct >= 80) pctClass = "pct-high";
-            else if (pct >= 65) pctClass = "pct-mid";
 
             html += '<div class="scan-card">';
 
