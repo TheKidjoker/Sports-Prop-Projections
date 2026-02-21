@@ -1,5 +1,5 @@
-# Monday time slot schedule (hour in 24hr PST, minute, slot_type)
-MONDAY_SLOTS = [
+# Public day slots — used for Monday, Wednesday, Friday (hour in 24hr PST, minute, slot_type)
+PUBLIC_DAY_SLOTS = [
     (17, 0, "vegas"),    # 5:00 PM
     (18, 0, "public"),   # 6:00 PM
     (19, 0, "vegas"),    # 7:00 PM
@@ -7,6 +7,28 @@ MONDAY_SLOTS = [
     (21, 0, "vegas"),    # 9:00 PM
     (22, 0, "public"),   # 10:00 PM
 ]
+
+# Vegas day slots — used for Tuesday, Thursday, Saturday, Sunday (hour in 24hr PST, minute, slot_type)
+VEGAS_DAY_SLOTS = [
+    (16, 0, "public"),   # 4:00 PM
+    (17, 0, "vegas"),    # 5:00 PM
+    (18, 0, "public"),   # 6:00 PM
+    (19, 0, "vegas"),    # 7:00 PM
+    (19, 30, "public"),  # 7:30 PM
+    (21, 0, "vegas"),    # 9:00 PM
+    (22, 0, "public"),   # 10:00 PM
+]
+
+# Map each day to its slot schedule
+DAY_SLOTS = {
+    "monday":    PUBLIC_DAY_SLOTS,
+    "tuesday":   VEGAS_DAY_SLOTS,
+    "wednesday": PUBLIC_DAY_SLOTS,
+    "thursday":  VEGAS_DAY_SLOTS,
+    "friday":    PUBLIC_DAY_SLOTS,
+    "saturday":  VEGAS_DAY_SLOTS,
+    "sunday":    VEGAS_DAY_SLOTS,
+}
 
 
 def classify_slot(day_of_week, hour, minute):
@@ -21,14 +43,15 @@ def classify_slot(day_of_week, hour, minute):
     Returns:
         'public', 'vegas', or 'unknown'
     """
-    if day_of_week.lower() != "monday":
+    slots = DAY_SLOTS.get(day_of_week.lower())
+    if slots is None:
         return "unknown"
 
     game_time = hour * 60 + minute
     best_match = None
     best_distance = float("inf")
 
-    for slot_hour, slot_minute, slot_type in MONDAY_SLOTS:
+    for slot_hour, slot_minute, slot_type in slots:
         slot_time = slot_hour * 60 + slot_minute
         distance = abs(game_time - slot_time)
         if distance < best_distance:
