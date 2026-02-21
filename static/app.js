@@ -232,8 +232,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 renderScanResults(data.games || []);
             }
 
-            // Auto-close sidebar on mobile
-            if (window.innerWidth <= 768) closeSidebar();
+            closeSidebar();
         })
         .catch(function () {
             scanLoading.classList.add("hidden");
@@ -385,18 +384,41 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
-
-        if (filtered.length === 0) {
-            scanResults.innerHTML = '<div class="scan-empty-state">' +
-                '<div class="scan-empty-headline">Even the Joker sits this one out.</div>' +
-                '<div class="scan-empty-sub">No high-confidence ' + currentSport.toUpperCase() + ' plays found. The house has the edge tonight — live to bet another day.</div>' +
-                '</div>';
-            scanResults.classList.remove("hidden");
-            return;
-        }
+        var nonSkip = games.filter(function (g) { return !g.skip; });
 
         var sportLabel = currentSport.toUpperCase();
         var dayLabel = currentSlate.showing_tomorrow ? "Tomorrow's" : "Today's";
+
+        if (filtered.length === 0) {
+            // No strong plays — show top alternatives
+            var alternatives = nonSkip.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; }).slice(0, 5);
+
+            if (alternatives.length === 0) {
+                scanResults.innerHTML = '<div class="scan-empty-state">' +
+                    '<div class="scan-empty-headline">Even the Joker sits this one out.</div>' +
+                    '<div class="scan-empty-sub">No ' + sportLabel + ' plays found. The house has the edge tonight — live to bet another day.</div>' +
+                    '</div>';
+                scanResults.classList.remove("hidden");
+                return;
+            }
+
+            var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
+            html += '<div class="alt-picks-header">No strong plays today — here are the closest calls</div>';
+            html += '<div class="scan-grid">';
+            alternatives.forEach(function (g) {
+                html += buildScanCard(g, currentSport, true);
+            });
+            html += '</div>';
+
+            // Still build parlays from alternatives if thresholds met
+            html += buildParlaySection(alternatives);
+
+            scanResults.innerHTML = html;
+            scanResults.classList.remove("hidden");
+            scanResultsVisible = true;
+            return;
+        }
+
         var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
         html += '<div class="scan-grid">';
 
@@ -408,6 +430,22 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Parlays section
         html += buildParlaySection(filtered);
+
+        // "Other Games to Watch" — below threshold but above 58%, not already shown
+        var filteredIds = filtered.map(function (g) { return g.home_team + g.away_team; });
+        var nearMisses = nonSkip.filter(function (g) {
+            return g.cover_pct >= 58 && g.cover_pct < 68.5 && filteredIds.indexOf(g.home_team + g.away_team) === -1;
+        }).sort(function (a, b) { return b.cover_pct - a.cover_pct; }).slice(0, 5);
+
+        if (nearMisses.length > 0) {
+            html += '<div class="alt-picks-section">';
+            html += '<div class="alt-picks-header">Other Games to Watch</div>';
+            html += '<div class="scan-grid">';
+            nearMisses.forEach(function (g) {
+                html += buildScanCard(g, currentSport, true);
+            });
+            html += '</div></div>';
+        }
 
         scanResults.innerHTML = html;
         scanResults.classList.remove("hidden");
@@ -455,12 +493,14 @@ document.addEventListener("DOMContentLoaded", function () {
         scanResultsVisible = true;
     }
 
-    function buildScanCard(g, sport) {
+    function buildScanCard(g, sport, isAlt) {
         var pct = g.cover_pct;
         var pctClass = "pct-mid";
         if (pct >= 80) pctClass = "pct-high";
+        if (isAlt) pctClass = "pct-low";
 
         var cardClass = g.skip ? "scan-card scan-card-skip" : "scan-card";
+        if (isAlt) cardClass += " scan-card-alt";
         var html = '<div class="' + cardClass + '">';
 
         // Header: matchup + cover %

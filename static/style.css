@@ -1665,6 +1665,33 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   Alternative Picks
+   ========================================= */
+.alt-picks-section {
+    margin-top: 1.5rem;
+}
+
+.alt-picks-header {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.scan-card-alt {
+    opacity: 0.7;
+    border-left-color: var(--text-muted) !important;
+}
+
+.scan-card-alt:hover {
+    opacity: 0.85;
+    border-left-color: var(--accent-yellow) !important;
+}
+
+/* =========================================
    Hidden
    ========================================= */
 .hidden {
