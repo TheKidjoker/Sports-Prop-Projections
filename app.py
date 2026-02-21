@@ -23,7 +23,7 @@ def api_games():
     """Returns today's games list for autocomplete."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl"):
             sport = "nba"
 
         games = get_todays_games(sport)
@@ -49,7 +49,7 @@ def api_games():
                 "event_id": game["event_id"],
             }
 
-            if sport in ("nhl", "cfb"):
+            if sport in ("nhl", "cfb", "nfl"):
                 entry["venue_name"] = game.get("venue_name", "")
                 entry["venue_city"] = game.get("venue_city", "")
                 entry["venue_state"] = game.get("venue_state", "")
@@ -72,7 +72,7 @@ def api_scan():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl"):
             sport = "nba"
 
         results = scan_all_games(sport)
@@ -86,7 +86,7 @@ def predict():
     try:
         data = request.get_json()
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl"):
             sport = "nba"
 
         # Validate required fields
@@ -145,7 +145,40 @@ def predict():
                         break
                 is_first_game = (game_idx == 0)
 
-                if sport == "cfb":
+                if sport == "nfl":
+                    # NFL: classify using PST (UTC-8)
+                    if game_date_str:
+                        try:
+                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+                            pst_dt = game_dt - timedelta(hours=8)
+                            hour, minute = pst_dt.hour, pst_dt.minute
+
+                            # Detect last non-SNF Sunday game
+                            is_last_sunday = False
+                            if day_of_week.lower() == "sunday":
+                                snf_mins = 17 * 60 + 20
+                                for g in reversed(sorted_games):
+                                    gd = g.get("game_date", "")
+                                    if gd:
+                                        try:
+                                            gdt = datetime.fromisoformat(gd.replace("Z", "+00:00"))
+                                            gpst = gdt - timedelta(hours=8)
+                                            gmins = gpst.hour * 60 + gpst.minute
+                                            if abs(gmins - snf_mins) > 30:
+                                                if g.get("event_id") == matched_game["event_id"]:
+                                                    is_last_sunday = True
+                                                break
+                                        except (ValueError, TypeError):
+                                            continue
+
+                            slot_type = classify_slot(
+                                day_of_week, hour, minute,
+                                sport="nfl",
+                                is_last_sunday_game=is_last_sunday,
+                            )
+                        except (ValueError, TypeError):
+                            pass
+                elif sport == "cfb":
                     # CFB: classify using EST (UTC-5)
                     if game_date_str:
                         try:
@@ -182,6 +215,18 @@ def predict():
                             slot_type = classify_slot(day_of_week, hour, minute)
                         except (ValueError, TypeError):
                             pass
+
+                # NFL skip slot: early return
+                if sport == "nfl" and slot_type == "skip":
+                    return jsonify({
+                        "success": True,
+                        "skip": True,
+                        "player_name": player_name or None,
+                        "home_team": home_team,
+                        "away_team": away_team,
+                        "slot_type": "skip",
+                        "message": "Sunday Night Football — SKIP (do not bet this game).",
+                    })
 
                 # Line movement check
                 opening, current = get_game_spread(matched_game["event_id"], sport)
@@ -238,7 +283,7 @@ def predict():
         prediction_data = None
         cover_rates_data = None
 
-        if player_name and sport not in ("nhl", "cfb"):
+        if player_name and sport not in ("nhl", "cfb", "nfl"):
             recent_games = get_player_recent_points(player_name, games)
 
             if not recent_games or len(recent_games) == 0:
@@ -282,8 +327,8 @@ def predict():
             "cover_rates": cover_rates_data,
         }
 
-        # Include venue for NHL and CFB
-        if sport in ("nhl", "cfb") and matched_game:
+        # Include venue for NHL, CFB, and NFL
+        if sport in ("nhl", "cfb", "nfl") and matched_game:
             response_data["venue_name"] = matched_game.get("venue_name", "")
             response_data["venue_city"] = matched_game.get("venue_city", "")
             response_data["venue_state"] = matched_game.get("venue_state", "")

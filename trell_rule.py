@@ -17,6 +17,14 @@ STAR_THRESHOLDS = {
             {"min_apg": 0.5, "min_toi": 16},
         ],
     },
+    "nfl": {
+        "min_pass_ypg": 230,
+        "min_qbr": 55,
+        "alt": [
+            {"min_rush_ypg": 75, "min_total_td": 6},
+            {"min_rec_ypg": 65, "min_total_td": 5},
+        ],
+    },
 }
 
 RECENCY_HOURS = 72

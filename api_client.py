@@ -1,3 +1,4 @@
+import os
 import requests
 
 BASE_URL = "https://www.balldontlie.io/api/v1"
@@ -7,6 +8,7 @@ SPORT_MAP = {
     "nba": {"category": "basketball", "league": "nba"},
     "nhl": {"category": "hockey", "league": "nhl"},
     "cfb": {"category": "football", "league": "college-football"},
+    "nfl": {"category": "football", "league": "nfl"},
 }
 
 
@@ -148,6 +150,18 @@ def get_todays_games(sport="nba"):
                     "home_rank": home_rank,
                     "away_rank": away_rank,
                 }
+
+                # Capture inline weather for NFL from scoreboard
+                if sport == "nfl":
+                    weather_obj = competition.get("weather", {})
+                    if weather_obj:
+                        game_entry["weather"] = {
+                            "temperature": weather_obj.get("temperature"),
+                            "condition": weather_obj.get("displayValue", ""),
+                            "wind_speed": weather_obj.get("windSpeed"),
+                            "precipitation": weather_obj.get("precipitation"),
+                        }
+
                 games.append(game_entry)
 
         return games
@@ -293,7 +307,24 @@ def get_player_season_averages(athlete_id, sport="nba"):
 
         stats = {}
 
-        if sport == "nhl":
+        if sport == "nfl":
+            for category in categories:
+                for stat in category.get("stats", []):
+                    name = stat.get("name", "")
+                    value = stat.get("value")
+                    if value is None:
+                        continue
+                    if name == "passingYardsPerGame":
+                        stats["pass_ypg"] = float(value)
+                    elif name == "QBRating" or name == "QBR":
+                        stats["qbr"] = float(value)
+                    elif name == "rushingYardsPerGame":
+                        stats["rush_ypg"] = float(value)
+                    elif name == "receivingYardsPerGame":
+                        stats["rec_ypg"] = float(value)
+                    elif name == "totalTouchdowns":
+                        stats["total_td"] = float(value)
+        elif sport == "nhl":
             for category in categories:
                 for stat in category.get("stats", []):
                     name = stat.get("name", "")
@@ -327,12 +358,165 @@ def get_player_season_averages(athlete_id, sport="nba"):
                         stats["mpg"] = float(value)
 
         # Check for primary stat
-        if sport == "nhl" and stats.get("ptspg") is not None:
+        if sport == "nfl" and (stats.get("pass_ypg") is not None or stats.get("rush_ypg") is not None):
             return stats
-        elif sport != "nhl" and stats.get("ppg") is not None:
+        elif sport == "nhl" and stats.get("ptspg") is not None:
+            return stats
+        elif sport not in ("nhl", "nfl") and stats.get("ppg") is not None:
             return stats
 
         return None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def get_game_overunder(event_id, sport="nfl"):
+    """
+    Fetches the over/under total from ESPN pickcenter.
+
+    Returns:
+        Float total or None on failure.
+    """
+    try:
+        url = _espn_url(sport, "summary")
+        response = requests.get(url, params={"event": event_id}, timeout=10)
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        pickcenter = data.get("pickcenter", [])
+        if not pickcenter:
+            return None
+
+        return float(pickcenter[0].get("overUnder", 0)) or None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def get_team_recent_results(team_id, count=4):
+    """
+    Fetches last N game results for an NFL team from ESPN.
+
+    Returns:
+        List of dicts: [{result: 'W'/'L', score: int, opp_score: int}, ...]
+        or empty list on failure.
+    """
+    try:
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+            f"teams/{team_id}/schedule"
+        )
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+        events = data.get("events", [])
+
+        results = []
+        for event in reversed(events):
+            competitions = event.get("competitions", [{}])
+            if not competitions:
+                continue
+            comp = competitions[0]
+            status_type = comp.get("status", {}).get("type", {}).get("name", "")
+            if status_type != "STATUS_FINAL":
+                continue
+
+            competitors = comp.get("competitors", [])
+            team_score = None
+            opp_score = None
+            for c in competitors:
+                if str(c.get("id")) == str(team_id):
+                    team_score = int(c.get("score", 0))
+                else:
+                    opp_score = int(c.get("score", 0))
+
+            if team_score is not None and opp_score is not None:
+                results.append({
+                    "result": "W" if team_score > opp_score else "L",
+                    "score": team_score,
+                    "opp_score": opp_score,
+                })
+                if len(results) >= count:
+                    break
+
+        return results
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return []
+
+
+def get_game_weather_espn(event_id, sport="nfl"):
+    """
+    Fetches weather data from ESPN game summary (gameInfo.weather).
+
+    Returns:
+        Dict with temperature, wind_speed, condition, precipitation or None.
+    """
+    try:
+        url = _espn_url(sport, "summary")
+        response = requests.get(url, params={"event": event_id}, timeout=10)
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        weather = data.get("gameInfo", {}).get("weather", {})
+        if not weather:
+            return None
+
+        return {
+            "temperature": weather.get("temperature"),
+            "wind_speed": weather.get("windSpeed"),
+            "condition": weather.get("displayValue", ""),
+            "precipitation": weather.get("precipitation"),
+        }
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def get_game_weather_openweather(city, state):
+    """
+    Fallback weather fetch using OpenWeatherMap free tier.
+    Requires OPENWEATHER_API_KEY env var.
+
+    Returns:
+        Dict with temperature, wind_speed, condition, precipitation or None.
+    """
+    api_key = os.environ.get("OPENWEATHER_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        query = f"{city},{state},US"
+        url = "https://api.openweathermap.org/data/2.5/weather"
+        response = requests.get(
+            url,
+            params={"q": query, "appid": api_key, "units": "imperial"},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        main = data.get("main", {})
+        wind = data.get("wind", {})
+        weather_list = data.get("weather", [{}])
+        condition = weather_list[0].get("main", "") if weather_list else ""
+
+        rain = data.get("rain", {}).get("1h", 0)
+        snow = data.get("snow", {}).get("1h", 0)
+        precipitation = rain + snow
+
+        return {
+            "temperature": main.get("temp"),
+            "wind_speed": wind.get("speed"),
+            "condition": condition,
+            "precipitation": precipitation if precipitation > 0 else 0,
+        }
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None

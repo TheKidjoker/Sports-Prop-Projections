@@ -1,8 +1,29 @@
 from datetime import datetime, timedelta
-from api_client import get_todays_games, get_all_injuries, get_game_spread, get_player_season_averages
+from api_client import (
+    get_todays_games, get_all_injuries, get_game_spread,
+    get_player_season_averages, get_game_overunder,
+    get_team_recent_results, get_game_weather_espn,
+    get_game_weather_openweather,
+)
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
+
+
+# ─── NFL INDOOR STADIUMS ────────────────────────────────────────────────────
+# Dome or retractable-roof venues where weather doesn't apply
+NFL_INDOOR_STADIUMS = {
+    "AT&T Stadium",             # Cowboys
+    "Allegiant Stadium",        # Raiders
+    "Caesars Superdome",        # Saints
+    "Ford Field",               # Lions
+    "Lucas Oil Stadium",        # Colts
+    "Mercedes-Benz Stadium",    # Falcons
+    "NRG Stadium",              # Texans
+    "State Farm Stadium",       # Cardinals
+    "SoFi Stadium",             # Rams/Chargers
+    "U.S. Bank Stadium",        # Vikings
+}
 
 
 # ─── CFB RANK TIERS ──────────────────────────────────────────────────────────
@@ -153,6 +174,156 @@ def _detect_spread_discrepancy(home_rank, away_rank, current_spread, slot_type):
     return result
 
 
+# ─── NFL ANALYSIS HELPERS ────────────────────────────────────────────────────
+
+def _analyze_nfl_trend_discrepancy(home_team_id, away_team_id):
+    """
+    Analyzes last 4 games for both teams.
+    Struggling teams (1-3 or 0-4) = bounce-back value.
+    Hot teams (4-0 or 3-1) = regression risk.
+
+    Returns:
+        Dict with trend analysis data.
+    """
+    result = {"applies": False, "home_signal": None, "away_signal": None}
+
+    home_results = get_team_recent_results(home_team_id, count=4)
+    away_results = get_team_recent_results(away_team_id, count=4)
+
+    def classify_trend(results):
+        if len(results) < 4:
+            return None
+        wins = sum(1 for r in results if r["result"] == "W")
+        if wins <= 1:
+            return "bounce-back"
+        elif wins >= 3:
+            return "regression"
+        return None
+
+    home_signal = classify_trend(home_results)
+    away_signal = classify_trend(away_results)
+
+    home_record = ""
+    away_record = ""
+    if home_results:
+        hw = sum(1 for r in home_results if r["result"] == "W")
+        home_record = f"{hw}-{len(home_results) - hw}"
+    if away_results:
+        aw = sum(1 for r in away_results if r["result"] == "W")
+        away_record = f"{aw}-{len(away_results) - aw}"
+
+    if home_signal or away_signal:
+        result["applies"] = True
+        result["home_signal"] = home_signal
+        result["away_signal"] = away_signal
+        result["home_record"] = home_record
+        result["away_record"] = away_record
+
+        # Strong contrarian: one hot + one struggling
+        if (home_signal == "bounce-back" and away_signal == "regression") or \
+           (home_signal == "regression" and away_signal == "bounce-back"):
+            result["strong_contrarian"] = True
+        else:
+            result["strong_contrarian"] = False
+
+    return result
+
+
+def _analyze_nfl_overunder(event_id, home_team_id, away_team_id):
+    """
+    Two checks:
+    1. Flag totals above 50.5 as potential under.
+    2. Compare total to combined team scoring averages, flag 6+ point divergence.
+
+    Returns:
+        Dict with O/U analysis data.
+    """
+    result = {"applies": False, "flags": []}
+
+    total = get_game_overunder(event_id)
+    if total is None:
+        return result
+
+    result["total"] = total
+
+    # Check 1: high total
+    if total > 50.5:
+        result["applies"] = True
+        result["flags"].append(f"Total {total} is above 50.5 — lean UNDER")
+
+    # Check 2: compare to team scoring averages
+    home_results = get_team_recent_results(home_team_id, count=4)
+    away_results = get_team_recent_results(away_team_id, count=4)
+
+    if home_results and away_results:
+        home_avg = sum(r["score"] for r in home_results) / len(home_results)
+        away_avg = sum(r["score"] for r in away_results) / len(away_results)
+        combined_avg = home_avg + away_avg
+        divergence = abs(total - combined_avg)
+
+        result["combined_avg"] = round(combined_avg, 1)
+        result["divergence"] = round(divergence, 1)
+
+        if divergence >= 6:
+            result["applies"] = True
+            direction = "OVER" if total < combined_avg else "UNDER"
+            result["flags"].append(
+                f"Total {total} vs combined avg {result['combined_avg']} "
+                f"({result['divergence']} pt gap) — lean {direction}"
+            )
+
+    return result
+
+
+def _analyze_nfl_weather(game, event_id):
+    """
+    3-tier weather fetch: scoreboard inline → ESPN summary → OpenWeather fallback.
+    Skips dome stadiums. Flags wind 15+ mph, temp <=32F, precipitation.
+
+    Returns:
+        Dict with weather data and alerts.
+    """
+    venue_name = game.get("venue_name", "")
+
+    # Check if indoor stadium
+    if venue_name in NFL_INDOOR_STADIUMS:
+        return {"is_dome": True, "alerts": []}
+
+    result = {"is_dome": False, "alerts": []}
+
+    # Tier 1: inline weather from scoreboard
+    weather = game.get("weather")
+
+    # Tier 2: ESPN summary
+    if not weather:
+        weather = get_game_weather_espn(event_id)
+
+    # Tier 3: OpenWeather fallback
+    if not weather:
+        city = game.get("venue_city", "")
+        state = game.get("venue_state", "")
+        if city and state:
+            weather = get_game_weather_openweather(city, state)
+
+    if not weather:
+        return result
+
+    result["weather"] = weather
+    temp = weather.get("temperature")
+    wind = weather.get("wind_speed")
+    condition = weather.get("condition", "")
+    precip = weather.get("precipitation")
+
+    if wind is not None and float(wind) >= 15:
+        result["alerts"].append(f"Wind {wind} mph")
+    if temp is not None and float(temp) <= 32:
+        result["alerts"].append(f"Temp {temp}°F")
+    if precip and float(precip) > 0:
+        result["alerts"].append(f"Precipitation: {condition}")
+
+    return result
+
+
 def scan_all_games(sport="nba"):
     """
     Fetch all today's games, analyze each, return ranked list.
@@ -176,12 +347,31 @@ def scan_all_games(sport="nba"):
     now = datetime.now()
     day_of_week = now.strftime("%A")
 
+    # NFL: detect last non-SNF Sunday game
+    last_sunday_non_snf_idx = None
+    if sport == "nfl" and now.strftime("%A").lower() == "sunday":
+        for i in range(len(sorted_games) - 1, -1, -1):
+            gd = sorted_games[i].get("game_date", "")
+            if gd:
+                try:
+                    gdt = datetime.fromisoformat(gd.replace("Z", "+00:00"))
+                    pst_dt = gdt - timedelta(hours=8)
+                    pst_mins = pst_dt.hour * 60 + pst_dt.minute
+                    snf_mins = 17 * 60 + 20
+                    if abs(pst_mins - snf_mins) > 30:
+                        last_sunday_non_snf_idx = i
+                        break
+                except (ValueError, TypeError):
+                    continue
+
     results = []
     for i, game in enumerate(sorted_games):
         is_first_game = (i == 0)
+        is_last_sunday = (i == last_sunday_non_snf_idx) if last_sunday_non_snf_idx is not None else False
         analysis = _analyze_single_game(
             game, day_of_week, all_injuries, is_first_game,
             sport=sport, total_games_on_slate=total_games, game_index=i,
+            is_last_sunday_game=is_last_sunday,
         )
         results.append(analysis)
 
@@ -191,7 +381,8 @@ def scan_all_games(sport="nba"):
 
 
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
-                          sport="nba", total_games_on_slate=1, game_index=0):
+                          sport="nba", total_games_on_slate=1, game_index=0,
+                          is_last_sunday_game=False):
     """
     Returns analysis dict for one game.
     """
@@ -215,7 +406,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             elif sport == "nhl":
                 classify_dt = game_dt - timedelta(hours=6)  # CST
             else:
-                classify_dt = game_dt - timedelta(hours=8)  # PST
+                classify_dt = game_dt - timedelta(hours=8)  # PST (NBA & NFL)
             hour, minute = classify_dt.hour, classify_dt.minute
 
             # Display timezone: always EST
@@ -228,7 +419,16 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             pass
 
     # Classify slot
-    if sport == "cfb":
+    if sport == "nfl":
+        if hour is not None:
+            slot_type = classify_slot(
+                day_of_week, hour, minute,
+                sport="nfl",
+                is_last_sunday_game=is_last_sunday_game,
+            )
+        else:
+            slot_type = "unknown"
+    elif sport == "cfb":
         if hour is not None:
             slot_type = classify_slot(day_of_week, hour, minute, sport="cfb")
         else:
@@ -251,6 +451,25 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             slot_type = classify_slot(day_of_week, hour, minute)
         else:
             slot_type = "unknown"
+
+    # NFL: early return for SKIP slot
+    if sport == "nfl" and slot_type == "skip":
+        return {
+            "home_team": home_team,
+            "away_team": away_team,
+            "event_id": event_id,
+            "game_time_est": game_time_est,
+            "confirmation_score": 0,
+            "cover_pct": 0,
+            "lean_team": None,
+            "action": None,
+            "recommendation": "SKIP",
+            "slot_type": "skip",
+            "skip": True,
+            "venue_name": game.get("venue_name", ""),
+            "venue_city": game.get("venue_city", ""),
+            "venue_state": game.get("venue_state", ""),
+        }
 
     # Line movement
     opening, current = get_game_spread(event_id, sport)
@@ -316,14 +535,42 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         if abs(current) >= 3:
             moneyline_recommend = True
 
+    # NFL-specific analyses (vegas/late Sunday only for trend + O/U)
+    nfl_trend = {"applies": False}
+    nfl_overunder = {"applies": False}
+    nfl_weather = {"is_dome": False, "alerts": []}
+
+    if sport == "nfl":
+        home_team_id = game.get("home_team_id")
+        away_team_id = game.get("away_team_id")
+
+        # Trend + O/U only in vegas slots
+        if slot_type == "vegas" and home_team_id and away_team_id:
+            nfl_trend = _analyze_nfl_trend_discrepancy(home_team_id, away_team_id)
+            nfl_overunder = _analyze_nfl_overunder(event_id, home_team_id, away_team_id)
+
+        # Weather for all non-skip games
+        nfl_weather = _analyze_nfl_weather(game, event_id)
+
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
     spread_disc_applies = spread_discrepancy.get("is_discrepancy", False)
+    trend_disc_applies = nfl_trend.get("applies", False)
+    ou_disc_applies = nfl_overunder.get("applies", False)
+    weather_applies = bool(nfl_weather.get("alerts"))
+
     score, _ = _calculate_score(
         slot_type, line_confirms, trell_result.get("applies", False),
         rank_scam_applies=rank_scam_applies, spread_disc_applies=spread_disc_applies,
+        trend_disc_applies=trend_disc_applies, ou_disc_applies=ou_disc_applies,
+        weather_applies=weather_applies,
     )
-    max_score = 30 if sport == "cfb" else 20
+    if sport == "nfl":
+        max_score = 35
+    elif sport == "cfb":
+        max_score = 30
+    else:
+        max_score = 20
     cover_pct = round(50 + (score / max_score) * 45, 1)
 
     # Determine which team to lean towards
@@ -357,14 +604,15 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "away_team": away_team,
         "event_id": event_id,
         "game_time_est": game_time_est,
+        "confirmation_score": score,
         "cover_pct": cover_pct,
         "lean_team": lean_team,
         "action": action,
         "recommendation": recommendation,
     }
 
-    # Include venue for NHL and CFB
-    if sport in ("nhl", "cfb"):
+    # Include venue for NHL, CFB, and NFL
+    if sport in ("nhl", "cfb", "nfl"):
         result["venue_name"] = game.get("venue_name", "")
         result["venue_city"] = game.get("venue_city", "")
         result["venue_state"] = game.get("venue_state", "")
@@ -378,6 +626,19 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             result["rank_scam"] = rank_scam
         if spread_discrepancy["is_discrepancy"]:
             result["spread_discrepancy"] = spread_discrepancy
+
+    # Include NFL-specific data
+    if sport == "nfl":
+        result["slot_type"] = slot_type
+        if nfl_weather.get("is_dome"):
+            result["weather_dome"] = True
+        elif nfl_weather.get("weather") or nfl_weather.get("alerts"):
+            result["weather"] = nfl_weather.get("weather", {})
+            result["weather_alerts"] = nfl_weather.get("alerts", [])
+        if nfl_trend.get("applies"):
+            result["trend_discrepancy"] = nfl_trend
+        if nfl_overunder.get("applies"):
+            result["overunder"] = nfl_overunder
 
     return result
 
@@ -411,7 +672,9 @@ def _determine_lean(slot_type, home_team, away_team, current_spread):
 
 
 def _calculate_score(slot_type, line_confirms, trell_applies,
-                     rank_scam_applies=False, spread_disc_applies=False):
+                     rank_scam_applies=False, spread_disc_applies=False,
+                     trend_disc_applies=False, ou_disc_applies=False,
+                     weather_applies=False):
     """
     Scoring:
       +10  public slot
@@ -419,13 +682,17 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
       +5   trell rule confirms
       +5   rank scam detected (CFB)
       +5   spread discrepancy detected (CFB)
-      = 20 max (NBA/NHL), 30 max (CFB)
+      +5   trend discrepancy (NFL)
+      +5   O/U discrepancy (NFL)
+      +5   weather factor (NFL)
+      = 20 max (NBA/NHL), 30 max (CFB), 35 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
     """
     breakdown = {"slot": 0, "line_movement": 0, "trell": 0,
-                 "rank_scam": 0, "spread_discrepancy": 0}
+                 "rank_scam": 0, "spread_discrepancy": 0,
+                 "trend_discrepancy": 0, "overunder": 0, "weather": 0}
 
     if slot_type == "public":
         breakdown["slot"] = 10
@@ -437,6 +704,12 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["rank_scam"] = 5
     if spread_disc_applies:
         breakdown["spread_discrepancy"] = 5
+    if trend_disc_applies:
+        breakdown["trend_discrepancy"] = 5
+    if ou_disc_applies:
+        breakdown["overunder"] = 5
+    if weather_applies:
+        breakdown["weather"] = 5
 
     total = sum(breakdown.values())
     return total, breakdown

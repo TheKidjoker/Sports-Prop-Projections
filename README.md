@@ -1,47 +1,63 @@
-# Sports Prop Projections
+# The Sharp Edge
 
-A rules-based player prop projection engine for NBA and college basketball that evaluates over/under likelihoods using recent performance metrics and contextual factors.
+A rules-based sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, and **NFL** using time-slot theory, line movement, injury impact, and sport-specific signals.
 
-## Core Betting Theory
+## How It Works
 
-This tool is built around a key concept: **not all time slots are created equal**.
+Not all time slots are created equal. Vegas adjusts its edge depending on when games are played. This tool classifies every game into a slot type, then layers additional confirmation factors on top to produce a confidence score.
 
-### Public Days
-There are specific days and times where Vegas is more likely to let the public win. These windows tend to favor straightforward, stats-backed bets. When the model detects a Public Day, it leans into player averages and historical cover rates with higher confidence.
+## Glossary
 
-### Vegas Slots
-On the flip side, there are days and times where Vegas holds the edge. During these windows, the books are more aggressive with their lines, and the public is more likely to lose. When the model detects a Vegas Slot, it adjusts its confidence accordingly and may recommend passing on bets that would otherwise look favorable.
+### Slot Types
 
-### Monday Time Slots (PST)
+| Term | Meaning |
+|------|---------|
+| **Public** | A time slot where the sensible, publicly-expected outcome tends to hit. Lean with the favorite. |
+| **Vegas** | A time slot where the books hold the edge and sharp money dominates. Lean with the underdog. |
+| **Trap** | A game designed to look appealing but likely to burn public bettors. Fade the obvious pick. |
+| **Skip** | A game that should not be bet at all (e.g., Sunday Night Football). |
 
-| Time (PST) | Slot Type |
-|------------|-----------|
-| 5:00 PM    | Vegas     |
-| 6:00 PM    | Public    |
-| 7:00 PM    | Vegas     |
-| 7:30 PM    | Public    |
-| 9:00 PM    | Vegas     |
-| 10:00 PM   | Public    |
+### Confirmation Factors
 
-### Why This Matters
-Most projection tools treat every game the same regardless of when it's played. By factoring in **when** a bet is placed — not just the stats behind it — this tool aims to add a layer of context that pure numbers miss.
+| Term | Meaning |
+|------|---------|
+| **Line Movement** | The spread shifted between open and close. If the movement direction matches the slot type, it confirms the play. |
+| **Trell Rule** | A star player is ruled Out with a recent injury in a Vegas slot. The absence creates exploitable value. |
+| **Rank Scam** | (CFB) A higher-ranked team is at home but listed as the underdog against a lower-ranked opponent. |
+| **Spread Discrepancy** | (CFB) The actual spread is significantly lower than expected for a ranked team's tier. |
+| **Trend Discrepancy** | (NFL) One or both teams' last 4 games show a lopsided record, signaling bounce-back value or regression risk. |
+| **O/U Alert** | (NFL) The over/under total is unusually high or diverges significantly from the teams' recent scoring averages. |
+| **Weather Alert** | (NFL) Extreme outdoor conditions (high wind, freezing temp, precipitation) that can affect scoring. |
+| **Dome** | (NFL) The game is played in an indoor stadium. Weather does not apply. |
 
-## Project Structure
+### Recommendation Labels
 
-- `main.py` — Entry point. Collects user input and runs predictions.
-- `projections.py` — Prediction logic (Over/Under/Pass) and historical cover rate calculations.
-- `time_slots.py` — Classifies game day + time into Public Day or Vegas Slot.
-- `api_client.py` — Fetches real NBA player data from the balldontlie API.
+| Label | Meaning |
+|-------|---------|
+| **STRONG PLAY** | Multiple confirmation factors align. Highest conviction. |
+| **LEAN** | Some factors confirm. Worth a look. |
+| **MONITOR** | Limited confirmation. Watch but don't commit. |
+
+### Other Terms
+
+| Term | Meaning |
+|------|---------|
+| **Cover %** | The model's estimated likelihood that the recommended side covers the spread. |
+| **Moneyline** | When the spread is 3+ points, the tool suggests taking the moneyline instead of the spread. |
+| **Quick Generate** | Scans all of today's games at once and ranks them by confidence. |
+| **Parlay Suggestions** | Auto-generated multi-leg bet combinations built from the day's highest-confidence plays. |
+
+## Sports Supported
+
+- **NBA** — Time-slot classification with day-of-week rules and first-game override
+- **NHL** — Slate-size-based classification (1 game, 2 games, 3+ time-based)
+- **CFB** — Day overrides + Saturday time slots, rank scam and spread discrepancy detection
+- **NFL** — Day overrides + Sunday early/late/night slots, trend discrepancy, O/U analysis, live weather
 
 ## Usage
 
 ```
-python main.py
+python app.py
 ```
 
-You will be prompted for:
-1. Player name (e.g., LeBron James)
-2. Vegas points line
-3. Number of recent games to analyze
-
-The tool outputs a directional prediction with confidence and historical cover rates against the given line.
+Open `http://localhost:5000` in your browser. Select a sport, hit Quick Generate, or use the manual form.

@@ -74,7 +74,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
             var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
             var text = awayLabel + " vs " + homeLabel + " - " + g.game_time_est + " EST";
-            if ((currentSport === "nhl" || currentSport === "cfb") && g.venue_name) {
+            if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "nfl") && g.venue_name) {
                 text += " | " + g.venue_name;
             }
             li.textContent = text;
@@ -181,6 +181,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderResults(data) {
+        // Handle NFL skip response
+        if (data.skip) {
+            document.getElementById("result-player").textContent = data.home_team + " vs " + data.away_team;
+            document.getElementById("recent-games-card").classList.add("hidden");
+            document.getElementById("prediction-card").classList.add("hidden");
+            document.getElementById("cover-rates-card").classList.add("hidden");
+            var leanCard = document.getElementById("lean-card");
+            var leanBody = document.getElementById("lean-body");
+            leanCard.classList.remove("hidden");
+            leanBody.innerHTML = '<div class="scan-skip-badge">' + (data.message || "SKIP — Do not bet this game.") + '</div>';
+            results.classList.remove("hidden");
+            return;
+        }
+
         // Header
         var label = data.player_name || "Analysis";
         document.getElementById("result-player").textContent = label;
@@ -245,7 +259,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var filtered = games.filter(function (g) { return g.cover_pct >= 68.5; });
+        var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
 
         if (filtered.length === 0) {
             scanResults.innerHTML = '<p class="scan-empty">No high-confidence plays found today.</p>';
@@ -262,7 +276,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var pctClass = "pct-mid";
             if (pct >= 80) pctClass = "pct-high";
 
-            html += '<div class="scan-card">';
+            var cardClass = g.skip ? "scan-card scan-card-skip" : "scan-card";
+            html += '<div class="' + cardClass + '">';
 
             // Header: matchup + cover %
             var awayLabel = g.away_rank ? '<span class="scan-rank">#' + g.away_rank + '</span> ' + g.away_team : g.away_team;
@@ -272,8 +287,8 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
             html += '</div>';
 
-            // Venue (NHL and CFB)
-            if ((currentSport === "nhl" || currentSport === "cfb") && g.venue_name) {
+            // Venue (NHL, CFB, and NFL)
+            if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "nfl") && g.venue_name) {
                 var venueText = g.venue_name;
                 if (g.venue_city) {
                     venueText += " — " + g.venue_city;
@@ -285,8 +300,8 @@ document.addEventListener("DOMContentLoaded", function () {
             // Time
             html += '<div class="scan-time">' + g.game_time_est + ' EST</div>';
 
-            // Slot type label (CFB)
-            if (currentSport === "cfb" && g.slot_type) {
+            // Slot type label (CFB and NFL)
+            if ((currentSport === "cfb" || currentSport === "nfl") && g.slot_type) {
                 var slotLabel = g.slot_type.toUpperCase();
                 var slotClass = "slot-" + g.slot_type;
                 html += '<div class="scan-slot ' + slotClass + '">' + slotLabel + '</div>';
@@ -307,6 +322,65 @@ document.addEventListener("DOMContentLoaded", function () {
                 html += '<span class="spread-disc-label">SPREAD ALERT</span> ';
                 html += '<span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span>';
                 html += '</div>';
+            }
+
+            // NFL: Weather badge
+            if (currentSport === "nfl") {
+                if (g.weather_dome) {
+                    html += '<div class="scan-weather-alert dome">';
+                    html += '<span class="weather-label">DOME</span>';
+                    html += '</div>';
+                } else if (g.weather_alerts && g.weather_alerts.length > 0) {
+                    html += '<div class="scan-weather-alert">';
+                    html += '<span class="weather-label">WEATHER ALERT</span> ';
+                    html += '<span class="weather-detail">' + g.weather_alerts.join(" | ") + '</span>';
+                    html += '</div>';
+                } else if (g.weather) {
+                    var weatherParts = [];
+                    if (g.weather.temperature) weatherParts.push(g.weather.temperature + "°F");
+                    if (g.weather.wind_speed) weatherParts.push("Wind " + g.weather.wind_speed + " mph");
+                    if (g.weather.condition) weatherParts.push(g.weather.condition);
+                    if (weatherParts.length > 0) {
+                        html += '<div class="scan-weather-info">';
+                        html += '<span class="weather-detail">' + weatherParts.join(" | ") + '</span>';
+                        html += '</div>';
+                    }
+                }
+            }
+
+            // NFL: Trend Discrepancy badge
+            if (g.trend_discrepancy && g.trend_discrepancy.applies) {
+                var td = g.trend_discrepancy;
+                html += '<div class="scan-trend-disc">';
+                html += '<span class="trend-disc-label">TREND ALERT</span> ';
+                if (td.home_signal) {
+                    var homeClass = td.home_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
+                    html += '<span class="' + homeClass + '">Home (' + td.home_record + '): ' + td.home_signal.toUpperCase() + '</span> ';
+                }
+                if (td.away_signal) {
+                    var awayClass = td.away_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
+                    html += '<span class="' + awayClass + '">Away (' + td.away_record + '): ' + td.away_signal.toUpperCase() + '</span> ';
+                }
+                if (td.strong_contrarian) {
+                    html += '<span class="trend-strong">STRONG CONTRARIAN</span>';
+                }
+                html += '</div>';
+            }
+
+            // NFL: O/U Alert badge
+            if (g.overunder && g.overunder.applies) {
+                var ou = g.overunder;
+                html += '<div class="scan-ou-alert">';
+                html += '<span class="ou-label">O/U ALERT</span> ';
+                ou.flags.forEach(function (flag) {
+                    html += '<span class="ou-detail">' + flag + '</span> ';
+                });
+                html += '</div>';
+            }
+
+            // NFL: Skip badge
+            if (g.skip) {
+                html += '<div class="scan-skip-badge">Sunday Night Football — Do Not Bet</div>';
             }
 
             // Action — what to do

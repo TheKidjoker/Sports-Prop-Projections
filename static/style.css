@@ -624,7 +624,7 @@ button[type="submit"]:disabled {
     text-align: right;
 }
 
-/* CFB Slot type badges */
+/* Slot type badges (CFB + NFL) */
 .scan-slot {
     display: inline-block;
     font-weight: 700;
@@ -716,6 +716,151 @@ button[type="submit"]:disabled {
 .spread-disc-detail {
     font-size: 0.85rem;
     color: #90caf9;
+}
+
+/* NFL: Skip slot */
+.slot-skip {
+    background: rgba(255, 255, 255, 0.05);
+    color: #666;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* NFL: Vegas slot (shared with other sports) */
+.slot-vegas {
+    background: rgba(255, 152, 0, 0.12);
+    color: #ff9800;
+    border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+/* NFL: Skip card muted */
+.scan-card-skip {
+    opacity: 0.5;
+    border-left-color: #333 !important;
+}
+
+.scan-card-skip:hover {
+    border-left-color: #555 !important;
+    opacity: 0.65;
+}
+
+/* NFL: Weather alert badge */
+.scan-weather-alert {
+    background: rgba(0, 188, 212, 0.12);
+    border: 1px solid rgba(0, 188, 212, 0.35);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 0 10px rgba(0, 188, 212, 0.12);
+}
+
+.scan-weather-alert.dome {
+    background: rgba(33, 150, 243, 0.12);
+    border-color: rgba(33, 150, 243, 0.35);
+}
+
+.weather-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #00bcd4;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.scan-weather-alert.dome .weather-label {
+    color: #64b5f6;
+}
+
+.weather-detail {
+    font-size: 0.85rem;
+    color: #4dd0e1;
+}
+
+.scan-weather-info {
+    padding: 0.25rem 0;
+    margin-bottom: 0.4rem;
+}
+
+.scan-weather-info .weather-detail {
+    font-size: 0.8rem;
+    color: #888;
+}
+
+/* NFL: Trend discrepancy badge */
+.scan-trend-disc {
+    background: rgba(255, 152, 0, 0.12);
+    border: 1px solid rgba(255, 152, 0, 0.35);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 0 10px rgba(255, 152, 0, 0.12);
+}
+
+.trend-disc-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #ff9800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.trend-bounce {
+    color: #4caf50;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+}
+
+.trend-regress {
+    color: #ff4444;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+}
+
+.trend-strong {
+    color: #ffd700;
+    font-weight: 700;
+    font-size: 0.8rem;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+/* NFL: O/U alert badge */
+.scan-ou-alert {
+    background: rgba(156, 39, 176, 0.12);
+    border: 1px solid rgba(156, 39, 176, 0.35);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 0 10px rgba(156, 39, 176, 0.12);
+}
+
+.ou-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #ce93d8;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.ou-detail {
+    font-size: 0.85rem;
+    color: #bb86fc;
+    display: block;
+    margin-top: 0.2rem;
+}
+
+/* NFL: Skip badge */
+.scan-skip-badge {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.5rem;
+    color: #666;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-align: center;
 }
 
 /* Ticker bar */
