@@ -1,6 +1,7 @@
 from projections import points_prediction, cover_rate
-from api_client import get_player_recent_points
+from api_client import get_player_recent_points, find_game_by_team, get_game_spread
 from time_slots import classify_slot, get_slot_label
+from line_movement import detect_movement, confirms_slot
 
 
 def parse_time(time_str):
@@ -45,6 +46,35 @@ def main():
     slot_type = classify_slot(day_of_week, hour, minute)
     slot_label = get_slot_label(slot_type)
 
+    # --- Line Movement Check ---
+    line_confirmed = False
+    team_name = input("Enter one team playing in the game (e.g., Lakers): ")
+
+    if team_name.strip():
+        event_id = find_game_by_team(team_name)
+
+        if event_id:
+            opening, current = get_game_spread(event_id)
+
+            if opening is not None and current is not None:
+                movement = detect_movement(opening, current)
+                confirmed = confirms_slot(movement, slot_type)
+                line_confirmed = confirmed
+
+                print(f"\nLine Movement:")
+                print(f"  Opening spread: {opening:+.1f}")
+                print(f"  Current spread: {current:+.1f}")
+                print(f"  Movement: {movement}")
+                print(f"  Confirms slot: {'YES' if confirmed else 'NO'}")
+                if confirmed:
+                    print("  +5 confidence boost applied")
+            else:
+                print("\nLine Movement: Spread data not available for this game.")
+        else:
+            print(f"\nLine Movement: No game found today for '{team_name}'.")
+    else:
+        print("\nLine Movement: Skipped (no team entered).")
+
     # --- Fetch real NBA data ---
     recent_games = get_player_recent_points(player_name, games)
 
@@ -56,7 +86,7 @@ def main():
 
     # --- Model Prediction ---
     player_avg = sum(recent_games) / len(recent_games)
-    decision, confidence = points_prediction(player_avg, vegas_line, slot_type)
+    decision, confidence = points_prediction(player_avg, vegas_line, slot_type, line_confirmed)
 
     print(f"\nTime Slot: {slot_label}")
     print("\nModel prediction:")

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Sharp Edge</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>The Sharp Edge</h1>
+            <p class="subtitle">See what the house sees.</p>
+        </header>
+
+        <button type="button" id="scan-btn">Quick Generate</button>
+
+        <div id="scan-loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Analyzing all games...</p>
+        </div>
+
+        <div id="scan-results" class="scan-results hidden"></div>
+
+        <form id="predict-form">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="player_name">Player Name</label>
+                    <input type="text" id="player_name" name="player_name" placeholder="e.g., LeBron James">
+                </div>
+
+                <div class="form-group">
+                    <label for="team_name">Team Name</label>
+                    <div class="autocomplete-wrapper">
+                        <input type="text" id="team_name" name="team_name" placeholder="e.g., Lakers" autocomplete="off">
+                        <ul id="team-dropdown" class="autocomplete-dropdown hidden"></ul>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="vegas_line">Vegas Line</label>
+                    <input type="number" id="vegas_line" name="vegas_line" step="0.5" placeholder="e.g., 25.5" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="games">Recent Games</label>
+                    <input type="number" id="games" name="games" min="1" max="20" value="5" required>
+                </div>
+
+            </div>
+
+            <button type="submit" id="submit-btn">Run Projection</button>
+        </form>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Fetching data and running model...</p>
+        </div>
+
+        <div id="error-banner" class="error-banner hidden"></div>
+
+        <div id="results" class="results hidden">
+            <h2>Results for <span id="result-player"></span></h2>
+
+            <div class="results-grid">
+                <div id="recent-games-card" class="card">
+                    <h3>Recent Games</h3>
+                    <div id="recent-games-list" class="card-body"></div>
+                    <div class="stat-row">
+                        <span class="stat-label">Average</span>
+                        <span id="player-avg" class="stat-value"></span>
+                    </div>
+                </div>
+
+                <div id="lean-card" class="card hidden">
+                    <h3>Recommended Play</h3>
+                    <div id="lean-body" class="card-body"></div>
+                </div>
+
+                <div id="prediction-card" class="card card-prediction">
+                    <h3>Prediction</h3>
+                    <div class="card-body prediction-body">
+                        <span id="decision" class="decision"></span>
+                        <span id="confidence" class="confidence"></span>
+                    </div>
+                </div>
+
+                <div id="cover-rates-card" class="card">
+                    <h3>Cover Rates</h3>
+                    <div class="card-body">
+                        <div class="stat-row">
+                            <span class="stat-label">OVER</span>
+                            <span id="over-rate" class="stat-value over"></span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">UNDER</span>
+                            <span id="under-rate" class="stat-value under"></span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">PUSH</span>
+                            <span id="push-rate" class="stat-value"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="ticker-bar">
+        <div class="ticker-track" id="ticker-track"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

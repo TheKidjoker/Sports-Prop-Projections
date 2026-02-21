@@ -74,3 +74,33 @@ def get_slot_label(slot_type):
     elif slot_type == "vegas":
         return "VEGAS SLOT"
     return "UNKNOWN"
+
+
+# Day type mapping: public days vs vegas days
+PUBLIC_DAYS = {"monday", "wednesday", "friday"}
+VEGAS_DAYS = {"tuesday", "thursday", "saturday", "sunday"}
+
+
+def get_day_type(day_of_week):
+    """
+    Returns 'public' for Mon/Wed/Fri, 'vegas' for Tue/Thu/Sat/Sun.
+    """
+    day = day_of_week.lower()
+    if day in PUBLIC_DAYS:
+        return "public"
+    if day in VEGAS_DAYS:
+        return "vegas"
+    return "unknown"
+
+
+def first_game_slot_override(day_of_week):
+    """
+    First game of the day is opposite of day type.
+    Public day → first game is 'vegas'. Vegas day → first game is 'public'.
+    """
+    day_type = get_day_type(day_of_week)
+    if day_type == "public":
+        return "vegas"
+    if day_type == "vegas":
+        return "public"
+    return "unknown"

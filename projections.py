@@ -1,4 +1,4 @@
-def points_prediction(player_avg, vegas_line, slot_type=None):
+def points_prediction(player_avg, vegas_line, slot_type=None, line_confirmed=False, trell_confirmed=False):
     """
     Determines whether to lean Over, Under, or Pass based on
     player average vs Vegas line.
@@ -7,6 +7,8 @@ def points_prediction(player_avg, vegas_line, slot_type=None):
         player_avg: Player's average points
         vegas_line: Vegas points line
         slot_type: 'public', 'vegas', or None for no adjustment
+        line_confirmed: True if line movement confirms the slot type
+        trell_confirmed: True if Trell Rule applies (star player injury in vegas slot)
 
     Returns:
         (decision: str, confidence: float)
@@ -36,6 +38,14 @@ def points_prediction(player_avg, vegas_line, slot_type=None):
         # Shift borderline picks toward PASS when Vegas has the edge
         if confidence < 55 and decision != "PASS":
             decision = "PASS"
+
+    # Apply line movement confirmation boost
+    if line_confirmed:
+        confidence = min(confidence + 5, 100)
+
+    # Apply Trell Rule boost
+    if trell_confirmed:
+        confidence = min(confidence + 5, 100)
 
     return decision, confidence
 
