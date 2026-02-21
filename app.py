@@ -9,8 +9,10 @@ from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from game_scanner import scan_all_games
+import tracker
 
 app = Flask(__name__)
+tracker.init_db()
 
 
 def _get_games_with_transition(sport):
@@ -117,12 +119,20 @@ def api_scan():
             all_results = {}
             for s in ("nba", "nhl", "cfb", "nfl", "cbb"):
                 all_results[s] = scan_all_games(s)
+                try:
+                    tracker.save_predictions(all_results[s], s)
+                except Exception:
+                    pass
             return jsonify({"success": True, "all_sports": all_results})
 
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
         results = scan_all_games(sport)
+        try:
+            tracker.save_predictions(results, sport)
+        except Exception:
+            pass
         return jsonify({"success": True, "games": results})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -391,6 +401,33 @@ def predict():
 
         return jsonify(response_data)
 
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    """Returns aggregated prediction tracking stats."""
+    try:
+        sport = request.args.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        stats = tracker.get_dashboard_stats(sport)
+        return jsonify({"success": True, **stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/grade", methods=["POST"])
+def api_grade():
+    """Grades pending predictions by fetching final scores."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        result = tracker.grade_predictions(sport)
+        return jsonify({"success": True, **result})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

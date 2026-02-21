@@ -1256,6 +1256,286 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   Ledger Button (sidebar)
+   ========================================= */
+#ledger-btn {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    letter-spacing: 0.5px;
+}
+
+#ledger-btn:hover {
+    background: var(--accent-red-dim);
+    border-color: var(--accent-red);
+}
+
+/* =========================================
+   Dashboard Section
+   ========================================= */
+.dashboard-section {
+    margin-bottom: 1.5rem;
+}
+
+.dashboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.dashboard-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.dashboard-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dashboard-filter {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.6rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+
+.dashboard-filter:focus {
+    border-color: var(--accent-red);
+}
+
+.grade-btn {
+    padding: 0.45rem 0.85rem;
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.grade-btn:hover {
+    background: var(--accent-red-hover);
+}
+
+.grade-btn:disabled {
+    background: #2d1215;
+    color: #6b3a3d;
+    cursor: not-allowed;
+}
+
+/* =========================================
+   Dashboard Stat Cards
+   ========================================= */
+.dash-stat-cards {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.dash-stat-card {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    text-align: center;
+}
+
+.dash-stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+}
+
+.dash-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stat-green { color: var(--accent-green); }
+.stat-yellow { color: var(--accent-yellow); }
+.stat-red { color: var(--accent-red); }
+.stat-muted { color: var(--text-muted); }
+
+/* =========================================
+   Dashboard Breakdowns
+   ========================================= */
+.dash-breakdown {
+    margin-bottom: 1.25rem;
+}
+
+.dash-section-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.dash-breakdown-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.35rem;
+}
+
+.dash-breakdown-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 100px;
+}
+
+.dash-breakdown-record {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    min-width: 70px;
+    text-align: center;
+}
+
+.dash-breakdown-rate {
+    font-size: 0.85rem;
+    font-weight: 700;
+    min-width: 50px;
+    text-align: right;
+}
+
+/* =========================================
+   Dashboard Recent List
+   ========================================= */
+.dash-recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.dash-recent-item {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--border-primary);
+}
+
+.dash-recent-border-hit { border-left-color: var(--accent-green); }
+.dash-recent-border-miss { border-left-color: var(--accent-red); }
+.dash-recent-border-push { border-left-color: var(--accent-yellow); }
+.dash-recent-border-pending { border-left-color: var(--text-muted); }
+
+.dash-recent-top {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.3rem;
+}
+
+.dash-recent-sport {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    background: var(--accent-red-dim);
+    color: var(--accent-red);
+}
+
+.dash-recent-matchup {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.dash-recent-status {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+}
+
+.status-hit {
+    background: rgba(76, 175, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+
+.status-miss {
+    background: rgba(230, 57, 70, 0.1);
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+.status-push {
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--accent-yellow);
+    border: 1px solid rgba(255, 193, 7, 0.25);
+}
+
+.status-pending {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dash-recent-bottom {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.dash-recent-action {
+    font-size: 0.8rem;
+    color: var(--accent-red);
+    font-weight: 600;
+    flex: 1;
+}
+
+.dash-recent-score {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.dash-recent-pct {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* =========================================
    Hidden
    ========================================= */
 .hidden {
@@ -1315,5 +1595,28 @@ button[type="submit"]:disabled {
 
     .hero-sport-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .dash-stat-cards {
+        flex-direction: column;
+    }
+
+    .dash-stat-card {
+        min-width: unset;
+    }
+
+    .dash-recent-top {
+        flex-wrap: wrap;
+    }
+
+    .dash-recent-bottom {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.3rem;
     }
 }

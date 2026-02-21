@@ -657,6 +657,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "lean_team": lean_team,
         "action": action,
         "recommendation": recommendation,
+        "current_spread": current_spread,
     }
 
     # Include venue for NHL, CFB, CBB, and NFL

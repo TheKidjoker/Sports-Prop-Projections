@@ -508,6 +508,51 @@ def get_game_weather_espn(event_id, sport="nfl"):
         return None
 
 
+def get_game_final_score(event_id, sport="nba"):
+    """
+    Fetches final score from ESPN game summary.
+
+    Returns:
+        (home_score, away_score, is_final) tuple.
+        (None, None, False) on failure or if game not final.
+    """
+    try:
+        url = _espn_url(sport, "summary")
+        response = requests.get(url, params={"event": event_id}, timeout=10)
+        if response.status_code != 200:
+            return None, None, False
+
+        data = response.json()
+        header = data.get("header", {})
+        competitions = header.get("competitions", [])
+        if not competitions:
+            return None, None, False
+
+        comp = competitions[0]
+        status_name = comp.get("status", {}).get("type", {}).get("name", "")
+        is_final = status_name == "STATUS_FINAL"
+
+        if not is_final:
+            return None, None, False
+
+        competitors = comp.get("competitors", [])
+        home_score = None
+        away_score = None
+        for c in competitors:
+            if c.get("homeAway") == "home":
+                home_score = int(c.get("score", 0))
+            else:
+                away_score = int(c.get("score", 0))
+
+        if home_score is not None and away_score is not None:
+            return home_score, away_score, True
+
+        return None, None, False
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None, None, False
+
+
 def get_game_weather_openweather(city, state):
     """
     Fallback weather fetch using OpenWeatherMap free tier.

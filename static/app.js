@@ -11,11 +11,17 @@ document.addEventListener("DOMContentLoaded", function () {
     var teamDropdown = document.getElementById("team-dropdown");
 
     var welcomeHero = document.getElementById("welcome-hero");
+    var dashboardSection = document.getElementById("dashboard-section");
+    var ledgerBtn = document.getElementById("ledger-btn");
+    var gradeBtn = document.getElementById("grade-btn");
+    var dashboardSportFilter = document.getElementById("dashboard-sport-filter");
+    var dashboardLoading = document.getElementById("dashboard-loading");
 
     var todaysGames = [];
     var currentSport = "nba";
     var currentSlate = { showing_tomorrow: false, game_count: 0 };
     var scanResultsVisible = false;
+    var dashboardVisible = false;
 
     // Sidebar toggle
     var navSportBadge = document.getElementById("nav-sport-badge");
@@ -73,6 +79,8 @@ document.addEventListener("DOMContentLoaded", function () {
             scanResultsVisible = false;
             results.classList.add("hidden");
             errorBanner.classList.add("hidden");
+            dashboardSection.classList.add("hidden");
+            dashboardVisible = false;
             welcomeHero.classList.remove("hidden");
 
             // Hide manual form when ALL is selected (it's sport-specific)
@@ -178,6 +186,8 @@ document.addEventListener("DOMContentLoaded", function () {
         scanBtn.disabled = true;
         scanLoading.classList.remove("hidden");
         scanResults.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
 
         fetch("/api/scan", {
             method: "POST",
@@ -216,6 +226,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
         results.classList.add("hidden");
         errorBanner.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
 
         var payload = {
             player_name: document.getElementById("player_name").value,
@@ -681,5 +693,179 @@ document.addEventListener("DOMContentLoaded", function () {
         var num = parseFloat(val);
         if (num > 0) return "+" + num.toFixed(1);
         return num.toFixed(1);
+    }
+
+    // ─── Dashboard (The Ledger) ─────────────────────────────────────
+    ledgerBtn.addEventListener("click", function () {
+        welcomeHero.classList.add("hidden");
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        dashboardSection.classList.remove("hidden");
+        dashboardVisible = true;
+        fetchDashboard();
+
+        if (window.innerWidth <= 768) closeSidebar();
+    });
+
+    gradeBtn.addEventListener("click", function () {
+        gradeBtn.disabled = true;
+        gradeBtn.textContent = "Grading...";
+
+        var body = {};
+        var filterVal = dashboardSportFilter.value;
+        if (filterVal) body.sport = filterVal;
+
+        fetch("/api/grade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            gradeBtn.disabled = false;
+            gradeBtn.textContent = "Grade Pending";
+            if (data.success) {
+                fetchDashboard();
+            }
+        })
+        .catch(function () {
+            gradeBtn.disabled = false;
+            gradeBtn.textContent = "Grade Pending";
+        });
+    });
+
+    dashboardSportFilter.addEventListener("change", function () {
+        fetchDashboard();
+    });
+
+    function fetchDashboard() {
+        dashboardLoading.classList.remove("hidden");
+        document.getElementById("dashboard-stats").innerHTML = "";
+        document.getElementById("dashboard-breakdowns").innerHTML = "";
+        document.getElementById("dashboard-recent").innerHTML = "";
+
+        var sportParam = dashboardSportFilter.value;
+        var url = "/api/dashboard";
+        if (sportParam) url += "?sport=" + sportParam;
+
+        fetch(url)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                dashboardLoading.classList.add("hidden");
+                if (data.success) {
+                    renderDashboard(data);
+                }
+            })
+            .catch(function () {
+                dashboardLoading.classList.add("hidden");
+            });
+    }
+
+    function renderDashboard(data) {
+        var o = data.overall;
+
+        // Stat cards
+        var rateClass = o.win_rate >= 55 ? "stat-green" : o.win_rate >= 45 ? "stat-yellow" : "stat-red";
+        var statsHtml = '<div class="dash-stat-cards">';
+        statsHtml += '<div class="dash-stat-card">';
+        statsHtml += '<div class="dash-stat-label">Record</div>';
+        statsHtml += '<div class="dash-stat-value">' + o.wins + '-' + o.losses + (o.pushes > 0 ? '-' + o.pushes : '') + '</div>';
+        statsHtml += '</div>';
+        statsHtml += '<div class="dash-stat-card">';
+        statsHtml += '<div class="dash-stat-label">Win Rate</div>';
+        statsHtml += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%</div>';
+        statsHtml += '</div>';
+        statsHtml += '<div class="dash-stat-card">';
+        statsHtml += '<div class="dash-stat-label">Total Picks</div>';
+        statsHtml += '<div class="dash-stat-value">' + o.total + '</div>';
+        statsHtml += '</div>';
+        statsHtml += '<div class="dash-stat-card">';
+        statsHtml += '<div class="dash-stat-label">Pending</div>';
+        statsHtml += '<div class="dash-stat-value stat-muted">' + o.pending + '</div>';
+        statsHtml += '</div>';
+        statsHtml += '</div>';
+        document.getElementById("dashboard-stats").innerHTML = statsHtml;
+
+        // Breakdowns
+        var breakHtml = '';
+
+        if (data.by_sport && data.by_sport.length > 0) {
+            breakHtml += '<div class="dash-breakdown">';
+            breakHtml += '<h3 class="dash-section-title">By Sport</h3>';
+            data.by_sport.forEach(function (s) {
+                breakHtml += buildBreakdownRow(s.sport.toUpperCase(), s);
+            });
+            breakHtml += '</div>';
+        }
+
+        if (data.by_slot && data.by_slot.length > 0) {
+            breakHtml += '<div class="dash-breakdown">';
+            breakHtml += '<h3 class="dash-section-title">By Slot Type</h3>';
+            data.by_slot.forEach(function (s) {
+                breakHtml += buildBreakdownRow(s.slot_type.toUpperCase(), s);
+            });
+            breakHtml += '</div>';
+        }
+
+        if (data.by_recommendation && data.by_recommendation.length > 0) {
+            breakHtml += '<div class="dash-breakdown">';
+            breakHtml += '<h3 class="dash-section-title">By Recommendation</h3>';
+            data.by_recommendation.forEach(function (s) {
+                breakHtml += buildBreakdownRow(s.recommendation, s);
+            });
+            breakHtml += '</div>';
+        }
+
+        document.getElementById("dashboard-breakdowns").innerHTML = breakHtml;
+
+        // Recent predictions
+        var recentHtml = '';
+        if (data.recent && data.recent.length > 0) {
+            recentHtml += '<h3 class="dash-section-title">Recent Predictions</h3>';
+            recentHtml += '<div class="dash-recent-list">';
+            data.recent.forEach(function (p) {
+                var statusClass = "status-pending";
+                if (p.result === "HIT") statusClass = "status-hit";
+                else if (p.result === "MISS") statusClass = "status-miss";
+                else if (p.result === "PUSH") statusClass = "status-push";
+
+                var borderClass = "dash-recent-border-pending";
+                if (p.result === "HIT") borderClass = "dash-recent-border-hit";
+                else if (p.result === "MISS") borderClass = "dash-recent-border-miss";
+                else if (p.result === "PUSH") borderClass = "dash-recent-border-push";
+
+                recentHtml += '<div class="dash-recent-item ' + borderClass + '">';
+                recentHtml += '<div class="dash-recent-top">';
+                recentHtml += '<span class="dash-recent-sport">' + p.sport.toUpperCase() + '</span>';
+                recentHtml += '<span class="dash-recent-matchup">' + p.away_team + ' vs ' + p.home_team + '</span>';
+                recentHtml += '<span class="dash-recent-status ' + statusClass + '">' + p.result + '</span>';
+                recentHtml += '</div>';
+                recentHtml += '<div class="dash-recent-bottom">';
+                recentHtml += '<span class="dash-recent-action">' + (p.action || '') + '</span>';
+                if (p.home_score !== null && p.away_score !== null) {
+                    recentHtml += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
+                }
+                recentHtml += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
+                recentHtml += '</div>';
+                recentHtml += '</div>';
+            });
+            recentHtml += '</div>';
+        }
+        document.getElementById("dashboard-recent").innerHTML = recentHtml;
+    }
+
+    function buildBreakdownRow(label, stats) {
+        var rateClass = stats.win_rate >= 55 ? "stat-green" : stats.win_rate >= 45 ? "stat-yellow" : "stat-red";
+        var decided = stats.wins + stats.losses;
+        var html = '<div class="dash-breakdown-row">';
+        html += '<span class="dash-breakdown-label">' + label + '</span>';
+        html += '<span class="dash-breakdown-record">' + stats.wins + '-' + stats.losses;
+        if (stats.pushes > 0) html += '-' + stats.pushes;
+        html += '</span>';
+        html += '<span class="dash-breakdown-rate ' + rateClass + '">' + stats.win_rate + '%</span>';
+        html += '</div>';
+        return html;
     }
 });
