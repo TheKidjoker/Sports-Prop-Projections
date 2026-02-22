@@ -343,14 +343,19 @@ def get_player_season_averages(athlete_id, sport="nba"):
     """
     Fetches a player's season averages from ESPN.
 
+    Handles two API response formats:
+    - Legacy: categories[].stats[] = [{name, value}, ...]
+    - Current: categories[].names[] + statistics[].stats[] (positional arrays)
+
     Args:
         athlete_id: ESPN athlete ID
-        sport: "nba" or "nhl"
+        sport: "nba", "nhl", "nfl", "cbb"
 
     Returns:
         Dict with stat keys or None on failure.
-        NBA: {ppg, rpg, apg, mpg}
+        NBA/CBB: {ppg, rpg, apg, mpg}
         NHL: {ptspg, gpg, apg, toi}
+        NFL: {pass_ypg, qbr, rush_ypg, rec_ypg, total_td}
     """
     try:
         url = _espn_player_stats_url(sport, athlete_id)
@@ -359,71 +364,97 @@ def get_player_season_averages(athlete_id, sport="nba"):
             return None
 
         categories = data.get("categories", [])
-
         stats = {}
 
-        if sport == "nfl":
-            for category in categories:
-                for stat in category.get("stats", []):
-                    name = stat.get("name", "")
-                    value = stat.get("value")
-                    if value is None:
-                        continue
-                    if name == "passingYardsPerGame":
-                        stats["pass_ypg"] = float(value)
-                    elif name == "QBRating" or name == "QBR":
-                        stats["qbr"] = float(value)
-                    elif name == "rushingYardsPerGame":
-                        stats["rush_ypg"] = float(value)
-                    elif name == "receivingYardsPerGame":
-                        stats["rec_ypg"] = float(value)
-                    elif name == "totalTouchdowns":
-                        stats["total_td"] = float(value)
-        elif sport == "nhl":
-            for category in categories:
-                for stat in category.get("stats", []):
-                    name = stat.get("name", "")
-                    value = stat.get("value")
-                    if value is None:
-                        continue
-                    if name == "avgPoints":
-                        stats["ptspg"] = float(value)
-                    elif name == "avgGoals":
-                        stats["gpg"] = float(value)
-                    elif name == "avgAssists":
-                        stats["apg"] = float(value)
-                    elif name == "avgTimeOnIce":
-                        stats["toi"] = float(value)
-        else:
-            for category in categories:
-                if category.get("name") != "offense":
-                    continue
-                for stat in category.get("stats", []):
-                    name = stat.get("name", "")
-                    value = stat.get("value")
-                    if value is None:
-                        continue
-                    if name == "avgPoints":
-                        stats["ppg"] = float(value)
-                    elif name == "avgRebounds":
-                        stats["rpg"] = float(value)
-                    elif name == "avgAssists":
-                        stats["apg"] = float(value)
-                    elif name == "avgMinutes":
-                        stats["mpg"] = float(value)
+        # Try the positional-array format first (current ESPN API)
+        for category in categories:
+            cat_name = category.get("name", "")
+            names = category.get("names", [])
+            statistics = category.get("statistics", [])
 
-        # Check for primary stat
-        if sport == "nfl" and (stats.get("pass_ypg") is not None or stats.get("rush_ypg") is not None):
-            return stats
-        elif sport == "nhl" and stats.get("ptspg") is not None:
-            return stats
-        elif sport not in ("nhl", "nfl") and stats.get("ppg") is not None:
-            return stats
+            if names and statistics:
+                # Find the most recent season (last entry)
+                latest = statistics[-1] if statistics else None
+                if latest:
+                    vals = latest.get("stats", [])
+                    # Build name->value map
+                    for i, stat_name in enumerate(names):
+                        if i < len(vals):
+                            try:
+                                val = float(vals[i]) if vals[i] and "-" not in str(vals[i]) else None
+                            except (ValueError, TypeError):
+                                val = None
+                            if val is not None:
+                                stats[stat_name] = val
+
+        # If positional format yielded results, map to our keys
+        if stats:
+            return _map_espn_stat_names(stats, sport)
+
+        # Fallback: legacy dict format — categories[].stats[] = [{name, value}]
+        stats = {}
+        for category in categories:
+            for stat in category.get("stats", []):
+                if not isinstance(stat, dict):
+                    continue
+                name = stat.get("name", "")
+                value = stat.get("value")
+                if value is not None:
+                    stats[name] = float(value)
+
+        if stats:
+            return _map_espn_stat_names(stats, sport)
 
         return None
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None
+
+
+def _map_espn_stat_names(raw_stats, sport):
+    """Map ESPN stat names to our internal keys."""
+    result = {}
+
+    if sport == "nfl":
+        mappings = {
+            "passingYardsPerGame": "pass_ypg",
+            "QBRating": "qbr", "QBR": "qbr",
+            "rushingYardsPerGame": "rush_ypg",
+            "receivingYardsPerGame": "rec_ypg",
+            "totalTouchdowns": "total_td",
+        }
+        for espn_name, our_key in mappings.items():
+            if espn_name in raw_stats:
+                result[our_key] = raw_stats[espn_name]
+        if result.get("pass_ypg") is not None or result.get("rush_ypg") is not None:
+            return result
+    elif sport == "nhl":
+        mappings = {
+            "avgPoints": "ptspg",
+            "avgGoals": "gpg",
+            "avgAssists": "apg",
+            "avgTimeOnIce": "toi",
+        }
+        for espn_name, our_key in mappings.items():
+            if espn_name in raw_stats:
+                result[our_key] = raw_stats[espn_name]
+        if result.get("ptspg") is not None:
+            return result
+    else:
+        # NBA, CBB
+        mappings = {
+            "avgPoints": "ppg",
+            "avgRebounds": "rpg",
+            "avgAssists": "apg",
+            "avgMinutes": "mpg",
+        }
+        for espn_name, our_key in mappings.items():
+            if espn_name in raw_stats:
+                result[our_key] = raw_stats[espn_name]
+        if result.get("ppg") is not None:
+            return result
+
+    return None
 
 
 def get_game_overunder(event_id, sport="nfl"):
@@ -799,6 +830,222 @@ def get_previous_matchup(team_id, opponent_name, sport="nba"):
         return None
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None
+
+
+def get_team_roster_leaders(team_id, sport="nba", limit=3):
+    """
+    Fetches top players by PPG from ESPN team endpoint + individual player stats.
+    Gets the roster, then fetches season averages for each player to find leaders.
+
+    Returns:
+        List of dicts: [{athlete_id, name, ppg, rpg, apg, mpg}, ...]
+        or empty list on failure.
+    """
+    try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams/{team_id}"
+        )
+        data = _cached_request(url, params={"enable": "roster"}, timeout=10)
+        if data is None:
+            return []
+
+        team_data = data.get("team", data)
+        athletes = team_data.get("athletes", [])
+
+        if not athletes:
+            return []
+
+        # Filter out injured-OUT players, collect IDs for stat lookup
+        candidates = []
+        for athlete in athletes:
+            a_id = athlete.get("id")
+            name = athlete.get("displayName") or athlete.get("fullName", "")
+            if not a_id or not name:
+                continue
+
+            injuries = athlete.get("injuries", [])
+            if injuries:
+                status = injuries[0].get("status", "")
+                if status.lower() == "out":
+                    continue
+
+            candidates.append({"athlete_id": a_id, "name": name})
+
+        # Fetch season averages for each candidate (cached, fast)
+        # Limit to first 8 to avoid excessive API calls
+        leaders = []
+        for cand in candidates[:8]:
+            stats = get_player_season_averages(cand["athlete_id"], sport)
+            if stats and stats.get("ppg", 0) > 0:
+                leaders.append({
+                    "athlete_id": cand["athlete_id"],
+                    "name": cand["name"],
+                    "ppg": stats.get("ppg", 0),
+                    "rpg": stats.get("rpg", 0),
+                    "apg": stats.get("apg", 0),
+                    "mpg": stats.get("mpg", 0),
+                })
+
+        leaders.sort(key=lambda x: x["ppg"], reverse=True)
+        return leaders[:limit]
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return []
+
+
+def get_team_defensive_stats(team_id, sport="nba"):
+    """
+    Fetches points allowed per game from ESPN team record (avgPointsAgainst).
+
+    Returns:
+        dict {"pts_allowed_per_game": float} or None
+    """
+    try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams/{team_id}"
+        )
+        data = _cached_request(url, timeout=10)
+        if data is None:
+            return None
+
+        team_data = data.get("team", data)
+        record = team_data.get("record", {})
+        items = record.get("items", [])
+
+        for item in items:
+            if item.get("type") == "total":
+                for stat in item.get("stats", []):
+                    if isinstance(stat, dict):
+                        name = stat.get("name", "")
+                        if name == "avgPointsAgainst":
+                            return {"pts_allowed_per_game": float(stat.get("value", 0))}
+                    elif isinstance(stat, str) and stat == "avgPointsAgainst":
+                        # Some responses use flat key-value in stats list
+                        continue
+
+                # Also check if avgPointsAgainst is a direct stat key
+                stats_dict = {s.get("name"): s.get("value") for s in item.get("stats", [])
+                              if isinstance(s, dict)}
+                if "avgPointsAgainst" in stats_dict:
+                    return {"pts_allowed_per_game": float(stats_dict["avgPointsAgainst"])}
+
+        return None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def get_player_game_log(player_name, count=7, sport="nba"):
+    """
+    Fetches recent game log with full stat lines via balldontlie.io.
+    NBA only — returns None for other sports.
+
+    Returns:
+        List of dicts: [{pts, reb, ast, min, date}, ...] or None
+    """
+    if sport != "nba":
+        return None
+
+    player_id = get_player_id(player_name)
+    if not player_id:
+        return None
+
+    try:
+        url = f"{BASE_URL}/stats"
+        data = _cached_request(url, params={
+            "player_ids[]": player_id,
+            "per_page": count,
+            "sort": "-game.date",
+        }, timeout=10)
+
+        if data is None:
+            return None
+
+        games = []
+        for game in data.get("data", []):
+            min_str = game.get("min", "0")
+            if not min_str or min_str == "00":
+                continue
+
+            # Parse minutes from "35:42" or "35" format
+            try:
+                if ":" in str(min_str):
+                    minutes = int(str(min_str).split(":")[0])
+                else:
+                    minutes = int(min_str)
+            except (ValueError, TypeError):
+                minutes = 0
+
+            game_date = ""
+            game_obj = game.get("game", {})
+            if game_obj:
+                game_date = game_obj.get("date", "")
+
+            games.append({
+                "pts": game.get("pts", 0),
+                "reb": game.get("reb", 0),
+                "ast": game.get("ast", 0),
+                "min": minutes,
+                "date": game_date,
+            })
+
+        return games if games else None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def get_player_props_odds(sport="nba"):
+    """
+    Fetches player points props from The-Odds-API.
+    Called once per scan (like get_odds_comparison).
+
+    Returns:
+        dict: {normalized_name: {"points": line_float}}
+        Empty dict if no API key.
+    """
+    api_key = os.environ.get("THE_ODDS_API_KEY")
+    if not api_key:
+        return {}
+
+    odds_sport = ODDS_API_SPORT_MAP.get(sport)
+    if not odds_sport:
+        return {}
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "player_points",
+            "oddsFormat": "american",
+        }
+        data = _cached_request(url, params=params, timeout=15)
+        if data is None:
+            return {}
+
+        props = {}
+        for game in data:
+            for bookmaker in game.get("bookmakers", []):
+                for market in bookmaker.get("markets", []):
+                    if market.get("key") != "player_points":
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("description", "")
+                        point = outcome.get("point")
+                        if name and point is not None:
+                            # Normalize name: lowercase, strip
+                            norm = name.strip().lower()
+                            if norm not in props:
+                                props[norm] = {"points": float(point)}
+        return props
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return {}
 
 
 def get_game_weather_openweather(city, state):

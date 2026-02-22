@@ -1853,6 +1853,171 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   PRISM Player Props
+   ========================================= */
+.scan-prism-section {
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 0.6rem;
+    padding-top: 0.5rem;
+}
+
+.prism-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    padding: 0.35rem 0;
+    user-select: none;
+}
+
+.prism-header:hover .prism-label {
+    color: var(--accent-purple);
+}
+
+.prism-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #ce93d8;
+    transition: color 0.2s;
+}
+
+.prism-count {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--accent-purple);
+    background: rgba(187, 134, 252, 0.12);
+    padding: 0.1rem 0.4rem;
+    border-radius: 10px;
+    margin-left: 0.4rem;
+}
+
+.prism-chevron {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.prism-expanded .prism-chevron {
+    transform: rotate(180deg);
+}
+
+.prism-body {
+    display: none;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding-top: 0.4rem;
+}
+
+.prism-expanded .prism-body {
+    display: flex;
+}
+
+.prism-prop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.prism-prop-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 140px;
+}
+
+.prism-player-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.prism-stat-line {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.prism-prop-signal {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.prism-signal-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.prism-strong-over {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.prism-strong-under {
+    background: rgba(230, 57, 70, 0.15);
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.3);
+}
+
+.prism-lean-over {
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--accent-yellow);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+.prism-lean-under {
+    background: rgba(255, 152, 0, 0.1);
+    color: var(--accent-orange);
+    border: 1px solid rgba(255, 152, 0, 0.25);
+}
+
+.prism-skip {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.prism-confidence {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.prism-streak-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #ce93d8;
+    background: rgba(187, 134, 252, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+}
+
+.prism-minutes-warn {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--accent-orange);
+    background: rgba(255, 152, 0, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+}
+
+/* =========================================
    Alternative Picks
    ========================================= */
 .alt-picks-section {

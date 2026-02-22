@@ -638,6 +638,44 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
+        // PRISM Player Props (collapsible)
+        if (g.player_props && g.player_props.length > 0) {
+            html += '<div class="scan-prism-section" id="prism-' + g.event_id + '">';
+            html += '<div class="prism-header" onclick="(function(el){el.closest(\'.scan-prism-section\').classList.toggle(\'prism-expanded\')})(this)">';
+            html += '<span><span class="prism-label">PRISM PLAYER PROPS</span>';
+            html += '<span class="prism-count">' + g.player_props.length + '</span></span>';
+            html += '<span class="prism-chevron">&#9660;</span>';
+            html += '</div>';
+            html += '<div class="prism-body">';
+
+            g.player_props.forEach(function (prop) {
+                var signalClass = "prism-skip";
+                if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
+                else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
+                else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
+                else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+
+                html += '<div class="prism-prop">';
+                html += '<div class="prism-prop-info">';
+                html += '<span class="prism-player-name">' + prop.player_name + '</span>';
+                html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
+                html += '</div>';
+                html += '<div class="prism-prop-signal">';
+                html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
+                html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
+                if (prop.streak) {
+                    html += '<span class="prism-streak-badge">' + prop.streak.count + '/5 ' + prop.streak.direction + '</span>';
+                }
+                if (prop.minutes_unstable) {
+                    html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
+                }
+                html += '</div>';
+                html += '</div>';
+            });
+
+            html += '</div></div>';
+        }
+
         // NFL: Skip badge
         if (g.skip) {
             html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';

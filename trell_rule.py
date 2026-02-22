@@ -144,6 +144,7 @@ def evaluate_trell_rule(injured_stars, slot_type):
             result["applies"] = True
             result["boost"] = TRELL_BOOST
             result["star_out"] = star["player_name"]
+            result["star_team"] = star.get("team")
             result["reason"] = star.get("star_reason", "Star player out")
             return result
 

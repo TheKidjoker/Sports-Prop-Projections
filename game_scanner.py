@@ -7,11 +7,14 @@ from api_client import (
     get_game_weather_openweather, is_game_stale,
     check_back_to_back, get_previous_matchup,
     get_odds_comparison,
+    get_team_roster_leaders, get_team_defensive_stats,
+    get_player_game_log, get_player_props_odds,
 )
 import tracker
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
+from prism import calculate_prism_projection, get_league_defensive_average
 
 
 # ─── NFL INDOOR STADIUMS ────────────────────────────────────────────────────
@@ -645,6 +648,14 @@ def scan_all_games(sport="nba", date_str=None):
     except Exception:
         odds_data = []
 
+    # Fetch player props odds once for PRISM (NBA only, graceful)
+    player_props_lines = {}
+    if sport == "nba":
+        try:
+            player_props_lines = get_player_props_odds(sport)
+        except Exception:
+            player_props_lines = {}
+
     # Sort by game_date to determine first game / game index
     sorted_games = sorted(games, key=lambda g: g.get("game_date", ""))
 
@@ -689,6 +700,7 @@ def scan_all_games(sport="nba", date_str=None):
             sport=sport, total_games_on_slate=total_games, game_index=i,
             is_last_sunday_game=is_last_sunday,
             odds_data=odds_data,
+            player_props_lines=player_props_lines,
         )
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -701,7 +713,8 @@ def scan_all_games(sport="nba", date_str=None):
 
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
-                          is_last_sunday_game=False, odds_data=None):
+                          is_last_sunday_game=False, odds_data=None,
+                          player_props_lines=None):
     """
     Returns analysis dict for one game.
     """
@@ -836,6 +849,8 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                 "star_reason": star_reason,
                 "is_recent": recent,
                 "status": injury["status"],
+                "team": team_name,
+                "ppg": player_stats.get("ppg", 0) if player_stats else 0,
             })
 
     trell_result = evaluate_trell_rule(injured_stars, slot_type)
@@ -882,6 +897,13 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     # Determine which team to lean towards (needed by new factors below)
     lean_team = _determine_lean(slot_type, home_team, away_team, current_spread)
 
+    # Trell Rule lean override: when a star is freshly injured, the public
+    # overreacts — lean TOWARD the injured player's team (value on the spread)
+    if trell_result.get("applies"):
+        trell_team = trell_result.get("star_team")
+        if trell_team:
+            lean_team = trell_team
+
     # ── New Factor: Back-to-Back / Rest Days (NBA & NHL only) ──
     home_team_id = game.get("home_team_id")
     away_team_id = game.get("away_team_id")
@@ -910,6 +932,16 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     h2h_result = _analyze_head_to_head(
         home_team_id, lean_team, home_team, away_team, sport=sport,
     )
+
+    # ── PRISM Player Props (NBA only) ──
+    player_props = []
+    if sport == "nba" and home_team_id and away_team_id:
+        player_props = _run_prism_analysis(
+            home_team_id, away_team_id, home_team, away_team,
+            event_id, game_date_str, current_spread, slot_type,
+            injured_stars, player_props_lines or {},
+            sport,
+        )
 
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
@@ -980,6 +1012,10 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "current_spread": current_spread,
     }
 
+    # Include PRISM player props (NBA)
+    if player_props:
+        result["player_props"] = player_props
+
     # Include venue for NHL, CFB, CBB, and NFL
     if sport in ("nhl", "cfb", "cbb", "nfl"):
         result["venue_name"] = game.get("venue_name", "")
@@ -1020,6 +1056,125 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         result["head_to_head"] = h2h_result
 
     return result
+
+
+def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
+                        event_id, game_date_str, current_spread, slot_type,
+                        injured_stars, player_props_lines, sport):
+    """
+    Runs PRISM player prop analysis for a single game.
+    Gets roster leaders, game logs, defensive stats, and generates projections.
+
+    Returns:
+        List of prop signal dicts sorted by abs(edge) descending,
+        filtered to non-PASS signals only.
+    """
+    results = []
+
+    # Get roster leaders for both teams (2 per team)
+    home_leaders = get_team_roster_leaders(home_team_id, sport=sport, limit=2)
+    away_leaders = get_team_roster_leaders(away_team_id, sport=sport, limit=2)
+
+    # Tag each leader with their team info
+    for p in home_leaders:
+        p["_team"] = home_team
+        p["_is_home"] = True
+        p["_opp_team_id"] = away_team_id
+    for p in away_leaders:
+        p["_team"] = away_team
+        p["_is_home"] = False
+        p["_opp_team_id"] = home_team_id
+
+    all_players = home_leaders + away_leaders
+
+    # Filter out injured-OUT players
+    out_names = {s["player_name"].lower() for s in injured_stars
+                 if s.get("status", "").lower() == "out"}
+    all_players = [p for p in all_players if p["name"].lower() not in out_names]
+
+    if not all_players:
+        return results
+
+    # Get game total for pace factor
+    game_total = get_game_overunder(event_id, sport=sport)
+
+    # Check B2B for each team
+    home_b2b = check_back_to_back(home_team_id, game_date_str, sport)
+    away_b2b = check_back_to_back(away_team_id, game_date_str, sport)
+
+    league_avg_def = get_league_defensive_average(sport)
+
+    for player in all_players:
+        player_name = player["name"]
+        season_ppg = player.get("ppg", 0)
+
+        if season_ppg <= 0:
+            continue
+
+        # Get opponent defensive stats
+        opp_def = get_team_defensive_stats(player["_opp_team_id"], sport=sport)
+        opp_def_rating = opp_def.get("pts_allowed_per_game") if opp_def else None
+
+        # Get game log from balldontlie
+        recent_games = get_player_game_log(player_name, count=7, sport=sport)
+
+        # B2B status for this player's team
+        is_b2b = home_b2b if player["_is_home"] else away_b2b
+
+        # Injured teammates on this player's team
+        team_name = player["_team"]
+        injured_teammates = [
+            {"name": s["player_name"], "ppg": s.get("ppg", 0)}
+            for s in injured_stars
+            if s.get("team") == team_name
+            and s.get("status", "").lower() == "out"
+            and s.get("ppg", 0) > 0
+        ]
+
+        # Get posted line from odds (normalized name match)
+        posted_line = None
+        norm_name = player_name.strip().lower()
+        if norm_name in player_props_lines:
+            posted_line = player_props_lines[norm_name].get("points")
+
+        proj = calculate_prism_projection(
+            season_avg=season_ppg,
+            recent_games=recent_games or [],
+            stat_type="pts",
+            opponent_def_rating=opp_def_rating,
+            league_avg_def=league_avg_def,
+            game_total=game_total,
+            is_b2b=is_b2b,
+            is_home=player["_is_home"],
+            spread=current_spread,
+            injured_teammates=injured_teammates,
+            posted_line=posted_line,
+            slot_type=slot_type,
+            sport=sport,
+        )
+
+        if proj is None:
+            continue
+
+        if proj["signal"] == "PASS":
+            continue
+
+        results.append({
+            "player_name": player_name,
+            "team": team_name,
+            "stat_type": "PTS",
+            "projection": proj["projection"],
+            "line": proj["line"],
+            "edge": proj["edge"],
+            "signal": proj["signal"],
+            "confidence": proj["confidence"],
+            "streak": proj["streak"],
+            "minutes_unstable": proj["minutes_unstable"],
+        })
+
+    # Sort by abs(edge) descending
+    results.sort(key=lambda x: abs(x["edge"]), reverse=True)
+    return results
 
 
 def _fmt_spread(val):
