@@ -731,6 +731,14 @@ button[type="submit"]:disabled {
     margin-bottom: 0.4rem;
 }
 
+.scan-date-label {
+    color: var(--accent-red);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+}
+
 .scan-venue {
     color: var(--text-secondary);
     font-size: 0.78rem;

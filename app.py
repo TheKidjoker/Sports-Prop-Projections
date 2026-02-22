@@ -18,42 +18,42 @@ tracker.init_db()
 
 def _get_games_with_transition(sport):
     """
-    Fetch today's games. If all are stale/final (or 0 games), fetch tomorrow's.
-    Filter out stale/final games from today's slate.
+    Fetch today's active games AND tomorrow's games combined.
+    Tags each game with a date_label ("Today" or "Tomorrow").
 
     Returns:
-        (games_list, slate_info) where slate_info = {showing_tomorrow, game_count}
+        (games_list, slate_info) where slate_info = {game_count, has_today, has_tomorrow}
     """
-    games = get_todays_games(sport)
-    showing_tomorrow = False
+    now_utc = datetime.now(timezone.utc)
+    tomorrow_str = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
 
-    # Check if all today's games are done
-    all_done = (
-        not games
-        or all(
-            is_game_stale(g.get("game_date", ""))
-            or g.get("game_status") == "STATUS_FINAL"
-            for g in games
-        )
-    )
+    # Fetch today's + tomorrow's scoreboards in parallel
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        today_future = pool.submit(get_todays_games, sport)
+        tomorrow_future = pool.submit(get_todays_games, sport, tomorrow_str)
+        today_games = today_future.result()
+        tomorrow_games = tomorrow_future.result()
 
-    if all_done:
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
-        tomorrow_games = get_todays_games(sport, date_str=tomorrow)
-        if tomorrow_games:
-            games = tomorrow_games
-            showing_tomorrow = True
+    # Filter out stale/final from today
+    active_today = [
+        g for g in today_games
+        if not is_game_stale(g.get("game_date", ""))
+        and g.get("game_status") != "STATUS_FINAL"
+    ]
+    for g in active_today:
+        g["date_label"] = "Today"
 
-    # Filter out stale/final from today's slate (skip filter for tomorrow — all future)
-    if not showing_tomorrow:
-        games = [
-            g for g in games
-            if not is_game_stale(g.get("game_date", ""))
-            and g.get("game_status") != "STATUS_FINAL"
-        ]
+    for g in tomorrow_games:
+        g["date_label"] = "Tomorrow"
 
-    slate = {"showing_tomorrow": showing_tomorrow, "game_count": len(games)}
-    return games, slate
+    combined = active_today + tomorrow_games
+
+    slate = {
+        "game_count": len(combined),
+        "has_today": len(active_today) > 0,
+        "has_tomorrow": len(tomorrow_games) > 0,
+    }
+    return combined, slate
 
 
 @app.route("/")
@@ -90,6 +90,7 @@ def api_games():
                 "away_team": game["away_team"],
                 "game_time_est": game_time_est,
                 "event_id": game["event_id"],
+                "date_label": game.get("date_label", ""),
             }
 
             if sport in ("nhl", "cfb", "cbb", "nfl"):

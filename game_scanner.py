@@ -621,21 +621,28 @@ def scan_all_games(sport="nba", date_str=None):
     Returns:
         List of analysis dicts sorted by confirmation_score descending.
     """
-    games = get_todays_games(sport, date_str=date_str)
+    if date_str:
+        # Specific date requested — use only that date
+        games = get_todays_games(sport, date_str=date_str)
+        for g in games:
+            g["date_label"] = ""
+    else:
+        # Fetch today's + tomorrow's scoreboards in parallel
+        now_utc = datetime.now(timezone.utc)
+        tomorrow_str = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
 
-    # Next-day fallback: if no games or all stale/final, try tomorrow
-    if not date_str:
-        all_done = (
-            not games
-            or all(
-                is_game_stale(g.get("game_date", ""))
-                or g.get("game_status") == "STATUS_FINAL"
-                for g in games
-            )
-        )
-        if all_done:
-            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
-            games = get_todays_games(sport, date_str=tomorrow)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            today_future = pool.submit(get_todays_games, sport)
+            tomorrow_future = pool.submit(get_todays_games, sport, tomorrow_str)
+            today_games = today_future.result()
+            tomorrow_games = tomorrow_future.result()
+
+        for g in today_games:
+            g["date_label"] = "Today"
+        for g in tomorrow_games:
+            g["date_label"] = "Tomorrow"
+
+        games = today_games + tomorrow_games
 
     if not games:
         return []
@@ -695,15 +702,17 @@ def scan_all_games(sport="nba", date_str=None):
         i, game = args
         is_first_game = (i == 0)
         is_last_sunday = (i == last_sunday_non_snf_idx) if last_sunday_non_snf_idx is not None else False
+        is_tomorrow = game.get("date_label") == "Tomorrow"
         return _analyze_single_game(
             game, day_of_week, all_injuries, is_first_game,
             sport=sport, total_games_on_slate=total_games, game_index=i,
             is_last_sunday_game=is_last_sunday,
             odds_data=odds_data,
             player_props_lines=player_props_lines,
+            lightweight=is_tomorrow,
         )
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=12) as pool:
         results = list(pool.map(_analyze_game_wrapper, enumerate(sorted_games)))
 
     # Sort by confirmation_score descending
@@ -714,9 +723,11 @@ def scan_all_games(sport="nba", date_str=None):
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
                           is_last_sunday_game=False, odds_data=None,
-                          player_props_lines=None):
+                          player_props_lines=None, lightweight=False):
     """
     Returns analysis dict for one game.
+    lightweight=True skips expensive API calls (PRISM, B2B, H2H, NFL weather/trends)
+    — used for tomorrow's games where deep analysis isn't needed yet.
     """
     event_id = game["event_id"]
     home_team = game["home_team"]
@@ -740,6 +751,9 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             else:
                 classify_dt = game_dt - timedelta(hours=8)  # PST (NBA & NFL)
             hour, minute = classify_dt.hour, classify_dt.minute
+
+            # Use game's own date for day_of_week (important for tomorrow's games)
+            day_of_week = classify_dt.strftime("%A")
 
             # Display timezone: always EST
             est_dt = game_dt - timedelta(hours=5)
@@ -792,6 +806,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "event_id": event_id,
             "game_date": game_date_str,
             "game_time_est": game_time_est,
+            "date_label": game.get("date_label", ""),
             "confirmation_score": 0,
             "cover_pct": 0,
             "lean_team": None,
@@ -804,8 +819,59 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "venue_state": game.get("venue_state", ""),
         }
 
-    # Line movement
-    opening, current = get_game_spread(event_id, sport)
+    home_team_id = game.get("home_team_id")
+    away_team_id = game.get("away_team_id")
+    home_rank = game.get("home_rank")
+    away_rank = game.get("away_rank")
+
+    # ── Phase 1: Fire ALL independent API calls in parallel ──────────
+    # Collect injured player IDs that need stat lookups
+    injured_entries = []  # (team_name, injury_dict)
+    for team_name in [home_team, away_team]:
+        for injury in all_injuries.get(team_name, []):
+            if injury.get("status", "").lower() == "out":
+                injured_entries.append((team_name, injury))
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        # Spread
+        spread_future = pool.submit(get_game_spread, event_id, sport)
+
+        # Injured player stats (parallel)
+        injury_stat_futures = []
+        for team_name, injury in injured_entries:
+            pid = injury.get("player_id")
+            if pid:
+                f = pool.submit(get_player_season_averages, pid, sport)
+            else:
+                f = None
+            injury_stat_futures.append((team_name, injury, f))
+
+        # Phase 1b: non-lightweight factors that don't depend on spread
+        b2b_home_future = None
+        b2b_away_future = None
+        h2h_future = None
+        nfl_trend_future = None
+        nfl_ou_future = None
+        nfl_weather_future = None
+
+        if not lightweight:
+            if sport in ("nba", "nhl") and home_team_id and away_team_id:
+                b2b_home_future = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+                b2b_away_future = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+
+            if home_team_id:
+                h2h_future = pool.submit(get_previous_matchup, home_team_id, away_team, sport)
+
+            if sport == "nfl":
+                if slot_type == "vegas" and home_team_id and away_team_id:
+                    nfl_trend_future = pool.submit(_analyze_nfl_trend_discrepancy, home_team_id, away_team_id)
+                    nfl_ou_future = pool.submit(_analyze_nfl_overunder, event_id, home_team_id, away_team_id)
+                nfl_weather_future = pool.submit(_analyze_nfl_weather, game, event_id)
+
+        # ── Collect spread result ──
+        opening, current = spread_future.result()
+
+    # ── Process spread / line movement (no API calls) ──
     line_movement_data = {"available": False}
     line_confirms = False
     line_magnitude = 0.0
@@ -823,53 +889,35 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "confirms_slot": confirmed,
         }
 
-    # Trell Rule: check injuries for both teams
+    # ── Build injured_stars from parallel results ──
     injured_stars = []
-    for team_name in [home_team, away_team]:
-        team_injuries = all_injuries.get(team_name, [])
-        for injury in team_injuries:
-            if injury.get("status", "").lower() != "out":
-                continue
+    for team_name, injury, stat_future in injury_stat_futures:
+        player_stats = stat_future.result() if stat_future else None
+        star = False
+        star_reason = ""
+        if player_stats:
+            star, star_reason = is_star_player(player_stats, sport)
 
-            recent = is_recent_injury(injury.get("injury_date", ""))
-            player_id = injury.get("player_id")
-
-            player_stats = None
-            star = False
-            star_reason = ""
-
-            if player_id:
-                player_stats = get_player_season_averages(player_id, sport)
-                if player_stats:
-                    star, star_reason = is_star_player(player_stats, sport)
-
-            injured_stars.append({
-                "player_name": injury["player_name"],
-                "is_star": star,
-                "star_reason": star_reason,
-                "is_recent": recent,
-                "status": injury["status"],
-                "team": team_name,
-                "ppg": player_stats.get("ppg", 0) if player_stats else 0,
-            })
+        injured_stars.append({
+            "player_name": injury["player_name"],
+            "is_star": star,
+            "star_reason": star_reason,
+            "is_recent": is_recent_injury(injury.get("injury_date", "")),
+            "status": injury["status"],
+            "team": team_name,
+            "ppg": player_stats.get("ppg", 0) if player_stats else 0,
+        })
 
     trell_result = evaluate_trell_rule(injured_stars, slot_type)
 
-    # CFB Rank Scam + Spread Discrepancy detection
+    # CFB/CBB Rank Scam + Spread Discrepancy (no API calls)
     rank_scam = {"is_rank_scam": False}
     spread_discrepancy = {"is_discrepancy": False}
-    home_rank = game.get("home_rank")
-    away_rank = game.get("away_rank")
-
     if sport in ("cfb", "cbb"):
         rank_scam = _detect_rank_scam(home_rank, away_rank, current, slot_type)
         spread_discrepancy = _detect_spread_discrepancy(home_rank, away_rank, current, slot_type, sport=sport)
 
-    # Moneyline rule — sport-specific thresholds
-    # NBA: 6+ (3-5 pt favorites have terrible ML juice)
-    # NFL: 3+ (field goal margin is meaningful)
-    # CFB: 7+ (touchdown margin)
-    # NHL: never (puck line sport, ML doesn't apply the same way)
+    # Moneyline rule
     moneyline_recommend = False
     current_spread = current
     ml_threshold = {"nba": 6, "nfl": 3, "cfb": 7, "cbb": 7}.get(sport)
@@ -877,71 +925,92 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         if abs(current) >= ml_threshold:
             moneyline_recommend = True
 
-    # NFL-specific analyses (vegas/late Sunday only for trend + O/U)
-    nfl_trend = {"applies": False}
-    nfl_overunder = {"applies": False}
-    nfl_weather = {"is_dome": False, "alerts": []}
-
-    if sport == "nfl":
-        home_team_id = game.get("home_team_id")
-        away_team_id = game.get("away_team_id")
-
-        # Trend + O/U only in vegas slots
-        if slot_type == "vegas" and home_team_id and away_team_id:
-            nfl_trend = _analyze_nfl_trend_discrepancy(home_team_id, away_team_id)
-            nfl_overunder = _analyze_nfl_overunder(event_id, home_team_id, away_team_id)
-
-        # Weather for all non-skip games
-        nfl_weather = _analyze_nfl_weather(game, event_id)
-
-    # Determine which team to lean towards (needed by new factors below)
+    # Determine lean team
     lean_team = _determine_lean(slot_type, home_team, away_team, current_spread)
 
-    # Trell Rule lean override: when a star is freshly injured, the public
-    # overreacts — lean TOWARD the injured player's team (value on the spread)
+    # Trell Rule lean override
     if trell_result.get("applies"):
         trell_team = trell_result.get("star_team")
         if trell_team:
             lean_team = trell_team
 
-    # ── New Factor: Back-to-Back / Rest Days (NBA & NHL only) ──
-    home_team_id = game.get("home_team_id")
-    away_team_id = game.get("away_team_id")
-    b2b_result = _analyze_back_to_back(
-        home_team_id, away_team_id, game_date_str,
-        lean_team, home_team, away_team, sport=sport,
-    )
+    # ── Collect Phase 1b parallel results + compute factors ──────────
+    b2b_result = {"b2b_bonus": False, "b2b_penalty": False, "detail": ""}
+    h2h_result = {"h2h_revenge_bonus": False, "h2h_dominance_bonus": False, "detail": ""}
+    nfl_trend = {"applies": False}
+    nfl_overunder = {"applies": False}
+    nfl_weather = {"is_dome": False, "alerts": []}
+    ats_result = {"ats_bonus": False, "ats_penalty": False, "detail": ""}
+    public_betting_result = {"public_betting_bonus": 0, "detail": ""}
+    feedback_adj = 0
+    player_props = []
 
-    # ── New Factor: Home/Away Splits (all sports) ──
+    # Home/Away Splits — no API call
     home_away_applies = _analyze_home_away_split(
         lean_team, home_team, slot_type, current_spread,
     )
 
-    # ── New Factor: ATS Record (all sports) ──
-    ats_result = _analyze_ats_record(lean_team, sport)
+    if not lightweight:
+        # B2B — collect parallel results, then interpret with lean_team
+        if b2b_home_future and b2b_away_future:
+            home_b2b = b2b_home_future.result()
+            away_b2b = b2b_away_future.result()
+            lean_is_home = (lean_team == home_team)
+            lean_b2b = home_b2b if lean_is_home else away_b2b
+            opp_b2b = away_b2b if lean_is_home else home_b2b
+            opp_name = away_team if lean_is_home else home_team
+            if opp_b2b and not lean_b2b:
+                b2b_result = {"b2b_bonus": True, "b2b_penalty": False,
+                              "detail": f"{opp_name} on B2B — rest advantage for {lean_team}"}
+            elif lean_b2b and not opp_b2b:
+                b2b_result = {"b2b_bonus": False, "b2b_penalty": True,
+                              "detail": f"{lean_team} on B2B — fatigue risk"}
 
-    # ── New Factor: Public Betting / Sharp Money (all sports) ──
-    public_betting_result = _analyze_public_betting(
-        odds_data or [], home_team, away_team, lean_team, slot_type,
-    )
+        # H2H — collect parallel result, then interpret with lean_team
+        if h2h_future:
+            matchup = h2h_future.result()
+            if matchup is not None:
+                threshold = H2H_REVENGE_THRESHOLDS.get(sport, 10)
+                margin = matchup["margin"]
+                lean_is_home = (lean_team == home_team) if lean_team else False
+                lean_margin = margin if lean_is_home else -margin
+                if lean_team:
+                    if lean_margin < 0 and abs(lean_margin) >= threshold:
+                        h2h_result = {
+                            "h2h_revenge_bonus": True, "h2h_dominance_bonus": False,
+                            "detail": f"REVENGE — {lean_team} lost by {abs(lean_margin)} "
+                                      f"({matchup['team_score']}-{matchup['opp_score']}) last meeting",
+                        }
+                    elif lean_margin > 0 and lean_margin >= threshold:
+                        h2h_result = {
+                            "h2h_revenge_bonus": False, "h2h_dominance_bonus": True,
+                            "detail": f"PRIOR WIN — {lean_team} won by {lean_margin} "
+                                      f"({matchup['team_score']}-{matchup['opp_score']}) last meeting",
+                        }
 
-    # ── New Factor: Feedback Loop (all sports) ──
-    feedback_adj = _get_feedback_adjustment(slot_type, sport)
+        # NFL parallel results
+        if nfl_trend_future:
+            nfl_trend = nfl_trend_future.result()
+        if nfl_ou_future:
+            nfl_overunder = nfl_ou_future.result()
+        if nfl_weather_future:
+            nfl_weather = nfl_weather_future.result()
 
-    # ── New Factor: Head-to-Head / Revenge Games (all sports) ──
-    h2h_result = _analyze_head_to_head(
-        home_team_id, lean_team, home_team, away_team, sport=sport,
-    )
-
-    # ── PRISM Player Props (NBA only) ──
-    player_props = []
-    if sport == "nba" and home_team_id and away_team_id:
-        player_props = _run_prism_analysis(
-            home_team_id, away_team_id, home_team, away_team,
-            event_id, game_date_str, current_spread, slot_type,
-            injured_stars, player_props_lines or {},
-            sport,
+        # ATS + public betting + feedback — cheap (local DB / pre-fetched data)
+        ats_result = _analyze_ats_record(lean_team, sport)
+        public_betting_result = _analyze_public_betting(
+            odds_data or [], home_team, away_team, lean_team, slot_type,
         )
+        feedback_adj = _get_feedback_adjustment(slot_type, sport)
+
+        # PRISM Player Props (NBA only)
+        if sport == "nba" and home_team_id and away_team_id:
+            player_props = _run_prism_analysis(
+                home_team_id, away_team_id, home_team, away_team,
+                event_id, game_date_str, current_spread, slot_type,
+                injured_stars, player_props_lines or {},
+                sport,
+            )
 
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
@@ -1004,6 +1073,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "event_id": event_id,
         "game_date": game_date_str,
         "game_time_est": game_time_est,
+        "date_label": game.get("date_label", ""),
         "confirmation_score": score,
         "cover_pct": cover_pct,
         "lean_team": lean_team,
@@ -1071,9 +1141,23 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     """
     results = []
 
-    # Get roster leaders for both teams (2 per team)
-    home_leaders = get_team_roster_leaders(home_team_id, sport=sport, limit=2)
-    away_leaders = get_team_roster_leaders(away_team_id, sport=sport, limit=2)
+    # ── Fire roster leaders, O/U, B2B, and defensive stats all in parallel ──
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        home_leaders_f = pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=2)
+        away_leaders_f = pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=2)
+        game_total_f = pool.submit(get_game_overunder, event_id, sport=sport)
+        home_b2b_f = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+        away_b2b_f = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+        home_def_f = pool.submit(get_team_defensive_stats, home_team_id, sport=sport)
+        away_def_f = pool.submit(get_team_defensive_stats, away_team_id, sport=sport)
+
+        home_leaders = home_leaders_f.result()
+        away_leaders = away_leaders_f.result()
+        game_total = game_total_f.result()
+        home_b2b = home_b2b_f.result()
+        away_b2b = away_b2b_f.result()
+        home_def = home_def_f.result()
+        away_def = away_def_f.result()
 
     # Tag each leader with their team info
     for p in home_leaders:
@@ -1095,14 +1179,19 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     if not all_players:
         return results
 
-    # Get game total for pace factor
-    game_total = get_game_overunder(event_id, sport=sport)
-
-    # Check B2B for each team
-    home_b2b = check_back_to_back(home_team_id, game_date_str, sport)
-    away_b2b = check_back_to_back(away_team_id, game_date_str, sport)
-
     league_avg_def = get_league_defensive_average(sport)
+
+    # Pre-map defensive stats by team_id
+    def_by_team = {home_team_id: home_def, away_team_id: away_def}
+
+    # ── Fetch all game logs in parallel ──
+    game_log_futures = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for player in all_players:
+            if player.get("ppg", 0) > 0:
+                game_log_futures[player["name"]] = pool.submit(
+                    get_player_game_log, player["name"], count=7, sport=sport
+                )
 
     for player in all_players:
         player_name = player["name"]
@@ -1111,12 +1200,12 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
         if season_ppg <= 0:
             continue
 
-        # Get opponent defensive stats
-        opp_def = get_team_defensive_stats(player["_opp_team_id"], sport=sport)
+        # Get opponent defensive stats (already fetched)
+        opp_def = def_by_team.get(player["_opp_team_id"])
         opp_def_rating = opp_def.get("pts_allowed_per_game") if opp_def else None
 
-        # Get game log from balldontlie
-        recent_games = get_player_game_log(player_name, count=7, sport=sport)
+        # Get game log (already fetched in parallel)
+        recent_games = game_log_futures[player_name].result() if player_name in game_log_futures else None
 
         # B2B status for this player's team
         is_b2b = home_b2b if player["_is_home"] else away_b2b

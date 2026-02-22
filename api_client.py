@@ -10,7 +10,7 @@ BASE_URL = "https://www.balldontlie.io/api/v1"
 STALE_HOURS = 2
 
 # ─── TTL Response Cache ─────────────────────────────────────────────────────
-CACHE_TTL = 120  # seconds
+CACHE_TTL = 600  # 10 minutes — ESPN data doesn't change every 2 min
 _cache = {}
 _cache_lock = threading.Lock()
 

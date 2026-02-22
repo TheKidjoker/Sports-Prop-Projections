@@ -22,7 +22,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var todaysGames = [];
     var currentSport = "nba";
-    var currentSlate = { showing_tomorrow: false, game_count: 0 };
+    var currentSlate = { game_count: 0, has_today: true, has_tomorrow: false };
     var scanResultsVisible = false;
     var dashboardVisible = false;
 
@@ -122,7 +122,7 @@ document.addEventListener("DOMContentLoaded", function () {
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 todaysGames = data.games || [];
-                currentSlate = data.slate || { showing_tomorrow: false, game_count: 0 };
+                currentSlate = data.slate || { game_count: 0, has_today: true, has_tomorrow: false };
                 buildTicker(todaysGames);
 
                 // Silent scan re-fetch if scan results are currently visible
@@ -175,7 +175,9 @@ document.addEventListener("DOMContentLoaded", function () {
             var li = document.createElement("li");
             var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
             var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
-            var text = awayLabel + " vs " + homeLabel + " - " + g.game_time_est + " EST";
+            var text = awayLabel + " vs " + homeLabel + " - ";
+            if (g.date_label) text += g.date_label + " ";
+            text += g.game_time_est + " EST";
             if ((currentSport === "nhl" || currentSport === "cfb" || currentSport === "cbb" || currentSport === "nfl") && g.venue_name) {
                 text += " | " + g.venue_name;
             }
@@ -387,7 +389,8 @@ document.addEventListener("DOMContentLoaded", function () {
         var nonSkip = games.filter(function (g) { return !g.skip; });
 
         var sportLabel = currentSport.toUpperCase();
-        var dayLabel = currentSlate.showing_tomorrow ? "Tomorrow's" : "Today's";
+        var dayLabel = (currentSlate.has_today && currentSlate.has_tomorrow) ? "Today & Tomorrow's"
+            : currentSlate.has_tomorrow ? "Tomorrow's" : "Today's";
 
         if (filtered.length === 0) {
             // No strong plays — show top alternatives
@@ -521,8 +524,13 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="scan-venue">' + venueText + '</div>';
         }
 
-        // Time
-        html += '<div class="scan-time">' + g.game_time_est + ' EST</div>';
+        // Time + Date label
+        var timeText = '';
+        if (g.date_label) {
+            timeText += '<span class="scan-date-label">' + g.date_label + '</span> — ';
+        }
+        timeText += g.game_time_est + ' EST';
+        html += '<div class="scan-time">' + timeText + '</div>';
 
         // Slot type label (CFB and NFL)
         if ((sport === "cfb" || sport === "cbb" || sport === "nfl") && g.slot_type) {
@@ -809,17 +817,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
         var items = "";
 
-        // Prepend "TOMORROW'S GAMES" label if showing tomorrow's slate
-        if (currentSlate.showing_tomorrow) {
-            items += '<span class="ticker-item ticker-tomorrow">TOMORROW IN GOTHAM</span>';
-        }
-
         games.forEach(function (g) {
             var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
             var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
+            var tickerTime = '';
+            if (g.date_label) {
+                tickerTime += g.date_label + ' — ';
+            }
+            tickerTime += g.game_time_est + ' EST';
             items += '<span class="ticker-item">' +
                 '<span class="ticker-teams">' + awayLabel + ' @ ' + homeLabel + '</span>' +
-                '<span class="ticker-time">' + g.game_time_est + ' EST</span>' +
+                '<span class="ticker-time">' + tickerTime + '</span>' +
                 '</span>';
         });
 
