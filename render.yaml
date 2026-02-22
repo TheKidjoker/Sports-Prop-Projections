@@ -3,15 +3,15 @@ services:
     name: jokers-edge
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 2 --threads 4 --timeout 120
+    startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 300
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: OPENWEATHER_API_KEY
         sync: false
       - key: SCAN_GAME_WORKERS
-        value: "3"
+        value: "2"
       - key: SCAN_API_WORKERS
-        value: "3"
+        value: "2"
       - key: PYTHON_VERSION
         value: 3.11.4
