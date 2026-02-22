@@ -1,45 +1,10 @@
 import os
-import time
-import threading
 import requests
 from datetime import datetime, timedelta, timezone
-
-BASE_URL = "https://www.balldontlie.io/api/v1"
+from api_cache import _cached_request, _espn_url, SPORT_MAP, CACHE_TTL  # noqa: F401
 
 # How many hours after kickoff before a game is considered stale
 STALE_HOURS = 2
-
-# ─── TTL Response Cache ─────────────────────────────────────────────────────
-CACHE_TTL = 600  # 10 minutes — ESPN data doesn't change every 2 min
-_cache = {}
-_cache_lock = threading.Lock()
-
-
-def _cached_request(url, params=None, timeout=10):
-    """
-    Thread-safe cached HTTP GET. Returns parsed JSON or None.
-    Cache key = URL + sorted query params. TTL = CACHE_TTL seconds.
-    """
-    key = url + "|" + str(sorted((params or {}).items()))
-    now = time.time()
-
-    with _cache_lock:
-        entry = _cache.get(key)
-        if entry and (now - entry["ts"]) < CACHE_TTL:
-            return entry["data"]
-
-    try:
-        response = requests.get(url, params=params, timeout=timeout)
-        if response.status_code != 200:
-            return None
-        data = response.json()
-    except (requests.RequestException, ValueError):
-        return None
-
-    with _cache_lock:
-        _cache[key] = {"data": data, "ts": time.time()}
-
-    return data
 
 
 def is_game_stale(game_date_str):
@@ -54,22 +19,6 @@ def is_game_stale(game_date_str):
     except (ValueError, TypeError):
         return False
 
-# ESPN URL builder
-SPORT_MAP = {
-    "nba": {"category": "basketball", "league": "nba"},
-    "nhl": {"category": "hockey", "league": "nhl"},
-    "cfb": {"category": "football", "league": "college-football"},
-    "nfl": {"category": "football", "league": "nfl"},
-    "cbb": {"category": "basketball", "league": "mens-college-basketball"},
-}
-
-
-def _espn_url(sport, endpoint):
-    """Build ESPN API URL for a given sport and endpoint."""
-    info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
-    base = "https://site.api.espn.com/apis/site/v2/sports"
-    return f"{base}/{info['category']}/{info['league']}/{endpoint}"
-
 
 def _espn_player_stats_url(sport, athlete_id):
     """Build ESPN player stats URL."""
@@ -78,55 +27,6 @@ def _espn_player_stats_url(sport, athlete_id):
         f"https://site.web.api.espn.com/apis/common/v3/sports/"
         f"{info['category']}/{info['league']}/athletes/{athlete_id}/stats"
     )
-
-
-def get_player_id(player_name):
-    response = requests.get(
-        f"{BASE_URL}/players",
-        params={"search": player_name}
-    )
-
-    if response.status_code != 200:
-        return None
-
-    data = response.json()
-
-    if data["data"]:
-        return data["data"][0]["id"]
-
-    return None
-
-
-def get_recent_game_points(player_id, games=5):
-    response = requests.get(
-        f"{BASE_URL}/stats",
-        params={
-            "player_ids[]": player_id,
-            "per_page": games,
-            "sort": "-game.date"
-        }
-    )
-
-    if response.status_code != 200:
-        return []
-
-    data = response.json()
-    points = []
-
-    for game in data["data"]:
-        if game["min"] and game["min"] != "00":
-            points.append(game["pts"])
-
-    return points
-
-
-def get_player_recent_points(player_name, games=5):
-    player_id = get_player_id(player_name)
-
-    if not player_id:
-        return None
-
-    return get_recent_game_points(player_id, games)
 
 
 def get_todays_games(sport="nba", date_str=None):
@@ -534,139 +434,6 @@ def get_team_recent_results(team_id, count=4, sport="nfl"):
         return []
 
 
-def get_game_weather_espn(event_id, sport="nfl"):
-    """
-    Fetches weather data from ESPN game summary (gameInfo.weather).
-
-    Returns:
-        Dict with temperature, wind_speed, condition, precipitation or None.
-    """
-    try:
-        url = _espn_url(sport, "summary")
-        data = _cached_request(url, params={"event": event_id}, timeout=10)
-        if data is None:
-            return None
-
-        weather = data.get("gameInfo", {}).get("weather", {})
-        if not weather:
-            return None
-
-        return {
-            "temperature": weather.get("temperature"),
-            "wind_speed": weather.get("windSpeed"),
-            "condition": weather.get("displayValue", ""),
-            "precipitation": weather.get("precipitation"),
-        }
-
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
-        return None
-
-
-ODDS_API_SPORT_MAP = {
-    "nba": "basketball_nba",
-    "nhl": "icehockey_nhl",
-    "nfl": "americanfootball_nfl",
-    "cfb": "americanfootball_ncaaf",
-    "cbb": "basketball_ncaab",
-}
-
-
-def get_odds_comparison(sport="nba"):
-    """
-    Fetches spreads from The-Odds-API for multiple sportsbooks.
-    Returns per-game data with Pinnacle (sharp) vs consensus spread.
-    Gracefully returns empty list if THE_ODDS_API_KEY is not set.
-
-    Called once per sport per scan (not per game).
-
-    Returns:
-        List of dicts: [{home_team, away_team, pinnacle_spread, consensus_spread}, ...]
-    """
-    api_key = os.environ.get("THE_ODDS_API_KEY")
-    if not api_key:
-        return []
-
-    odds_sport = ODDS_API_SPORT_MAP.get(sport)
-    if not odds_sport:
-        return []
-
-    try:
-        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
-        params = {
-            "apiKey": api_key,
-            "regions": "us",
-            "markets": "spreads",
-            "oddsFormat": "american",
-        }
-        data = _cached_request(url, params=params, timeout=15)
-        if data is None:
-            return []
-
-        results = []
-        for game in data:
-            home_team = game.get("home_team", "")
-            away_team = game.get("away_team", "")
-
-            pinnacle_spread = None
-            all_spreads = []
-
-            for bookmaker in game.get("bookmakers", []):
-                book_key = bookmaker.get("key", "")
-                for market in bookmaker.get("markets", []):
-                    if market.get("key") != "spreads":
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        if outcome.get("name") == home_team:
-                            spread_val = outcome.get("point")
-                            if spread_val is not None:
-                                all_spreads.append(float(spread_val))
-                                if book_key == "pinnacle":
-                                    pinnacle_spread = float(spread_val)
-
-            if all_spreads:
-                consensus = sum(all_spreads) / len(all_spreads)
-                results.append({
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "pinnacle_spread": pinnacle_spread,
-                    "consensus_spread": round(consensus, 1),
-                })
-
-        return results
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
-        return []
-
-
-def _match_odds_to_game(odds_data, home_team, away_team):
-    """
-    Fuzzy-matches odds data to an ESPN game using team name substrings.
-
-    Returns:
-        Matching odds dict or None.
-    """
-    home_lower = home_team.lower()
-    away_lower = away_team.lower()
-
-    for od in odds_data:
-        od_home = od["home_team"].lower()
-        od_away = od["away_team"].lower()
-
-        # Check substring matches in both directions
-        home_match = (
-            home_lower in od_home or od_home in home_lower
-            or any(w in od_home for w in home_lower.split() if len(w) > 3)
-        )
-        away_match = (
-            away_lower in od_away or od_away in away_lower
-            or any(w in od_away for w in away_lower.split() if len(w) > 3)
-        )
-
-        if home_match and away_match:
-            return od
-
-    return None
-
-
 def get_game_final_score(event_id, sport="nba"):
     """
     Fetches final score from ESPN game summary.
@@ -939,154 +706,22 @@ def get_team_defensive_stats(team_id, sport="nba"):
         return None
 
 
-def get_player_game_log(player_name, count=7, sport="nba"):
-    """
-    Fetches recent game log with full stat lines via balldontlie.io.
-    NBA only — returns None for other sports.
+# ─── Backward-compatible re-exports ──────────────────────────────────────────
+# These functions were moved to api_players.py and api_odds.py but are
+# re-exported here so existing imports (app.py, tracker.py, etc.) keep working.
 
-    Returns:
-        List of dicts: [{pts, reb, ast, min, date}, ...] or None
-    """
-    if sport != "nba":
-        return None
+from api_players import (  # noqa: E402, F401
+    get_player_id,
+    get_recent_game_points,
+    get_player_recent_points,
+    get_player_game_log,
+)
 
-    player_id = get_player_id(player_name)
-    if not player_id:
-        return None
-
-    try:
-        url = f"{BASE_URL}/stats"
-        data = _cached_request(url, params={
-            "player_ids[]": player_id,
-            "per_page": count,
-            "sort": "-game.date",
-        }, timeout=10)
-
-        if data is None:
-            return None
-
-        games = []
-        for game in data.get("data", []):
-            min_str = game.get("min", "0")
-            if not min_str or min_str == "00":
-                continue
-
-            # Parse minutes from "35:42" or "35" format
-            try:
-                if ":" in str(min_str):
-                    minutes = int(str(min_str).split(":")[0])
-                else:
-                    minutes = int(min_str)
-            except (ValueError, TypeError):
-                minutes = 0
-
-            game_date = ""
-            game_obj = game.get("game", {})
-            if game_obj:
-                game_date = game_obj.get("date", "")
-
-            games.append({
-                "pts": game.get("pts", 0),
-                "reb": game.get("reb", 0),
-                "ast": game.get("ast", 0),
-                "min": minutes,
-                "date": game_date,
-            })
-
-        return games if games else None
-
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
-        return None
-
-
-def get_player_props_odds(sport="nba"):
-    """
-    Fetches player points props from The-Odds-API.
-    Called once per scan (like get_odds_comparison).
-
-    Returns:
-        dict: {normalized_name: {"points": line_float}}
-        Empty dict if no API key.
-    """
-    api_key = os.environ.get("THE_ODDS_API_KEY")
-    if not api_key:
-        return {}
-
-    odds_sport = ODDS_API_SPORT_MAP.get(sport)
-    if not odds_sport:
-        return {}
-
-    try:
-        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
-        params = {
-            "apiKey": api_key,
-            "regions": "us",
-            "markets": "player_points",
-            "oddsFormat": "american",
-        }
-        data = _cached_request(url, params=params, timeout=15)
-        if data is None:
-            return {}
-
-        props = {}
-        for game in data:
-            for bookmaker in game.get("bookmakers", []):
-                for market in bookmaker.get("markets", []):
-                    if market.get("key") != "player_points":
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        name = outcome.get("description", "")
-                        point = outcome.get("point")
-                        if name and point is not None:
-                            # Normalize name: lowercase, strip
-                            norm = name.strip().lower()
-                            if norm not in props:
-                                props[norm] = {"points": float(point)}
-        return props
-
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
-        return {}
-
-
-def get_game_weather_openweather(city, state):
-    """
-    Fallback weather fetch using OpenWeatherMap free tier.
-    Requires OPENWEATHER_API_KEY env var.
-
-    Returns:
-        Dict with temperature, wind_speed, condition, precipitation or None.
-    """
-    api_key = os.environ.get("OPENWEATHER_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        query = f"{city},{state},US"
-        url = "https://api.openweathermap.org/data/2.5/weather"
-        response = requests.get(
-            url,
-            params={"q": query, "appid": api_key, "units": "imperial"},
-            timeout=10,
-        )
-        if response.status_code != 200:
-            return None
-
-        data = response.json()
-        main = data.get("main", {})
-        wind = data.get("wind", {})
-        weather_list = data.get("weather", [{}])
-        condition = weather_list[0].get("main", "") if weather_list else ""
-
-        rain = data.get("rain", {}).get("1h", 0)
-        snow = data.get("snow", {}).get("1h", 0)
-        precipitation = rain + snow
-
-        return {
-            "temperature": main.get("temp"),
-            "wind_speed": wind.get("speed"),
-            "condition": condition,
-            "precipitation": precipitation if precipitation > 0 else 0,
-        }
-
-    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
-        return None
+from api_odds import (  # noqa: E402, F401
+    ODDS_API_SPORT_MAP,
+    get_odds_comparison,
+    _match_odds_to_game,
+    get_player_props_odds,
+    get_game_weather_espn,
+    get_game_weather_openweather,
+)
