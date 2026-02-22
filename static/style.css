@@ -992,6 +992,168 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   Intelligence Badges (B2B / Rest Alert)
+   ========================================= */
+.scan-b2b-alert {
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.scan-b2b-alert.bonus {
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+
+.scan-b2b-alert.penalty {
+    background: rgba(230, 57, 70, 0.1);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+.b2b-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.scan-b2b-alert.bonus .b2b-label {
+    color: var(--accent-green);
+}
+
+.scan-b2b-alert.penalty .b2b-label {
+    color: var(--accent-red);
+}
+
+.b2b-detail {
+    font-size: 0.8rem;
+}
+
+.scan-b2b-alert.bonus .b2b-detail {
+    color: #81c784;
+}
+
+.scan-b2b-alert.penalty .b2b-detail {
+    color: #ef9a9a;
+}
+
+/* =========================================
+   Intelligence Badges (ATS Record)
+   ========================================= */
+.scan-ats-record {
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.scan-ats-record.strong {
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+
+.scan-ats-record.weak {
+    background: rgba(230, 57, 70, 0.1);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+.ats-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.scan-ats-record.strong .ats-label {
+    color: var(--accent-green);
+}
+
+.scan-ats-record.weak .ats-label {
+    color: var(--accent-red);
+}
+
+.ats-detail {
+    font-size: 0.8rem;
+}
+
+.scan-ats-record.strong .ats-detail {
+    color: #81c784;
+}
+
+.scan-ats-record.weak .ats-detail {
+    color: #ef9a9a;
+}
+
+/* =========================================
+   Intelligence Badges (Sharp Money)
+   ========================================= */
+.scan-sharp-money {
+    background: rgba(255, 215, 0, 0.1);
+    border: 1px solid rgba(255, 215, 0, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.sharp-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    color: #ffd700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.sharp-detail {
+    font-size: 0.8rem;
+    color: #ffe066;
+}
+
+/* =========================================
+   Intelligence Badges (H2H / Revenge Game)
+   ========================================= */
+.scan-h2h {
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.scan-h2h.revenge {
+    background: rgba(255, 87, 34, 0.12);
+    border: 1px solid rgba(255, 87, 34, 0.3);
+}
+
+.scan-h2h.dominance {
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+}
+
+.h2h-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.scan-h2h.revenge .h2h-label {
+    color: #ff5722;
+}
+
+.scan-h2h.dominance .h2h-label {
+    color: var(--accent-blue);
+}
+
+.h2h-detail {
+    font-size: 0.8rem;
+}
+
+.scan-h2h.revenge .h2h-detail {
+    color: #ff8a65;
+}
+
+.scan-h2h.dominance .h2h-detail {
+    color: #79c0ff;
+}
+
+/* =========================================
    Skip Badge / Skip Card
    ========================================= */
 .scan-skip-badge {
@@ -1457,6 +1619,32 @@ button[type="submit"]:disabled {
 /* =========================================
    Dashboard Recent List
    ========================================= */
+.dash-date-group {
+    margin-bottom: 1.5rem;
+}
+
+.dash-date-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.dash-date-label {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent-red);
+    letter-spacing: 0.3px;
+}
+
+.dash-date-record {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
 .dash-recent-list {
     display: flex;
     flex-direction: column;

@@ -55,6 +55,7 @@ def init_db():
                 sport TEXT NOT NULL,
                 home_team TEXT NOT NULL,
                 away_team TEXT NOT NULL,
+                game_date TEXT,
                 game_time_est TEXT,
                 lean_team TEXT,
                 action TEXT,
@@ -79,6 +80,7 @@ def init_db():
                 sport TEXT NOT NULL,
                 home_team TEXT NOT NULL,
                 away_team TEXT NOT NULL,
+                game_date TEXT,
                 game_time_est TEXT,
                 lean_team TEXT,
                 action TEXT,
@@ -95,9 +97,24 @@ def init_db():
                 UNIQUE(event_id, sport)
             )
         """)
+    # Migration: add game_date column if missing (existing databases)
+    _migrate_add_column(cur, "game_date")
     conn.commit()
     cur.close()
     conn.close()
+
+
+def _migrate_add_column(cur, column_name):
+    """Adds a column to predictions table if it doesn't already exist."""
+    try:
+        if DATABASE_URL:
+            cur.execute(f"""
+                ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {column_name} TEXT
+            """)
+        else:
+            cur.execute(f"ALTER TABLE predictions ADD COLUMN {column_name} TEXT")
+    except Exception:
+        pass  # Column already exists (SQLite raises if duplicate)
 
 
 def save_predictions(games, sport):
@@ -118,12 +135,24 @@ def save_predictions(games, sport):
         if not g.get("lean_team") or not g.get("action"):
             continue
 
+        # Derive game date (EST) from ISO game_date if available
+        game_date_display = ""
+        raw_date = g.get("game_date", "")
+        if raw_date:
+            try:
+                from datetime import timedelta as _td
+                gdt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                est_dt = gdt - _td(hours=5)
+                game_date_display = est_dt.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                pass
+
         cur.execute(f"""
             INSERT INTO predictions
-                (event_id, sport, home_team, away_team, game_time_est,
+                (event_id, sport, home_team, away_team, game_date, game_time_est,
                  lean_team, action, slot_type, recommendation,
                  confirmation_score, cover_pct, current_spread, created_at)
-            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
             ON CONFLICT(event_id, sport) DO UPDATE SET
                 lean_team = EXCLUDED.lean_team,
                 action = EXCLUDED.action,
@@ -131,12 +160,14 @@ def save_predictions(games, sport):
                 recommendation = EXCLUDED.recommendation,
                 confirmation_score = EXCLUDED.confirmation_score,
                 cover_pct = EXCLUDED.cover_pct,
-                current_spread = EXCLUDED.current_spread
+                current_spread = EXCLUDED.current_spread,
+                game_date = EXCLUDED.game_date
         """, (
             g.get("event_id"),
             sport,
             g.get("home_team"),
             g.get("away_team"),
+            game_date_display,
             g.get("game_time_est", ""),
             g.get("lean_team"),
             g.get("action"),
@@ -263,14 +294,21 @@ def _determine_result(lean_team, home_team, away_team, spread, action,
 def get_dashboard_stats(sport=None):
     """
     Returns aggregated dashboard stats.
+    Auto-grades all pending predictions before computing stats.
 
     Returns dict with:
         overall: {wins, losses, pushes, pending, total, win_rate}
         by_sport: [{sport, wins, losses, pushes, win_rate}, ...]
         by_slot: [{slot_type, wins, losses, pushes, win_rate}, ...]
         by_recommendation: [{recommendation, wins, losses, pushes, win_rate}, ...]
-        recent: [last 50 predictions as dicts]
+        recent: [all predictions as dicts, newest first]
     """
+    # Auto-grade all pending predictions before returning stats
+    try:
+        grade_predictions(sport)
+    except Exception:
+        pass  # Don't block dashboard if grading fails
+
     conn = get_db()
     cur = conn.cursor()
     ph = _PH
@@ -321,10 +359,10 @@ def get_dashboard_stats(sport=None):
         stats["recommendation"] = r["recommendation"]
         by_recommendation.append(stats)
 
-    # Recent 50
+    # All predictions, newest first
     cur.execute(
         "SELECT * FROM predictions WHERE 1=1" + sport_filter +
-        " ORDER BY created_at DESC LIMIT 50",
+        " ORDER BY created_at DESC",
         params
     )
     recent = _fetchall_dicts(cur)
@@ -339,6 +377,99 @@ def get_dashboard_stats(sport=None):
         "by_recommendation": by_recommendation,
         "recent": recent,
     }
+
+
+def get_team_ats_record(team_name, sport):
+    """
+    Queries the predictions ledger for a team's ATS hit/miss record.
+
+    Args:
+        team_name: Team display name (checked against lean_team)
+        sport: Sport key
+
+    Returns:
+        Dict with {wins, losses, total, rate} or None if insufficient data.
+    """
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        ph = _PH
+
+        cur.execute(
+            f"SELECT result FROM predictions "
+            f"WHERE lean_team = {ph} AND sport = {ph} "
+            f"AND result IN ('HIT', 'MISS')",
+            (team_name, sport)
+        )
+        rows = _fetchall_dicts(cur)
+        cur.close()
+        conn.close()
+
+        if len(rows) < 3:
+            return None
+
+        wins = sum(1 for r in rows if r["result"] == "HIT")
+        losses = len(rows) - wins
+        rate = round((wins / len(rows)) * 100, 1) if rows else 0
+
+        return {"wins": wins, "losses": losses, "total": len(rows), "rate": rate}
+    except Exception:
+        return None
+
+
+def get_factor_performance(sport):
+    """
+    Returns hit rates by slot type and overall for a sport.
+    Used by the feedback loop factor.
+
+    Returns:
+        Dict with {by_slot: {slot_type: {wins, total, rate}}, overall: {wins, total, rate}}
+        or None on failure.
+    """
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        ph = _PH
+
+        # By slot type
+        cur.execute(
+            f"SELECT slot_type, result FROM predictions "
+            f"WHERE sport = {ph} AND result IN ('HIT', 'MISS')",
+            (sport,)
+        )
+        rows = _fetchall_dicts(cur)
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return None
+
+        by_slot = {}
+        total_wins = 0
+        total_decided = 0
+
+        for row in rows:
+            slot = row.get("slot_type", "unknown") or "unknown"
+            if slot not in by_slot:
+                by_slot[slot] = {"wins": 0, "total": 0}
+            by_slot[slot]["total"] += 1
+            total_decided += 1
+            if row["result"] == "HIT":
+                by_slot[slot]["wins"] += 1
+                total_wins += 1
+
+        for slot in by_slot:
+            s = by_slot[slot]
+            s["rate"] = round((s["wins"] / s["total"]) * 100, 1) if s["total"] > 0 else 0
+
+        overall_rate = round((total_wins / total_decided) * 100, 1) if total_decided > 0 else 0
+
+        return {
+            "by_slot": by_slot,
+            "overall": {"wins": total_wins, "total": total_decided, "rate": overall_rate},
+        }
+    except Exception:
+        return None
 
 
 def _aggregate_stats(cur, where_extra="", params=None):

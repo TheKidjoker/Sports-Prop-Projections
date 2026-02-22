@@ -449,18 +449,19 @@ def get_game_overunder(event_id, sport="nfl"):
         return None
 
 
-def get_team_recent_results(team_id, count=4):
+def get_team_recent_results(team_id, count=4, sport="nfl"):
     """
-    Fetches last N game results for an NFL team from ESPN.
+    Fetches last N game results for a team from ESPN.
 
     Returns:
         List of dicts: [{result: 'W'/'L', score: int, opp_score: int}, ...]
         or empty list on failure.
     """
     try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
         url = (
-            f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-            f"teams/{team_id}/schedule"
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams/{team_id}/schedule"
         )
         data = _cached_request(url, timeout=10)
         if data is None:
@@ -530,6 +531,111 @@ def get_game_weather_espn(event_id, sport="nfl"):
         return None
 
 
+ODDS_API_SPORT_MAP = {
+    "nba": "basketball_nba",
+    "nhl": "icehockey_nhl",
+    "nfl": "americanfootball_nfl",
+    "cfb": "americanfootball_ncaaf",
+    "cbb": "basketball_ncaab",
+}
+
+
+def get_odds_comparison(sport="nba"):
+    """
+    Fetches spreads from The-Odds-API for multiple sportsbooks.
+    Returns per-game data with Pinnacle (sharp) vs consensus spread.
+    Gracefully returns empty list if THE_ODDS_API_KEY is not set.
+
+    Called once per sport per scan (not per game).
+
+    Returns:
+        List of dicts: [{home_team, away_team, pinnacle_spread, consensus_spread}, ...]
+    """
+    api_key = os.environ.get("THE_ODDS_API_KEY")
+    if not api_key:
+        return []
+
+    odds_sport = ODDS_API_SPORT_MAP.get(sport)
+    if not odds_sport:
+        return []
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "spreads",
+            "oddsFormat": "american",
+        }
+        data = _cached_request(url, params=params, timeout=15)
+        if data is None:
+            return []
+
+        results = []
+        for game in data:
+            home_team = game.get("home_team", "")
+            away_team = game.get("away_team", "")
+
+            pinnacle_spread = None
+            all_spreads = []
+
+            for bookmaker in game.get("bookmakers", []):
+                book_key = bookmaker.get("key", "")
+                for market in bookmaker.get("markets", []):
+                    if market.get("key") != "spreads":
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") == home_team:
+                            spread_val = outcome.get("point")
+                            if spread_val is not None:
+                                all_spreads.append(float(spread_val))
+                                if book_key == "pinnacle":
+                                    pinnacle_spread = float(spread_val)
+
+            if all_spreads:
+                consensus = sum(all_spreads) / len(all_spreads)
+                results.append({
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "pinnacle_spread": pinnacle_spread,
+                    "consensus_spread": round(consensus, 1),
+                })
+
+        return results
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return []
+
+
+def _match_odds_to_game(odds_data, home_team, away_team):
+    """
+    Fuzzy-matches odds data to an ESPN game using team name substrings.
+
+    Returns:
+        Matching odds dict or None.
+    """
+    home_lower = home_team.lower()
+    away_lower = away_team.lower()
+
+    for od in odds_data:
+        od_home = od["home_team"].lower()
+        od_away = od["away_team"].lower()
+
+        # Check substring matches in both directions
+        home_match = (
+            home_lower in od_home or od_home in home_lower
+            or any(w in od_home for w in home_lower.split() if len(w) > 3)
+        )
+        away_match = (
+            away_lower in od_away or od_away in away_lower
+            or any(w in od_away for w in away_lower.split() if len(w) > 3)
+        )
+
+        if home_match and away_match:
+            return od
+
+    return None
+
+
 def get_game_final_score(event_id, sport="nba"):
     """
     Fetches final score from ESPN game summary.
@@ -572,6 +678,127 @@ def get_game_final_score(event_id, sport="nba"):
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None, None, False
+
+
+def get_team_schedule(team_id, sport="nba"):
+    """
+    Fetches a team's schedule from ESPN.
+    Cached via _cached_request so repeated calls for B2B + H2H reuse the same data.
+
+    Returns:
+        List of event dicts from the schedule, or empty list on failure.
+    """
+    try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams/{team_id}/schedule"
+        )
+        data = _cached_request(url, timeout=10)
+        if data is None:
+            return []
+        return data.get("events", [])
+    except (requests.RequestException, KeyError, IndexError):
+        return []
+
+
+def check_back_to_back(team_id, game_date_str, sport="nba"):
+    """
+    Checks if a team played the day before the given game date.
+
+    Args:
+        team_id: ESPN team ID
+        game_date_str: ISO date string of the game to check
+        sport: "nba" or "nhl"
+
+    Returns:
+        True if the team played yesterday (back-to-back), False otherwise.
+    """
+    if not game_date_str:
+        return False
+
+    try:
+        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+        yesterday = (game_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        events = get_team_schedule(team_id, sport)
+        for event in events:
+            event_date = event.get("date", "")
+            if not event_date:
+                continue
+            try:
+                evt_dt = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
+                evt_day = evt_dt.strftime("%Y-%m-%d")
+                if evt_day == yesterday:
+                    # Verify the game was actually played (final)
+                    comps = event.get("competitions", [{}])
+                    if comps:
+                        status = comps[0].get("status", {}).get("type", {}).get("name", "")
+                        if status == "STATUS_FINAL":
+                            return True
+            except (ValueError, TypeError):
+                continue
+
+        return False
+    except (ValueError, TypeError):
+        return False
+
+
+def get_previous_matchup(team_id, opponent_name, sport="nba"):
+    """
+    Finds the most recent completed matchup between a team and an opponent this season.
+    Reuses get_team_schedule (same cached response as B2B check).
+
+    Args:
+        team_id: ESPN team ID of one of the teams
+        opponent_name: Display name of the opponent
+        sport: Sport key
+
+    Returns:
+        Dict with {margin, team_won} or None if no prior matchup found.
+        margin is positive = team_id's team won by that many.
+    """
+    try:
+        events = get_team_schedule(team_id, sport)
+        opp_lower = opponent_name.lower()
+
+        for event in reversed(events):
+            comps = event.get("competitions", [{}])
+            if not comps:
+                continue
+            comp = comps[0]
+
+            # Only look at completed games
+            status = comp.get("status", {}).get("type", {}).get("name", "")
+            if status != "STATUS_FINAL":
+                continue
+
+            competitors = comp.get("competitors", [])
+            team_score = None
+            opp_score = None
+            is_opponent = False
+
+            for c in competitors:
+                c_name = c.get("team", {}).get("displayName", "")
+                c_score = int(c.get("score", 0))
+                if str(c.get("id")) == str(team_id):
+                    team_score = c_score
+                elif opp_lower in c_name.lower():
+                    opp_score = c_score
+                    is_opponent = True
+
+            if is_opponent and team_score is not None and opp_score is not None:
+                margin = team_score - opp_score
+                return {
+                    "margin": margin,
+                    "team_won": margin > 0,
+                    "team_score": team_score,
+                    "opp_score": opp_score,
+                }
+
+        return None
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
 
 
 def get_game_weather_openweather(city, state):

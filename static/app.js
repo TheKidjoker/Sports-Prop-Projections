@@ -602,6 +602,42 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
+        // B2B / Rest Alert badge
+        if (g.b2b) {
+            var b2bClass = g.b2b.b2b_bonus ? "scan-b2b-alert bonus" : "scan-b2b-alert penalty";
+            html += '<div class="' + b2bClass + '">';
+            html += '<span class="b2b-label">REST ALERT</span> ';
+            html += '<span class="b2b-detail">' + g.b2b.detail + '</span>';
+            html += '</div>';
+        }
+
+        // ATS Record badge
+        if (g.ats_record) {
+            var atsClass = g.ats_record.ats_bonus ? "scan-ats-record strong" : "scan-ats-record weak";
+            html += '<div class="' + atsClass + '">';
+            html += '<span class="ats-label">ATS RECORD</span> ';
+            html += '<span class="ats-detail">' + g.ats_record.detail + '</span>';
+            html += '</div>';
+        }
+
+        // Sharp Money badge
+        if (g.public_betting && g.public_betting.public_betting_bonus > 0) {
+            html += '<div class="scan-sharp-money">';
+            html += '<span class="sharp-label">SHARP MONEY</span> ';
+            html += '<span class="sharp-detail">' + g.public_betting.detail + '</span>';
+            html += '</div>';
+        }
+
+        // H2H / Revenge Game badge
+        if (g.head_to_head) {
+            var h2hClass = g.head_to_head.h2h_revenge_bonus ? "scan-h2h revenge" : "scan-h2h dominance";
+            var h2hLabel = g.head_to_head.h2h_revenge_bonus ? "REVENGE GAME" : "PRIOR MATCHUP";
+            html += '<div class="' + h2hClass + '">';
+            html += '<span class="h2h-label">' + h2hLabel + '</span> ';
+            html += '<span class="h2h-detail">' + g.head_to_head.detail + '</span>';
+            html += '</div>';
+        }
+
         // NFL: Skip badge
         if (g.skip) {
             html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';
@@ -1003,38 +1039,105 @@ document.addEventListener("DOMContentLoaded", function () {
 
         document.getElementById("dashboard-breakdowns").innerHTML = breakHtml;
 
-        // Recent predictions
+        // Recent predictions grouped by date
         var recentHtml = '';
         if (data.recent && data.recent.length > 0) {
-            recentHtml += '<h3 class="dash-section-title">Recent Predictions</h3>';
-            recentHtml += '<div class="dash-recent-list">';
+            recentHtml += '<h3 class="dash-section-title">Pick History</h3>';
+
+            // Group by game_date (fall back to created_at date)
+            var groups = {};
+            var groupOrder = [];
             data.recent.forEach(function (p) {
-                var statusClass = "status-pending";
-                if (p.result === "HIT") statusClass = "status-hit";
-                else if (p.result === "MISS") statusClass = "status-miss";
-                else if (p.result === "PUSH") statusClass = "status-push";
-
-                var borderClass = "dash-recent-border-pending";
-                if (p.result === "HIT") borderClass = "dash-recent-border-hit";
-                else if (p.result === "MISS") borderClass = "dash-recent-border-miss";
-                else if (p.result === "PUSH") borderClass = "dash-recent-border-push";
-
-                recentHtml += '<div class="dash-recent-item ' + borderClass + '">';
-                recentHtml += '<div class="dash-recent-top">';
-                recentHtml += '<span class="dash-recent-sport">' + p.sport.toUpperCase() + '</span>';
-                recentHtml += '<span class="dash-recent-matchup">' + p.away_team + ' vs ' + p.home_team + '</span>';
-                recentHtml += '<span class="dash-recent-status ' + statusClass + '">' + p.result + '</span>';
-                recentHtml += '</div>';
-                recentHtml += '<div class="dash-recent-bottom">';
-                recentHtml += '<span class="dash-recent-action">' + (p.action || '') + '</span>';
-                if (p.home_score !== null && p.away_score !== null) {
-                    recentHtml += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
+                var dateKey = p.game_date || "";
+                if (!dateKey && p.created_at) {
+                    dateKey = p.created_at.substring(0, 10);
                 }
-                recentHtml += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
+                if (!dateKey) dateKey = "Unknown";
+                if (!groups[dateKey]) {
+                    groups[dateKey] = [];
+                    groupOrder.push(dateKey);
+                }
+                groups[dateKey].push(p);
+            });
+
+            groupOrder.forEach(function (dateKey) {
+                var preds = groups[dateKey];
+
+                // Format date header
+                var dateLabel = dateKey;
+                if (dateKey !== "Unknown" && dateKey.length >= 10) {
+                    try {
+                        var parts = dateKey.split("-");
+                        var dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                        var today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        var yesterday = new Date(today);
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        var dtDay = new Date(dt);
+                        dtDay.setHours(0, 0, 0, 0);
+
+                        if (dtDay.getTime() === today.getTime()) {
+                            dateLabel = "Today";
+                        } else if (dtDay.getTime() === yesterday.getTime()) {
+                            dateLabel = "Yesterday";
+                        } else {
+                            var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                            var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                            dateLabel = days[dt.getDay()] + ", " + months[dt.getMonth()] + " " + dt.getDate();
+                        }
+                    } catch (e) {
+                        dateLabel = dateKey;
+                    }
+                }
+
+                // Compute day record
+                var dayW = 0, dayL = 0, dayP = 0, dayPend = 0;
+                preds.forEach(function (p) {
+                    if (p.result === "HIT") dayW++;
+                    else if (p.result === "MISS") dayL++;
+                    else if (p.result === "PUSH") dayP++;
+                    else dayPend++;
+                });
+                var dayRecord = dayW + "-" + dayL;
+                if (dayP > 0) dayRecord += "-" + dayP;
+                if (dayPend > 0) dayRecord += " (" + dayPend + " pending)";
+
+                recentHtml += '<div class="dash-date-group">';
+                recentHtml += '<div class="dash-date-header">';
+                recentHtml += '<span class="dash-date-label">' + dateLabel + '</span>';
+                recentHtml += '<span class="dash-date-record">' + dayRecord + '</span>';
+                recentHtml += '</div>';
+
+                recentHtml += '<div class="dash-recent-list">';
+                preds.forEach(function (p) {
+                    var statusClass = "status-pending";
+                    if (p.result === "HIT") statusClass = "status-hit";
+                    else if (p.result === "MISS") statusClass = "status-miss";
+                    else if (p.result === "PUSH") statusClass = "status-push";
+
+                    var borderClass = "dash-recent-border-pending";
+                    if (p.result === "HIT") borderClass = "dash-recent-border-hit";
+                    else if (p.result === "MISS") borderClass = "dash-recent-border-miss";
+                    else if (p.result === "PUSH") borderClass = "dash-recent-border-push";
+
+                    recentHtml += '<div class="dash-recent-item ' + borderClass + '">';
+                    recentHtml += '<div class="dash-recent-top">';
+                    recentHtml += '<span class="dash-recent-sport">' + p.sport.toUpperCase() + '</span>';
+                    recentHtml += '<span class="dash-recent-matchup">' + p.away_team + ' vs ' + p.home_team + '</span>';
+                    recentHtml += '<span class="dash-recent-status ' + statusClass + '">' + p.result + '</span>';
+                    recentHtml += '</div>';
+                    recentHtml += '<div class="dash-recent-bottom">';
+                    recentHtml += '<span class="dash-recent-action">' + (p.action || '') + '</span>';
+                    if (p.home_score !== null && p.away_score !== null) {
+                        recentHtml += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
+                    }
+                    recentHtml += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
+                    recentHtml += '</div>';
+                    recentHtml += '</div>';
+                });
                 recentHtml += '</div>';
                 recentHtml += '</div>';
             });
-            recentHtml += '</div>';
         }
         document.getElementById("dashboard-recent").innerHTML = recentHtml;
     }

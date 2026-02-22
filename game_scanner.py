@@ -5,7 +5,10 @@ from api_client import (
     get_player_season_averages, get_game_overunder,
     get_team_recent_results, get_game_weather_espn,
     get_game_weather_openweather, is_game_stale,
+    check_back_to_back, get_previous_matchup,
+    get_odds_comparison,
 )
+import tracker
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
@@ -337,6 +340,273 @@ def _analyze_nfl_weather(game, event_id):
     return result
 
 
+# ─── FEEDBACK LOOP CACHE ────────────────────────────────────────────────────
+_feedback_cache = {}
+_FEEDBACK_TTL = 300  # 5 minutes
+
+
+def _get_feedback_adjustment(slot_type, sport):
+    """
+    Returns a flat score adjustment (-2 to +3) based on historical ledger performance
+    for this slot type and sport. Cached at module level with 5-min TTL.
+    """
+    import time
+    cache_key = f"{sport}:{slot_type}"
+    now = time.time()
+
+    entry = _feedback_cache.get(cache_key)
+    if entry and (now - entry["ts"]) < _FEEDBACK_TTL:
+        return entry["adj"]
+
+    try:
+        perf = tracker.get_factor_performance(sport)
+    except Exception:
+        perf = None
+
+    adj = 0
+    if perf:
+        # Slot-level adjustment
+        slot_data = perf.get("by_slot", {}).get(slot_type)
+        if slot_data and slot_data["total"] >= 20:
+            if slot_data["rate"] > 60:
+                adj += 2
+            elif slot_data["rate"] < 45:
+                adj -= 2
+
+        # Overall sport adjustment
+        overall = perf.get("overall", {})
+        if overall.get("total", 0) >= 50:
+            if overall["rate"] > 58:
+                adj += 1
+            elif overall["rate"] < 45:
+                adj -= 1
+
+    # Clamp to [-2, +3]
+    adj = max(-2, min(3, adj))
+
+    _feedback_cache[cache_key] = {"adj": adj, "ts": now}
+    return adj
+
+
+def _analyze_ats_record(lean_team, sport):
+    """
+    Checks our ledger for the lean team's ATS record.
+
+    +4 if >60% ATS (min 3 decided games)
+    -3 if <40% ATS
+
+    Returns:
+        Dict with ats_bonus, ats_penalty, and detail.
+    """
+    result = {"ats_bonus": False, "ats_penalty": False, "detail": ""}
+
+    if not lean_team:
+        return result
+
+    try:
+        record = tracker.get_team_ats_record(lean_team, sport)
+    except Exception:
+        return result
+
+    if record is None:
+        return result
+
+    if record["rate"] > 60:
+        result["ats_bonus"] = True
+        result["detail"] = (
+            f"{lean_team} ATS: {record['wins']}-{record['losses']} "
+            f"({record['rate']}%)"
+        )
+    elif record["rate"] < 40:
+        result["ats_penalty"] = True
+        result["detail"] = (
+            f"{lean_team} ATS: {record['wins']}-{record['losses']} "
+            f"({record['rate']}%)"
+        )
+
+    return result
+
+
+def _analyze_public_betting(odds_data, home_team, away_team, lean_team, slot_type):
+    """
+    Compares Pinnacle (sharp) spread vs consensus as proxy for sharp vs public money.
+
+    +5: Pinnacle disagrees with consensus by 1.5+ pts AND aligns with lean (vegas slot)
+    +3: Sharp + public align with lean (public slot)
+
+    Returns:
+        Dict with public_betting_bonus (int 0/3/5) and detail.
+    """
+    from api_client import _match_odds_to_game
+
+    result = {"public_betting_bonus": 0, "detail": ""}
+
+    if not odds_data or not lean_team:
+        return result
+
+    match = _match_odds_to_game(odds_data, home_team, away_team)
+    if match is None or match.get("pinnacle_spread") is None:
+        return result
+
+    pinnacle = match["pinnacle_spread"]
+    consensus = match["consensus_spread"]
+    diff = abs(pinnacle - consensus)
+
+    # Determine which team Pinnacle favors more than consensus
+    # More negative = more home-favored
+    lean_is_home = (lean_team == home_team)
+
+    if slot_type in ("vegas", "trap") and diff >= 1.5:
+        # Sharp divergence in vegas slot — check if Pinnacle aligns with lean
+        # If lean is home: pinnacle more negative (more home-favored) = aligns
+        # If lean is away: pinnacle more positive (less home-favored) = aligns
+        if lean_is_home and pinnacle < consensus:
+            result["public_betting_bonus"] = 5
+            result["detail"] = (
+                f"Sharp divergence: Pinnacle {pinnacle:+.1f} vs consensus "
+                f"{consensus:+.1f} — favors {lean_team}"
+            )
+        elif not lean_is_home and pinnacle > consensus:
+            result["public_betting_bonus"] = 5
+            result["detail"] = (
+                f"Sharp divergence: Pinnacle {pinnacle:+.1f} vs consensus "
+                f"{consensus:+.1f} — favors {lean_team}"
+            )
+    elif slot_type in ("public", "caution") and diff < 1.5:
+        # Sharp and public aligned — check if both align with lean
+        # consensus negative = home favored
+        if lean_is_home and consensus < 0:
+            result["public_betting_bonus"] = 3
+            result["detail"] = (
+                f"Sharp + public aligned: consensus {consensus:+.1f} "
+                f"— backs {lean_team}"
+            )
+        elif not lean_is_home and consensus > 0:
+            result["public_betting_bonus"] = 3
+            result["detail"] = (
+                f"Sharp + public aligned: consensus {consensus:+.1f} "
+                f"— backs {lean_team}"
+            )
+
+    return result
+
+
+def _analyze_back_to_back(home_team_id, away_team_id, game_date_str,
+                          lean_team, home_team, away_team, sport="nba"):
+    """
+    Back-to-back detection for NBA and NHL.
+
+    Returns:
+        Dict with b2b_bonus (bool) and b2b_penalty (bool), plus detail string.
+    """
+    result = {"b2b_bonus": False, "b2b_penalty": False, "detail": ""}
+
+    if sport not in ("nba", "nhl"):
+        return result
+    if not home_team_id or not away_team_id or not lean_team:
+        return result
+
+    home_b2b = check_back_to_back(home_team_id, game_date_str, sport)
+    away_b2b = check_back_to_back(away_team_id, game_date_str, sport)
+
+    lean_is_home = (lean_team == home_team)
+    lean_b2b = home_b2b if lean_is_home else away_b2b
+    opp_b2b = away_b2b if lean_is_home else home_b2b
+    opp_name = away_team if lean_is_home else home_team
+
+    if opp_b2b and not lean_b2b:
+        result["b2b_bonus"] = True
+        result["detail"] = f"{opp_name} on B2B — rest advantage for {lean_team}"
+    elif lean_b2b and not opp_b2b:
+        result["b2b_penalty"] = True
+        result["detail"] = f"{lean_team} on B2B — fatigue risk"
+
+    return result
+
+
+# Revenge game thresholds by sport
+H2H_REVENGE_THRESHOLDS = {
+    "nba": 10,
+    "nhl": 3,
+    "cfb": 10,
+    "cbb": 10,
+    "nfl": 7,
+}
+
+
+def _analyze_head_to_head(home_team_id, lean_team, home_team, away_team, sport="nba"):
+    """
+    Head-to-head / revenge game analysis.
+
+    +3 if lean team lost prior matchup by threshold+ (revenge motivation)
+    +2 if lean team dominated prior matchup (continued dominance)
+
+    Returns:
+        Dict with h2h_revenge_bonus, h2h_dominance_bonus, and detail.
+    """
+    result = {"h2h_revenge_bonus": False, "h2h_dominance_bonus": False, "detail": ""}
+
+    if not home_team_id or not lean_team:
+        return result
+
+    lean_is_home = (lean_team == home_team)
+    opponent_name = away_team if lean_is_home else home_team
+    team_id = home_team_id  # We check from home team's perspective
+
+    matchup = get_previous_matchup(team_id, opponent_name, sport)
+    if matchup is None:
+        return result
+
+    threshold = H2H_REVENGE_THRESHOLDS.get(sport, 10)
+    margin = matchup["margin"]
+
+    # margin is from home_team's perspective
+    if lean_is_home:
+        lean_margin = margin
+    else:
+        lean_margin = -margin
+
+    if lean_margin < 0 and abs(lean_margin) >= threshold:
+        result["h2h_revenge_bonus"] = True
+        result["detail"] = (
+            f"REVENGE — {lean_team} lost by {abs(lean_margin)} "
+            f"({matchup['team_score']}-{matchup['opp_score']}) last meeting"
+        )
+    elif lean_margin > 0 and lean_margin >= threshold:
+        result["h2h_dominance_bonus"] = True
+        result["detail"] = (
+            f"PRIOR WIN — {lean_team} won by {lean_margin} "
+            f"({matchup['team_score']}-{matchup['opp_score']}) last meeting"
+        )
+
+    return result
+
+
+def _analyze_home_away_split(lean_team, home_team, slot_type, current_spread):
+    """
+    +3 bonus when the lean aligns with the natural home/away edge:
+      - Public slot + lean is home favorite
+      - Vegas slot + lean is road underdog
+
+    Returns:
+        bool: True if the bonus applies.
+    """
+    if lean_team is None or current_spread is None:
+        return False
+
+    is_lean_home = (lean_team == home_team)
+    is_home_fav = (current_spread < 0)
+
+    if slot_type in ("public", "caution"):
+        # Public: bonus when lean is home AND home is favored
+        return is_lean_home and is_home_fav
+    elif slot_type in ("vegas", "trap"):
+        # Vegas: bonus when lean is away AND away is underdog (home favored)
+        return (not is_lean_home) and is_home_fav
+
+    return False
+
+
 def scan_all_games(sport="nba", date_str=None):
     """
     Fetch all today's games, analyze each, return ranked list.
@@ -368,6 +638,12 @@ def scan_all_games(sport="nba", date_str=None):
         return []
 
     all_injuries = get_all_injuries(sport)
+
+    # Fetch odds data once for sharp money factor (graceful if no API key)
+    try:
+        odds_data = get_odds_comparison(sport)
+    except Exception:
+        odds_data = []
 
     # Sort by game_date to determine first game / game index
     sorted_games = sorted(games, key=lambda g: g.get("game_date", ""))
@@ -412,6 +688,7 @@ def scan_all_games(sport="nba", date_str=None):
             game, day_of_week, all_injuries, is_first_game,
             sport=sport, total_games_on_slate=total_games, game_index=i,
             is_last_sunday_game=is_last_sunday,
+            odds_data=odds_data,
         )
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -424,7 +701,7 @@ def scan_all_games(sport="nba", date_str=None):
 
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
-                          is_last_sunday_game=False):
+                          is_last_sunday_game=False, odds_data=None):
     """
     Returns analysis dict for one game.
     """
@@ -500,6 +777,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "home_team": home_team,
             "away_team": away_team,
             "event_id": event_id,
+            "game_date": game_date_str,
             "game_time_est": game_time_est,
             "confirmation_score": 0,
             "cover_pct": 0,
@@ -601,6 +879,38 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         # Weather for all non-skip games
         nfl_weather = _analyze_nfl_weather(game, event_id)
 
+    # Determine which team to lean towards (needed by new factors below)
+    lean_team = _determine_lean(slot_type, home_team, away_team, current_spread)
+
+    # ── New Factor: Back-to-Back / Rest Days (NBA & NHL only) ──
+    home_team_id = game.get("home_team_id")
+    away_team_id = game.get("away_team_id")
+    b2b_result = _analyze_back_to_back(
+        home_team_id, away_team_id, game_date_str,
+        lean_team, home_team, away_team, sport=sport,
+    )
+
+    # ── New Factor: Home/Away Splits (all sports) ──
+    home_away_applies = _analyze_home_away_split(
+        lean_team, home_team, slot_type, current_spread,
+    )
+
+    # ── New Factor: ATS Record (all sports) ──
+    ats_result = _analyze_ats_record(lean_team, sport)
+
+    # ── New Factor: Public Betting / Sharp Money (all sports) ──
+    public_betting_result = _analyze_public_betting(
+        odds_data or [], home_team, away_team, lean_team, slot_type,
+    )
+
+    # ── New Factor: Feedback Loop (all sports) ──
+    feedback_adj = _get_feedback_adjustment(slot_type, sport)
+
+    # ── New Factor: Head-to-Head / Revenge Games (all sports) ──
+    h2h_result = _analyze_head_to_head(
+        home_team_id, lean_team, home_team, away_team, sport=sport,
+    )
+
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
     spread_disc_applies = spread_discrepancy.get("is_discrepancy", False)
@@ -615,17 +925,23 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         trend_disc_applies=trend_disc_applies, ou_disc_applies=ou_disc_applies,
         weather_applies=weather_applies,
         spread_value=current, sport=sport,
+        b2b_bonus=b2b_result["b2b_bonus"],
+        b2b_penalty=b2b_result["b2b_penalty"],
+        ats_bonus=ats_result["ats_bonus"],
+        ats_penalty=ats_result["ats_penalty"],
+        home_away_applies=home_away_applies,
+        public_betting_bonus=public_betting_result["public_betting_bonus"],
+        feedback_adjustment=feedback_adj,
+        h2h_revenge_bonus=h2h_result["h2h_revenge_bonus"],
+        h2h_dominance_bonus=h2h_result["h2h_dominance_bonus"],
     )
     if sport == "nfl":
-        max_score = 38
+        max_score = 53
     elif sport in ("cfb", "cbb"):
-        max_score = 33
+        max_score = 48
     else:
-        max_score = 23
+        max_score = 42
     cover_pct = round(50 + (score / max_score) * 45, 1)
-
-    # Determine which team to lean towards
-    lean_team = _determine_lean(slot_type, home_team, away_team, current_spread)
 
     # Recommendation label
     if score >= 15:
@@ -654,6 +970,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "home_team": home_team,
         "away_team": away_team,
         "event_id": event_id,
+        "game_date": game_date_str,
         "game_time_est": game_time_est,
         "confirmation_score": score,
         "cover_pct": cover_pct,
@@ -692,6 +1009,16 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         if nfl_overunder.get("applies"):
             result["overunder"] = nfl_overunder
 
+    # ── New factor badges ──
+    if b2b_result["b2b_bonus"] or b2b_result["b2b_penalty"]:
+        result["b2b"] = b2b_result
+    if ats_result["ats_bonus"] or ats_result["ats_penalty"]:
+        result["ats_record"] = ats_result
+    if public_betting_result["public_betting_bonus"] > 0:
+        result["public_betting"] = public_betting_result
+    if h2h_result["h2h_revenge_bonus"] or h2h_result["h2h_dominance_bonus"]:
+        result["head_to_head"] = h2h_result
+
     return result
 
 
@@ -728,19 +1055,31 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      rank_scam_applies=False, spread_disc_applies=False,
                      trend_disc_applies=False, ou_disc_applies=False,
                      weather_applies=False,
-                     spread_value=None, sport="nba"):
+                     spread_value=None, sport="nba",
+                     b2b_bonus=False, b2b_penalty=False,
+                     ats_bonus=False, ats_penalty=False,
+                     home_away_applies=False,
+                     public_betting_bonus=0,
+                     feedback_adjustment=0,
+                     h2h_revenge_bonus=False, h2h_dominance_bonus=False):
     """
     Scoring:
       +10  public slot
       +0-8 line movement confirms slot (graduated by magnitude)
       +5   trell rule confirms
-      +5   rank scam detected (CFB)
-      +5   spread discrepancy detected (CFB)
+      +5   rank scam detected (CFB/CBB)
+      +5   spread discrepancy detected (CFB/CBB)
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
       -3   spread size penalty (large spreads are harder to cover)
-      = 23 max (NBA/NHL), 33 max (CFB), 38 max (NFL)
+      +4/-3 back-to-back rest (NBA/NHL)
+      +4/-3 ATS record (all)
+      +3   home/away split (all)
+      +3/+5 public betting / sharp money (all)
+      -2/+3 feedback loop (all)
+      +3/+2 head-to-head revenge/dominance (all)
+      = 42 max (NBA/NHL), 48 max (CFB/CBB), 53 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
@@ -748,7 +1087,9 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     breakdown = {"slot": 0, "line_movement": 0, "trell": 0,
                  "rank_scam": 0, "spread_discrepancy": 0,
                  "trend_discrepancy": 0, "overunder": 0, "weather": 0,
-                 "spread_penalty": 0}
+                 "spread_penalty": 0,
+                 "b2b": 0, "ats_record": 0, "home_away_split": 0,
+                 "public_betting": 0, "feedback": 0, "head_to_head": 0}
 
     if slot_type == "public":
         breakdown["slot"] = 10
@@ -766,6 +1107,24 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["overunder"] = 5
     if weather_applies:
         breakdown["weather"] = 5
+
+    # New factors
+    if b2b_bonus:
+        breakdown["b2b"] = 4
+    elif b2b_penalty:
+        breakdown["b2b"] = -3
+    if ats_bonus:
+        breakdown["ats_record"] = 4
+    elif ats_penalty:
+        breakdown["ats_record"] = -3
+    if home_away_applies:
+        breakdown["home_away_split"] = 3
+    breakdown["public_betting"] = public_betting_bonus
+    breakdown["feedback"] = feedback_adjustment
+    if h2h_revenge_bonus:
+        breakdown["head_to_head"] = 3
+    elif h2h_dominance_bonus:
+        breakdown["head_to_head"] = 2
 
     # Spread size penalty: large spreads are harder to cover
     if spread_value is not None:
