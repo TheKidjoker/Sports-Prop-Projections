@@ -120,15 +120,12 @@ def api_scan():
         if sport == "all":
             sports = ("nba", "nhl", "cfb", "nfl", "cbb")
             all_results = {}
-            with ThreadPoolExecutor(max_workers=5) as pool:
-                futures = {pool.submit(scan_all_games, s): s for s in sports}
-                for future in futures:
-                    s = futures[future]
-                    all_results[s] = future.result()
-                    try:
-                        tracker.save_predictions(all_results[s], s)
-                    except Exception:
-                        pass
+            for s in sports:
+                all_results[s] = scan_all_games(s)
+                try:
+                    tracker.save_predictions(all_results[s], s)
+                except Exception:
+                    pass
             return jsonify({"success": True, "all_sports": all_results})
 
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
