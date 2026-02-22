@@ -28,17 +28,29 @@
 
             <button type="button" id="scan-btn">Quick Picks</button>
 
-            <div id="scan-loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Shuffling the deck...</p>
+            <div id="scan-loading" class="sonar-loading hidden">
+                <div class="sonar-container">
+                    <div class="sonar-ring ring-1"></div>
+                    <div class="sonar-ring ring-2"></div>
+                    <div class="sonar-ring ring-3"></div>
+                    <div class="sonar-sweep"></div>
+                    <div class="sonar-dot"></div>
+                </div>
+                <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
             </div>
 
             <button type="button" id="ledger-btn">The Ledger</button>
 
             <button type="button" id="lotto-btn">Joker's Lotto</button>
-            <div id="lotto-loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Scanning all of Gotham...</p>
+            <div id="lotto-loading" class="sonar-loading hidden">
+                <div class="sonar-container">
+                    <div class="sonar-ring ring-1"></div>
+                    <div class="sonar-ring ring-2"></div>
+                    <div class="sonar-ring ring-3"></div>
+                    <div class="sonar-sweep"></div>
+                    <div class="sonar-dot"></div>
+                </div>
+                <p class="sonar-text">Scanning all of Gotham<span class="sonar-dots"></span></p>
             </div>
 
             <div class="sidebar-divider"></div>
@@ -152,6 +164,17 @@
         </section>
 
         <div id="lotto-results" class="lotto-results hidden"></div>
+
+        <div id="scan-sonar" class="scan-sonar hidden">
+            <div class="sonar-container sonar-lg">
+                <div class="sonar-ring ring-1"></div>
+                <div class="sonar-ring ring-2"></div>
+                <div class="sonar-ring ring-3"></div>
+                <div class="sonar-sweep"></div>
+                <div class="sonar-dot"></div>
+            </div>
+            <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
+        </div>
 
         <div id="scan-results" class="scan-results hidden"></div>
 

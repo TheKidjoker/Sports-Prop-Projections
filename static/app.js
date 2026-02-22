@@ -20,6 +20,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var lottoLoading = document.getElementById("lotto-loading");
     var lottoResults = document.getElementById("lotto-results");
 
+    var scanSonar = document.getElementById("scan-sonar");
+
     var todaysGames = [];
     var currentSport = "nba";
     var currentSlate = { game_count: 0, has_today: true, has_tomorrow: false };
@@ -50,6 +52,7 @@ document.addEventListener("DOMContentLoaded", function () {
         scanResults.classList.add("hidden");
         scanResults.innerHTML = "";
         scanResultsVisible = false;
+        scanSonar.classList.add("hidden");
         results.classList.add("hidden");
         errorBanner.classList.add("hidden");
         dashboardSection.classList.add("hidden");
@@ -60,7 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
         closeSidebar();
     });
 
-    // Hero sport card clicks
+    // Hero sport card clicks — auto-scan on click
     document.querySelectorAll(".hero-sport-card").forEach(function (card) {
         card.addEventListener("click", function () {
             var sport = card.getAttribute("data-sport");
@@ -68,9 +71,11 @@ document.addEventListener("DOMContentLoaded", function () {
             sportBtns.forEach(function (b) { b.classList.remove("active"); });
             document.querySelector('.sport-btn[data-sport="' + sport + '"]').classList.add("active");
             navSportBadge.textContent = sport.toUpperCase();
-            form.classList.remove("hidden");
+            if (sport !== "all") {
+                form.classList.remove("hidden");
+            }
             fetchGames();
-            openSidebar();
+            runScan();
         });
     });
 
@@ -95,6 +100,7 @@ document.addEventListener("DOMContentLoaded", function () {
             scanResults.classList.add("hidden");
             scanResults.innerHTML = "";
             scanResultsVisible = false;
+            scanSonar.classList.add("hidden");
             results.classList.add("hidden");
             errorBanner.classList.add("hidden");
             dashboardSection.classList.add("hidden");
@@ -204,14 +210,18 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     // Quick Generate (Scan All Games)
-    scanBtn.addEventListener("click", function () {
+    function runScan() {
         scanBtn.disabled = true;
         scanLoading.classList.remove("hidden");
+        scanSonar.classList.remove("hidden");
         scanResults.classList.add("hidden");
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        welcomeHero.classList.add("hidden");
 
         fetch("/api/scan", {
             method: "POST",
@@ -221,6 +231,7 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(function (res) { return res.json(); })
         .then(function (data) {
             scanLoading.classList.add("hidden");
+            scanSonar.classList.add("hidden");
             scanBtn.disabled = false;
 
             if (!data.success) {
@@ -238,10 +249,13 @@ document.addEventListener("DOMContentLoaded", function () {
         })
         .catch(function () {
             scanLoading.classList.add("hidden");
+            scanSonar.classList.add("hidden");
             scanBtn.disabled = false;
             showError("Gotham's signal went dark.");
         });
-    });
+    }
+
+    scanBtn.addEventListener("click", runScan);
 
     // Form submit
     form.addEventListener("submit", function (e) {

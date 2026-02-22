@@ -1,5 +1,12 @@
-from concurrent.futures import ThreadPoolExecutor
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+
+# ─── Thread Pool Config ─────────────────────────────────────────────────────
+# Configurable via env vars for deployment tuning.
+# Defaults are fast for local dev. For Render free tier, set lower values.
+_GAME_WORKERS = int(os.environ.get("SCAN_GAME_WORKERS", 10))
+_API_WORKERS = int(os.environ.get("SCAN_API_WORKERS", 8))
 from api_client import (
     get_todays_games, get_all_injuries, get_game_spread,
     get_player_season_averages, get_game_overunder,
@@ -712,7 +719,7 @@ def scan_all_games(sport="nba", date_str=None):
             lightweight=is_tomorrow,
         )
 
-    with ThreadPoolExecutor(max_workers=12) as pool:
+    with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
         results = list(pool.map(_analyze_game_wrapper, enumerate(sorted_games)))
 
     # Sort by confirmation_score descending
@@ -832,16 +839,16 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             if injury.get("status", "").lower() == "out":
                 injured_entries.append((team_name, injury))
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=_API_WORKERS) as api_pool:
         # Spread
-        spread_future = pool.submit(get_game_spread, event_id, sport)
+        spread_future = api_pool.submit(get_game_spread, event_id, sport)
 
         # Injured player stats (parallel)
         injury_stat_futures = []
         for team_name, injury in injured_entries:
             pid = injury.get("player_id")
             if pid:
-                f = pool.submit(get_player_season_averages, pid, sport)
+                f = api_pool.submit(get_player_season_averages, pid, sport)
             else:
                 f = None
             injury_stat_futures.append((team_name, injury, f))
@@ -856,17 +863,17 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
         if not lightweight:
             if sport in ("nba", "nhl") and home_team_id and away_team_id:
-                b2b_home_future = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
-                b2b_away_future = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+                b2b_home_future = api_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+                b2b_away_future = api_pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
 
             if home_team_id:
-                h2h_future = pool.submit(get_previous_matchup, home_team_id, away_team, sport)
+                h2h_future = api_pool.submit(get_previous_matchup, home_team_id, away_team, sport)
 
             if sport == "nfl":
                 if slot_type == "vegas" and home_team_id and away_team_id:
-                    nfl_trend_future = pool.submit(_analyze_nfl_trend_discrepancy, home_team_id, away_team_id)
-                    nfl_ou_future = pool.submit(_analyze_nfl_overunder, event_id, home_team_id, away_team_id)
-                nfl_weather_future = pool.submit(_analyze_nfl_weather, game, event_id)
+                    nfl_trend_future = api_pool.submit(_analyze_nfl_trend_discrepancy, home_team_id, away_team_id)
+                    nfl_ou_future = api_pool.submit(_analyze_nfl_overunder, event_id, home_team_id, away_team_id)
+                nfl_weather_future = api_pool.submit(_analyze_nfl_weather, game, event_id)
 
         # ── Collect spread result ──
         opening, current = spread_future.result()
@@ -1142,14 +1149,14 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     results = []
 
     # ── Fire roster leaders, O/U, B2B, and defensive stats all in parallel ──
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        home_leaders_f = pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=2)
-        away_leaders_f = pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=2)
-        game_total_f = pool.submit(get_game_overunder, event_id, sport=sport)
-        home_b2b_f = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
-        away_b2b_f = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
-        home_def_f = pool.submit(get_team_defensive_stats, home_team_id, sport=sport)
-        away_def_f = pool.submit(get_team_defensive_stats, away_team_id, sport=sport)
+    with ThreadPoolExecutor(max_workers=_API_WORKERS) as prism_pool:
+        home_leaders_f = prism_pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=2)
+        away_leaders_f = prism_pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=2)
+        game_total_f = prism_pool.submit(get_game_overunder, event_id, sport=sport)
+        home_b2b_f = prism_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+        away_b2b_f = prism_pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+        home_def_f = prism_pool.submit(get_team_defensive_stats, home_team_id, sport=sport)
+        away_def_f = prism_pool.submit(get_team_defensive_stats, away_team_id, sport=sport)
 
         home_leaders = home_leaders_f.result()
         away_leaders = away_leaders_f.result()
@@ -1185,11 +1192,11 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     def_by_team = {home_team_id: home_def, away_team_id: away_def}
 
     # ── Fetch all game logs in parallel ──
-    game_log_futures = {}
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=_API_WORKERS) as log_pool:
+        game_log_futures = {}
         for player in all_players:
             if player.get("ppg", 0) > 0:
-                game_log_futures[player["name"]] = pool.submit(
+                game_log_futures[player["name"]] = log_pool.submit(
                     get_player_game_log, player["name"], count=7, sport=sport
                 )
 

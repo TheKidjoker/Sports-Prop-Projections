@@ -464,6 +464,171 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   Sonar Scanner Loading
+   ========================================= */
+.sonar-loading {
+    text-align: center;
+    padding: 3rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.sonar-container {
+    position: relative;
+    width: 140px;
+    height: 140px;
+}
+
+.sonar-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent-red);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.ring-1 {
+    width: 40px;
+    height: 40px;
+    opacity: 0.6;
+}
+
+.ring-2 {
+    width: 80px;
+    height: 80px;
+    opacity: 0.35;
+}
+
+.ring-3 {
+    width: 120px;
+    height: 120px;
+    opacity: 0.15;
+    animation: sonar-pulse 2s ease-out infinite;
+}
+
+.sonar-sweep {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 60px;
+    height: 2px;
+    transform-origin: 0% 50%;
+    background: linear-gradient(90deg, var(--accent-red), transparent);
+    animation: sonar-sweep-spin 2s linear infinite;
+}
+
+.sonar-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-red);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 12px var(--accent-red), 0 0 24px rgba(200, 30, 30, 0.4);
+    animation: sonar-dot-glow 2s ease-in-out infinite;
+}
+
+@keyframes sonar-sweep-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes sonar-pulse {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.15;
+    }
+    50% {
+        opacity: 0.3;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1.4);
+        opacity: 0;
+    }
+}
+
+@keyframes sonar-dot-glow {
+    0%, 100% { box-shadow: 0 0 8px var(--accent-red), 0 0 16px rgba(200, 30, 30, 0.3); }
+    50% { box-shadow: 0 0 16px var(--accent-red), 0 0 32px rgba(200, 30, 30, 0.6); }
+}
+
+.sonar-text {
+    color: var(--accent-red);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.sonar-dots::after {
+    content: '';
+    animation: sonar-ellipsis 1.5s steps(4, end) infinite;
+}
+
+@keyframes sonar-ellipsis {
+    0% { content: ''; }
+    25% { content: '.'; }
+    50% { content: '..'; }
+    75% { content: '...'; }
+}
+
+/* Full-page sonar (main content area) */
+.scan-sonar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    padding: 4rem 1rem;
+    min-height: 50vh;
+    animation: sonar-fade-in 0.4s ease-out;
+}
+
+.sonar-lg {
+    width: 200px;
+    height: 200px;
+}
+
+.sonar-lg .ring-1 {
+    width: 60px;
+    height: 60px;
+}
+
+.sonar-lg .ring-2 {
+    width: 120px;
+    height: 120px;
+}
+
+.sonar-lg .ring-3 {
+    width: 180px;
+    height: 180px;
+}
+
+.sonar-lg .sonar-sweep {
+    width: 90px;
+}
+
+.sonar-lg .sonar-dot {
+    width: 10px;
+    height: 10px;
+}
+
+.scan-sonar .sonar-text {
+    font-size: 1.15rem;
+    letter-spacing: 2px;
+}
+
+@keyframes sonar-fade-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* =========================================
    Error Banner
    ========================================= */
 .error-banner {
