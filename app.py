@@ -12,16 +12,22 @@ from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from game_scanner import scan_all_games
 import tracker
 import scan_cache
-from test_model import db as tm_db
-from test_model.collector import start_collection_thread, get_collection_status
-from test_model.features import compute_all_features
-from test_model.backtest import start_backtest_thread, get_backtest_status
-from test_model.scanner import scan_today_with_model
+
+try:
+    from test_model import db as tm_db
+    from test_model.collector import start_collection_thread, get_collection_status
+    from test_model.features import compute_all_features
+    from test_model.backtest import start_backtest_thread, get_backtest_status
+    from test_model.scanner import scan_today_with_model
+    HAS_TEST_MODEL = True
+except ImportError:
+    HAS_TEST_MODEL = False
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 tracker.init_db()
-tm_db.init_tm_db()
+if HAS_TEST_MODEL:
+    tm_db.init_tm_db()
 scan_cache.init()
 
 
@@ -481,9 +487,18 @@ def api_grade():
 
 # ─── Test Model API Endpoints ──────────────────────────────────────────────
 
+def _require_test_model():
+    if not HAS_TEST_MODEL:
+        return jsonify({"success": False, "error": "Test model module not available"}), 501
+    return None
+
+
 @app.route("/api/tm/collect", methods=["POST"])
 def api_tm_collect():
     """Start background historical data collection for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
@@ -498,6 +513,9 @@ def api_tm_collect():
 @app.route("/api/tm/collect/status", methods=["GET"])
 def api_tm_collect_status():
     """Poll collection progress for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
@@ -520,6 +538,9 @@ def api_tm_collect_status():
 @app.route("/api/tm/features", methods=["POST"])
 def api_tm_features():
     """Compute features for all collected historical data."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
@@ -534,6 +555,9 @@ def api_tm_features():
 @app.route("/api/tm/backtest", methods=["POST"])
 def api_tm_backtest():
     """Start background walk-forward backtest for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
@@ -548,6 +572,9 @@ def api_tm_backtest():
 @app.route("/api/tm/backtest/status", methods=["GET"])
 def api_tm_backtest_status():
     """Poll backtest progress for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
@@ -561,6 +588,9 @@ def api_tm_backtest_status():
 @app.route("/api/tm/scan", methods=["POST"])
 def api_tm_scan():
     """Scan today's games with ML model overlay."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
@@ -575,6 +605,9 @@ def api_tm_scan():
 @app.route("/api/tm/metrics", methods=["GET"])
 def api_tm_metrics():
     """Get backtest performance metrics for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
