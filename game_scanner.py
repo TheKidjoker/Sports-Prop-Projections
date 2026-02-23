@@ -135,13 +135,8 @@ def scan_all_games(sport="nba", date_str=None):
             lightweight=is_tomorrow,
         )
 
-    # On constrained deployments (_GAME_WORKERS <= 2), run games sequentially
-    # to avoid nested thread pool thrashing. Only parallelize when we have headroom.
-    if _GAME_WORKERS <= 2:
-        results = [_analyze_game_wrapper(args) for args in enumerate(sorted_games)]
-    else:
-        with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
-            results = list(pool.map(_analyze_game_wrapper, enumerate(sorted_games)))
+    with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
+        results = list(pool.map(_analyze_game_wrapper, enumerate(sorted_games)))
 
     # Sort by confirmation_score descending
     results.sort(key=lambda r: r.get("confirmation_score", 0), reverse=True)
