@@ -660,6 +660,14 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
+        // Vegas Trap badge (NBA)
+        if (g.vegas_trap && g.vegas_trap.is_vegas_trap) {
+            html += '<div class="scan-vegas-trap">';
+            html += '<span class="vegas-trap-label">VEGAS TRAP</span> ';
+            html += '<span class="vegas-trap-detail">' + g.vegas_trap.detail + '</span>';
+            html += '</div>';
+        }
+
         // PRISM Player Props (collapsible)
         if (g.player_props && g.player_props.length > 0) {
             html += '<div class="scan-prism-section" id="prism-' + g.event_id + '">';

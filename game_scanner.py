@@ -29,6 +29,7 @@ from analysis_factors import (
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
     _get_feedback_adjustment, _analyze_ats_record, _analyze_public_betting,
     _analyze_back_to_back, _analyze_head_to_head, _analyze_home_away_split,
+    _detect_vegas_trap,
     _calculate_score, _determine_lean, _fmt_spread,
 )
 
@@ -357,6 +358,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         if trell_team:
             lean_team = trell_team
 
+    # ── Vegas Trap detection (NBA only) ──
+    vegas_trap_result = {"is_vegas_trap": False, "bonus": 0, "detail": "", "fav_record": ""}
+    if not lightweight and sport == "nba" and home_team_id and away_team_id:
+        vegas_trap_result = _detect_vegas_trap(
+            slot_type, current_spread, home_team_id, away_team_id,
+            home_team, away_team,
+        )
+
     # ── Collect Phase 1b parallel results + compute factors ──────────
     b2b_result = {"b2b_bonus": False, "b2b_penalty": False, "detail": ""}
     h2h_result = {"h2h_revenge_bonus": False, "h2h_dominance_bonus": False, "detail": ""}
@@ -458,11 +467,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         feedback_adjustment=feedback_adj,
         h2h_revenge_bonus=h2h_result["h2h_revenge_bonus"],
         h2h_dominance_bonus=h2h_result["h2h_dominance_bonus"],
+        vegas_trap_bonus=vegas_trap_result["bonus"],
     )
     if sport == "nfl":
         max_score = 53
     elif sport in ("cfb", "cbb"):
         max_score = 48
+    elif sport == "nba":
+        max_score = 49
     else:
         max_score = 42
     cover_pct = round(50 + (score / max_score) * 45, 1)
@@ -547,6 +559,8 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         result["public_betting"] = public_betting_result
     if h2h_result["h2h_revenge_bonus"] or h2h_result["h2h_dominance_bonus"]:
         result["head_to_head"] = h2h_result
+    if vegas_trap_result["is_vegas_trap"]:
+        result["vegas_trap"] = vegas_trap_result
 
     return result
 

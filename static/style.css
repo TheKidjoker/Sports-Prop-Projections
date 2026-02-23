@@ -1326,6 +1326,27 @@ button[type="submit"]:disabled {
     color: #79c0ff;
 }
 
+.scan-vegas-trap {
+    background: rgba(220, 38, 38, 0.15);
+    border: 1px solid rgba(220, 38, 38, 0.35);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.vegas-trap-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #ef4444;
+}
+
+.vegas-trap-detail {
+    font-size: 0.8rem;
+    color: #fca5a5;
+}
+
 /* =========================================
    Skip Badge / Skip Card
    ========================================= */

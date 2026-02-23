@@ -417,6 +417,79 @@ def _analyze_head_to_head(home_team_id, lean_team, home_team, away_team, sport="
     return result
 
 
+def _detect_vegas_trap(slot_type, current_spread, home_team_id, away_team_id,
+                       home_team, away_team):
+    """
+    Detects classic NBA trap games: heavy favorite in a vegas/trap slot
+    where the favorite is cold. Public bets the name, underdog covers.
+
+    Conditions:
+      - Vegas or trap slot
+      - |spread| >= 7 (heavy favorite)
+      - Favorite cold: <= 2 wins in last 7
+
+    Bonus:
+      +5 if favorite is cold
+      +7 if both teams are cold (strongest signal)
+
+    Returns:
+        Dict with is_vegas_trap, bonus, detail, fav_record.
+    """
+    result = {"is_vegas_trap": False, "bonus": 0, "detail": "", "fav_record": ""}
+
+    if slot_type not in ("vegas", "trap"):
+        return result
+    if current_spread is None or abs(current_spread) < 7:
+        return result
+
+    # Identify favorite and underdog
+    # Negative spread = home favored
+    if current_spread < 0:
+        fav_team_id, fav_team = home_team_id, home_team
+        dog_team_id, dog_team = away_team_id, away_team
+        dog_spread = abs(current_spread)
+    else:
+        fav_team_id, fav_team = away_team_id, away_team
+        dog_team_id, dog_team = home_team_id, home_team
+        dog_spread = abs(current_spread)
+
+    if not fav_team_id:
+        return result
+
+    # Check favorite's last 7 games
+    fav_results = get_team_recent_results(fav_team_id, count=7, sport="nba")
+    if not fav_results or len(fav_results) < 5:
+        return result
+
+    fav_wins = sum(1 for r in fav_results if r["result"] == "W")
+    fav_record = f"{fav_wins}-{len(fav_results) - fav_wins}"
+
+    if fav_wins > 2:
+        return result
+
+    # Favorite is cold — check underdog too
+    bonus = 5
+    detail = (f"Heavy favorite ({fav_team} -{dog_spread}) on a cold streak "
+              f"({fav_record} L7) — take {dog_team} +{dog_spread}")
+
+    if dog_team_id:
+        dog_results = get_team_recent_results(dog_team_id, count=7, sport="nba")
+        if dog_results and len(dog_results) >= 5:
+            dog_wins = sum(1 for r in dog_results if r["result"] == "W")
+            if dog_wins <= 2:
+                bonus = 7
+                dog_record = f"{dog_wins}-{len(dog_results) - dog_wins}"
+                detail = (f"Both teams cold — {fav_team} ({fav_record}) favored by "
+                          f"{dog_spread} vs {dog_team} ({dog_record}) — take {dog_team} +{dog_spread}")
+
+    result["is_vegas_trap"] = True
+    result["bonus"] = bonus
+    result["detail"] = detail
+    result["fav_record"] = fav_record
+
+    return result
+
+
 def _analyze_home_away_split(lean_team, home_team, slot_type, current_spread):
     """
     +3 bonus when the lean aligns with the natural home/away edge:
@@ -481,7 +554,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      home_away_applies=False,
                      public_betting_bonus=0,
                      feedback_adjustment=0,
-                     h2h_revenge_bonus=False, h2h_dominance_bonus=False):
+                     h2h_revenge_bonus=False, h2h_dominance_bonus=False,
+                     vegas_trap_bonus=0):
     """
     Scoring:
       +10  public slot
@@ -499,7 +573,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
       +3/+5 public betting / sharp money (all)
       -2/+3 feedback loop (all)
       +3/+2 head-to-head revenge/dominance (all)
-      = 42 max (NBA/NHL), 48 max (CFB/CBB), 53 max (NFL)
+      +5/+7 vegas trap (NBA only)
+      = 49 max (NBA), 42 max (NHL), 48 max (CFB/CBB), 53 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
@@ -509,7 +584,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                  "trend_discrepancy": 0, "overunder": 0, "weather": 0,
                  "spread_penalty": 0,
                  "b2b": 0, "ats_record": 0, "home_away_split": 0,
-                 "public_betting": 0, "feedback": 0, "head_to_head": 0}
+                 "public_betting": 0, "feedback": 0, "head_to_head": 0,
+                 "vegas_trap": 0}
 
     if slot_type == "public":
         breakdown["slot"] = 10
@@ -545,6 +621,7 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["head_to_head"] = 3
     elif h2h_dominance_bonus:
         breakdown["head_to_head"] = 2
+    breakdown["vegas_trap"] = vegas_trap_bonus
 
     # Spread size penalty: large spreads are harder to cover
     if spread_value is not None:
