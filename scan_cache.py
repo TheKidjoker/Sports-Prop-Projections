@@ -1,7 +1,7 @@
 """
 Background scan cache — keeps game analysis pre-computed for instant page loads.
 
-- On startup: pre-scans all sports to populate cache
+- On demand: scans a sport when first requested by a visitor
 - Every hour: refreshes all cached sports
 - On visitor arrival (/api/games): triggers immediate refresh for that sport
 - /api/scan returns cached results instantly, queues background refresh
@@ -78,12 +78,7 @@ def _scan(sport):
 
 
 def _loop():
-    """Background: warm up all sports, then refresh on demand or periodically."""
-    # Startup warm-up
-    for sport in ALL_SPORTS:
-        _scan(sport)
-    logger.info("[scan_cache] Startup warm-up complete")
-
+    """Background: refresh on demand or periodically (no startup warm-up)."""
     while True:
         _wake.wait(timeout=BG_INTERVAL)
         _wake.clear()
