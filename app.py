@@ -1,6 +1,9 @@
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from flask import Flask, render_template, request, jsonify
+import jwt
 from projections import points_prediction, cover_rate
 from api_client import (
     get_player_recent_points, get_todays_games, get_game_spread,
@@ -29,6 +32,35 @@ tracker.init_db()
 if HAS_TEST_MODEL:
     tm_db.init_tm_db()
 scan_cache.init()
+
+# ─── Supabase Auth ──────────────────────────────────────────────────────
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not SUPABASE_JWT_SECRET:
+            # Auth not configured — allow through (local dev)
+            return f(*args, **kwargs)
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid token"}), 401
+        token = auth_header[7:]
+        try:
+            jwt.decode(
+                token, SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def _get_games_with_transition(sport):
@@ -76,7 +108,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/auth/config", methods=["GET"])
+def auth_config():
+    return jsonify({
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": SUPABASE_ANON_KEY,
+    })
+
+
 @app.route("/api/games", methods=["GET"])
+@require_auth
 def api_games():
     """Returns today's games list for autocomplete."""
     try:
@@ -129,6 +170,7 @@ def api_games():
 
 
 @app.route("/api/scan", methods=["POST"])
+@require_auth
 def api_scan():
     """Scans all today's games, returns ranked results.
     Returns cached results instantly when available, queues background refresh.
@@ -192,6 +234,7 @@ def api_scan():
 
 
 @app.route("/api/predict", methods=["POST"])
+@require_auth
 def predict():
     try:
         data = request.get_json()
@@ -459,6 +502,7 @@ def predict():
 
 
 @app.route("/api/dashboard", methods=["GET"])
+@require_auth
 def api_dashboard():
     """Returns aggregated prediction tracking stats."""
     try:
@@ -472,6 +516,7 @@ def api_dashboard():
 
 
 @app.route("/api/grade", methods=["POST"])
+@require_auth
 def api_grade():
     """Grades pending predictions by fetching final scores."""
     try:
@@ -494,6 +539,7 @@ def _require_test_model():
 
 
 @app.route("/api/tm/collect", methods=["POST"])
+@require_auth
 def api_tm_collect():
     """Start background historical data collection for a sport."""
     err = _require_test_model()
@@ -511,6 +557,7 @@ def api_tm_collect():
 
 
 @app.route("/api/tm/collect/status", methods=["GET"])
+@require_auth
 def api_tm_collect_status():
     """Poll collection progress for a sport."""
     err = _require_test_model()
@@ -536,6 +583,7 @@ def api_tm_collect_status():
 
 
 @app.route("/api/tm/features", methods=["POST"])
+@require_auth
 def api_tm_features():
     """Compute features for all collected historical data."""
     err = _require_test_model()
@@ -553,6 +601,7 @@ def api_tm_features():
 
 
 @app.route("/api/tm/backtest", methods=["POST"])
+@require_auth
 def api_tm_backtest():
     """Start background walk-forward backtest for a sport."""
     err = _require_test_model()
@@ -570,6 +619,7 @@ def api_tm_backtest():
 
 
 @app.route("/api/tm/backtest/status", methods=["GET"])
+@require_auth
 def api_tm_backtest_status():
     """Poll backtest progress for a sport."""
     err = _require_test_model()
@@ -586,6 +636,7 @@ def api_tm_backtest_status():
 
 
 @app.route("/api/tm/scan", methods=["POST"])
+@require_auth
 def api_tm_scan():
     """Scan today's games with ML model overlay."""
     err = _require_test_model()
@@ -603,6 +654,7 @@ def api_tm_scan():
 
 
 @app.route("/api/tm/metrics", methods=["GET"])
+@require_auth
 def api_tm_metrics():
     """Get backtest performance metrics for a sport."""
     err = _require_test_model()
@@ -626,7 +678,6 @@ def api_tm_metrics():
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     debug = "PORT" not in os.environ
     app.run(host="0.0.0.0", port=port, debug=debug)

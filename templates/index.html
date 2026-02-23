@@ -4,9 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260223">
+    <link rel="stylesheet" href="/static/style.css?v=20260223a">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
+    <!-- Auth Gate -->
+    <div id="auth-gate" class="auth-gate">
+        <div class="auth-card">
+            <h1 class="auth-title">Joker's Edge</h1>
+            <p class="auth-subtitle">Why so serious about logging in?</p>
+            <form id="auth-form" class="auth-form">
+                <div class="auth-field">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" placeholder="joker@gotham.com" required>
+                </div>
+                <div class="auth-field">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" placeholder="Enter password" required>
+                </div>
+                <div id="auth-error" class="auth-error hidden"></div>
+                <button type="submit" id="auth-submit" class="auth-submit">Sign In</button>
+            </form>
+            <p class="auth-toggle">
+                <span id="auth-toggle-text">Don't have an account?</span>
+                <button type="button" id="auth-toggle-btn" class="auth-toggle-btn">Sign Up</button>
+            </p>
+        </div>
+    </div>
+
+    <div id="app-container" class="app-container hidden">
     <!-- Sidebar overlay -->
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -114,6 +140,7 @@
         </button>
         <span class="nav-title">Joker's Edge</span>
         <button type="button" class="nav-home-btn" id="nav-home-btn" aria-label="Go home">&#8962;</button>
+        <button type="button" class="nav-logout-btn" id="nav-logout-btn" aria-label="Log out">Logout</button>
         <span class="nav-sport-badge" id="nav-sport-badge">NBA</span>
     </nav>
 
@@ -286,6 +313,8 @@
         <div class="ticker-track" id="ticker-track"></div>
     </div>
 
-    <script src="/static/app.js?v=20260223"></script>
+    </div><!-- /app-container -->
+
+    <script src="/static/app.js?v=20260223a"></script>
 </body>
 </html>

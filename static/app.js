@@ -1,4 +1,136 @@
 document.addEventListener("DOMContentLoaded", function () {
+    // ─── Auth State ─────────────────────────────────────────────────────
+    var _supabaseClient = null;
+    var _accessToken = null;
+
+    function authFetch(url, opts) {
+        opts = opts || {};
+        if (_accessToken) {
+            opts.headers = opts.headers || {};
+            opts.headers["Authorization"] = "Bearer " + _accessToken;
+        }
+        return fetch(url, opts).then(function (res) {
+            if (res.status === 401) {
+                // Token expired or invalid — sign out
+                if (_supabaseClient) {
+                    _supabaseClient.auth.signOut();
+                }
+                showAuthGate();
+            }
+            return res;
+        });
+    }
+
+    function showAuthGate() {
+        document.getElementById("auth-gate").classList.remove("hidden");
+        document.getElementById("app-container").classList.add("hidden");
+    }
+
+    function showApp() {
+        document.getElementById("auth-gate").classList.add("hidden");
+        document.getElementById("app-container").classList.remove("hidden");
+        // Kick off initial data loads
+        fetchGames();
+        tmPollCollect();
+    }
+
+    function initAuth() {
+        fetch("/api/auth/config")
+            .then(function (res) { return res.json(); })
+            .then(function (cfg) {
+                if (!cfg.supabase_url || !cfg.supabase_anon_key) {
+                    // Auth not configured — skip login, show app directly
+                    showApp();
+                    return;
+                }
+
+                _supabaseClient = supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+
+                // Listen for auth state changes
+                _supabaseClient.auth.onAuthStateChange(function (event, session) {
+                    if (session) {
+                        _accessToken = session.access_token;
+                        showApp();
+                    } else {
+                        _accessToken = null;
+                        showAuthGate();
+                    }
+                });
+
+                // Check existing session
+                _supabaseClient.auth.getSession().then(function (result) {
+                    var session = result.data.session;
+                    if (session) {
+                        _accessToken = session.access_token;
+                        showApp();
+                    } else {
+                        showAuthGate();
+                    }
+                });
+
+                // Wire up auth form
+                var authForm = document.getElementById("auth-form");
+                var authError = document.getElementById("auth-error");
+                var authSubmit = document.getElementById("auth-submit");
+                var authToggleBtn = document.getElementById("auth-toggle-btn");
+                var authToggleText = document.getElementById("auth-toggle-text");
+                var isSignUp = false;
+
+                authToggleBtn.addEventListener("click", function () {
+                    isSignUp = !isSignUp;
+                    authSubmit.textContent = isSignUp ? "Sign Up" : "Sign In";
+                    authToggleText.textContent = isSignUp ? "Already have an account?" : "Don't have an account?";
+                    authToggleBtn.textContent = isSignUp ? "Sign In" : "Sign Up";
+                    authError.classList.add("hidden");
+                });
+
+                authForm.addEventListener("submit", function (e) {
+                    e.preventDefault();
+                    var email = document.getElementById("auth-email").value.trim();
+                    var password = document.getElementById("auth-password").value;
+                    authSubmit.disabled = true;
+                    authError.classList.add("hidden");
+
+                    var authPromise;
+                    if (isSignUp) {
+                        authPromise = _supabaseClient.auth.signUp({ email: email, password: password });
+                    } else {
+                        authPromise = _supabaseClient.auth.signInWithPassword({ email: email, password: password });
+                    }
+
+                    authPromise.then(function (result) {
+                        authSubmit.disabled = false;
+                        if (result.error) {
+                            authError.textContent = result.error.message;
+                            authError.classList.remove("hidden");
+                            return;
+                        }
+                        if (isSignUp && result.data.user && !result.data.session) {
+                            authError.textContent = "Check your email to confirm your account.";
+                            authError.classList.remove("hidden");
+                            authError.style.color = "var(--accent-green)";
+                            authError.style.borderColor = "rgba(76, 175, 80, 0.3)";
+                            authError.style.background = "rgba(76, 175, 80, 0.1)";
+                        }
+                    }).catch(function () {
+                        authSubmit.disabled = false;
+                        authError.textContent = "Connection error. Try again.";
+                        authError.classList.remove("hidden");
+                    });
+                });
+
+                // Logout button
+                document.getElementById("nav-logout-btn").addEventListener("click", function () {
+                    _supabaseClient.auth.signOut();
+                });
+            })
+            .catch(function () {
+                // Config fetch failed — allow through (local dev fallback)
+                showApp();
+            });
+    }
+
+    // ─── Main App ───────────────────────────────────────────────────────
     var form = document.getElementById("predict-form");
     var submitBtn = document.getElementById("submit-btn");
     var loading = document.getElementById("loading");
@@ -125,7 +257,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     function fetchGames() {
-        fetch("/api/games?sport=" + currentSport)
+        authFetch("/api/games?sport=" + currentSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 todaysGames = data.games || [];
@@ -134,7 +266,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
                 // Silent scan re-fetch if scan results are currently visible
                 if (scanResultsVisible && !scanResults.classList.contains("hidden")) {
-                    fetch("/api/scan", {
+                    authFetch("/api/scan", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ sport: currentSport })
@@ -155,9 +287,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 todaysGames = [];
             });
     }
-
-    // Initial fetch
-    fetchGames();
 
     // Auto-poll every 3 minutes
     setInterval(fetchGames, 3 * 60 * 1000);
@@ -228,7 +357,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (testmodelSection) testmodelSection.classList.add("hidden");
         welcomeHero.classList.add("hidden");
 
-        fetch("/api/scan", {
+        authFetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: currentSport })
@@ -301,7 +430,7 @@ document.addEventListener("DOMContentLoaded", function () {
         loading.classList.remove("hidden");
         submitBtn.disabled = true;
 
-        fetch("/api/predict", {
+        authFetch("/api/predict", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -954,7 +1083,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         if (testmodelSection) testmodelSection.classList.add("hidden");
 
-        fetch("/api/scan", {
+        authFetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: "all" })
@@ -1083,7 +1212,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var filterVal = dashboardSportFilter.value;
         if (filterVal) body.sport = filterVal;
 
-        fetch("/api/grade", {
+        authFetch("/api/grade", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
@@ -1116,7 +1245,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var url = "/api/dashboard";
         if (sportParam) url += "?sport=" + sportParam;
 
-        fetch(url)
+        authFetch(url)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 dashboardLoading.classList.add("hidden");
@@ -1354,7 +1483,7 @@ document.addEventListener("DOMContentLoaded", function () {
         btn.disabled = true;
         btn.textContent = "Collecting...";
 
-        fetch("/api/tm/collect", {
+        authFetch("/api/tm/collect", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: currentSport })
@@ -1381,7 +1510,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function tmPollCollect() {
-        fetch("/api/tm/collect/status?sport=" + currentSport)
+        authFetch("/api/tm/collect/status?sport=" + currentSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1423,7 +1552,7 @@ document.addEventListener("DOMContentLoaded", function () {
         btn.disabled = true;
         btn.textContent = "Computing...";
 
-        fetch("/api/tm/features", {
+        authFetch("/api/tm/features", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: currentSport })
@@ -1452,7 +1581,7 @@ document.addEventListener("DOMContentLoaded", function () {
         btn.textContent = "Running Backtest...";
         document.getElementById("tm-backtest-results").innerHTML = "";
 
-        fetch("/api/tm/backtest", {
+        authFetch("/api/tm/backtest", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: currentSport })
@@ -1479,7 +1608,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function tmPollBacktest() {
-        fetch("/api/tm/backtest/status?sport=" + currentSport)
+        authFetch("/api/tm/backtest/status?sport=" + currentSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1519,7 +1648,7 @@ document.addEventListener("DOMContentLoaded", function () {
         loadEl.classList.remove("hidden");
         document.getElementById("tm-scan-results").innerHTML = "";
 
-        fetch("/api/tm/scan", {
+        authFetch("/api/tm/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sport: currentSport })
@@ -1622,7 +1751,7 @@ document.addEventListener("DOMContentLoaded", function () {
         loadEl.classList.remove("hidden");
         contentEl.innerHTML = "";
 
-        fetch("/api/tm/metrics?sport=" + currentSport)
+        authFetch("/api/tm/metrics?sport=" + currentSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 loadEl.classList.add("hidden");
@@ -1710,6 +1839,6 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
-    // Initial poll of collection status
-    tmPollCollect();
+    // Start auth flow — fetchGames() and tmPollCollect() are called from showApp() after auth
+    initAuth();
 });
