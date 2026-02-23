@@ -120,7 +120,7 @@ def api_scan():
         if sport == "all":
             sports = ("nba", "nhl", "cfb", "nfl", "cbb")
             all_results = {}
-            with ThreadPoolExecutor(max_workers=3) as pool:
+            with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = {pool.submit(scan_all_games, s): s for s in sports}
                 for future in futures:
                     s = futures[future]
