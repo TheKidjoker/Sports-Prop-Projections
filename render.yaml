@@ -13,5 +13,9 @@ services:
         value: "4"
       - key: SCAN_API_WORKERS
         value: "4"
+      - key: GNEWS_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
       - key: PYTHON_VERSION
         value: 3.11.4

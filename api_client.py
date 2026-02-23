@@ -46,6 +46,11 @@ def get_todays_games(sport="nba", date_str=None):
         params = {}
         if date_str:
             params["dates"] = date_str
+        else:
+            # Always pass explicit ET date — ESPN's default scoreboard can lag
+            # behind and show yesterday's completed games instead of today's
+            now_et = datetime.now(timezone.utc) - timedelta(hours=5)
+            params["dates"] = now_et.strftime("%Y%m%d")
         data = _cached_request(url, params=params, timeout=10)
         if data is None:
             return []

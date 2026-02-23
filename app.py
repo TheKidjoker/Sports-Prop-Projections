@@ -11,9 +11,18 @@ from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from game_scanner import scan_all_games
 import tracker
+import scan_cache
+from test_model import db as tm_db
+from test_model.collector import start_collection_thread, get_collection_status
+from test_model.features import compute_all_features
+from test_model.backtest import start_backtest_thread, get_backtest_status
+from test_model.scanner import scan_today_with_model
 
 app = Flask(__name__)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 tracker.init_db()
+tm_db.init_tm_db()
+scan_cache.init()
 
 
 def _get_games_with_transition(sport):
@@ -69,6 +78,9 @@ def api_games():
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
+        # Signal visitor arrival — wake background cache refresh
+        scan_cache.request_refresh(sport)
+
         games, slate = _get_games_with_transition(sport)
         result = []
         for game in games:
@@ -112,7 +124,9 @@ def api_games():
 
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
-    """Scans all today's games, returns ranked results."""
+    """Scans all today's games, returns ranked results.
+    Returns cached results instantly when available, queues background refresh.
+    """
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
@@ -120,13 +134,29 @@ def api_scan():
         if sport == "all":
             sports = ("nba", "nhl", "cfb", "nfl", "cbb")
             all_results = {}
+            missing = []
+            for s in sports:
+                cached, age = scan_cache.get(s)
+                if cached is not None:
+                    all_results[s] = cached
+                else:
+                    missing.append(s)
+
+            if not missing:
+                # All cached — return instantly, queue refresh
+                scan_cache.request_refresh(*sports)
+                return jsonify({"success": True, "all_sports": all_results, "cached": True})
+
+            # Scan missing sports (blocking)
             with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {pool.submit(scan_all_games, s): s for s in sports}
+                futures = {pool.submit(scan_all_games, s): s for s in missing}
                 for future in futures:
                     s = futures[future]
-                    all_results[s] = future.result()
+                    result = future.result()
+                    all_results[s] = result
+                    scan_cache.put(s, result)
                     try:
-                        tracker.save_predictions(all_results[s], s)
+                        tracker.save_predictions(result, s)
                     except Exception:
                         pass
             return jsonify({"success": True, "all_sports": all_results})
@@ -134,7 +164,18 @@ def api_scan():
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
 
+        # Check cache first
+        cached, age = scan_cache.get(sport)
+        if cached is not None:
+            scan_cache.request_refresh(sport)
+            return jsonify({
+                "success": True, "games": cached,
+                "cached": True, "cache_age": round(age),
+            })
+
+        # No cache — blocking scan
         results = scan_all_games(sport)
+        scan_cache.put(sport, results)
         try:
             tracker.save_predictions(results, sport)
         except Exception:
@@ -434,6 +475,119 @@ def api_grade():
             sport = None
         result = tracker.grade_predictions(sport)
         return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Test Model API Endpoints ──────────────────────────────────────────────
+
+@app.route("/api/tm/collect", methods=["POST"])
+def api_tm_collect():
+    """Start background historical data collection for a sport."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        started = start_collection_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/collect/status", methods=["GET"])
+def api_tm_collect_status():
+    """Poll collection progress for a sport."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        progress = get_collection_status(sport)
+        db_progress = tm_db.get_collection_progress(sport)
+        total_games = tm_db.count_historical_games(sport)
+        games_with_spreads = tm_db.count_games_with_spreads(sport)
+        return jsonify({
+            "success": True,
+            "progress": progress,
+            "db_progress": db_progress,
+            "total_games": total_games,
+            "games_with_spreads": games_with_spreads,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/features", methods=["POST"])
+def api_tm_features():
+    """Compute features for all collected historical data."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        count = compute_all_features(sport)
+        return jsonify({"success": True, "features_computed": count})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/backtest", methods=["POST"])
+def api_tm_backtest():
+    """Start background walk-forward backtest for a sport."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        started = start_backtest_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/backtest/status", methods=["GET"])
+def api_tm_backtest_status():
+    """Poll backtest progress for a sport."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        progress = get_backtest_status(sport)
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/scan", methods=["POST"])
+def api_tm_scan():
+    """Scan today's games with ML model overlay."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        results = scan_today_with_model(sport)
+        return jsonify({"success": True, "games": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/metrics", methods=["GET"])
+def api_tm_metrics():
+    """Get backtest performance metrics for a sport."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        metrics = tm_db.get_backtest_metrics(sport)
+        total_games = tm_db.count_historical_games(sport)
+        total_features = tm_db.count_game_features(sport)
+        return jsonify({
+            "success": True,
+            "metrics": metrics,
+            "total_games": total_games,
+            "total_features": total_features,
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

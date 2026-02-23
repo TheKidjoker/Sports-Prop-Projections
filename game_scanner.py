@@ -580,8 +580,8 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
 
     # ── Fire roster leaders, O/U, B2B, and defensive stats all in parallel ──
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as prism_pool:
-        home_leaders_f = prism_pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=2)
-        away_leaders_f = prism_pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=2)
+        home_leaders_f = prism_pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=3)
+        away_leaders_f = prism_pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=3)
         game_total_f = prism_pool.submit(get_game_overunder, event_id, sport=sport)
         home_b2b_f = prism_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
         away_b2b_f = prism_pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
@@ -630,11 +630,17 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                     get_player_game_log, player["name"], count=7, sport=sport
                 )
 
+    # Stat types to analyze: (stat_key, season_avg_key, label, odds_key, min_avg)
+    stat_configs = [
+        ("pts", "ppg", "PTS", "points", 8.0),
+        ("reb", "rpg", "REB", "rebounds", 4.0),
+        ("ast", "apg", "AST", "assists", 3.0),
+    ]
+
     for player in all_players:
         player_name = player["name"]
-        season_ppg = player.get("ppg", 0)
 
-        if season_ppg <= 0:
+        if player.get("ppg", 0) <= 0:
             continue
 
         # Get opponent defensive stats (already fetched)
@@ -657,46 +663,51 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
             and s.get("ppg", 0) > 0
         ]
 
-        # Get posted line from odds (normalized name match)
-        posted_line = None
+        # Odds lines for this player
         norm_name = player_name.strip().lower()
-        if norm_name in player_props_lines:
-            posted_line = player_props_lines[norm_name].get("points")
+        player_odds = player_props_lines.get(norm_name, {})
 
-        proj = calculate_prism_projection(
-            season_avg=season_ppg,
-            recent_games=recent_games or [],
-            stat_type="pts",
-            opponent_def_rating=opp_def_rating,
-            league_avg_def=league_avg_def,
-            game_total=game_total,
-            is_b2b=is_b2b,
-            is_home=player["_is_home"],
-            spread=current_spread,
-            injured_teammates=injured_teammates,
-            posted_line=posted_line,
-            slot_type=slot_type,
-            sport=sport,
-        )
+        for stat_key, avg_key, label, odds_key, min_avg in stat_configs:
+            season_avg = player.get(avg_key, 0)
+            if season_avg < min_avg:
+                continue
 
-        if proj is None:
-            continue
+            posted_line = player_odds.get(odds_key)
 
-        if proj["signal"] == "PASS":
-            continue
+            proj = calculate_prism_projection(
+                season_avg=season_avg,
+                recent_games=recent_games or [],
+                stat_type=stat_key,
+                opponent_def_rating=opp_def_rating,
+                league_avg_def=league_avg_def,
+                game_total=game_total,
+                is_b2b=is_b2b,
+                is_home=player["_is_home"],
+                spread=current_spread,
+                injured_teammates=injured_teammates if stat_key == "pts" else [],
+                posted_line=posted_line,
+                slot_type=slot_type,
+                sport=sport,
+            )
 
-        results.append({
-            "player_name": player_name,
-            "team": team_name,
-            "stat_type": "PTS",
-            "projection": proj["projection"],
-            "line": proj["line"],
-            "edge": proj["edge"],
-            "signal": proj["signal"],
-            "confidence": proj["confidence"],
-            "streak": proj["streak"],
-            "minutes_unstable": proj["minutes_unstable"],
-        })
+            if proj is None:
+                continue
+
+            if proj["signal"] in ("PASS", "SKIP"):
+                continue
+
+            results.append({
+                "player_name": player_name,
+                "team": team_name,
+                "stat_type": label,
+                "projection": proj["projection"],
+                "line": proj["line"],
+                "edge": proj["edge"],
+                "signal": proj["signal"],
+                "confidence": proj["confidence"],
+                "streak": proj["streak"],
+                "minutes_unstable": proj["minutes_unstable"],
+            })
 
     # Sort by abs(edge) descending
     results.sort(key=lambda x: abs(x["edge"]), reverse=True)

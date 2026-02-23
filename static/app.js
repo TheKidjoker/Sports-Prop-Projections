@@ -107,6 +107,7 @@ document.addEventListener("DOMContentLoaded", function () {
             dashboardVisible = false;
             lottoResults.classList.add("hidden");
             lottoResults.innerHTML = "";
+            if (testmodelSection) testmodelSection.classList.add("hidden");
             welcomeHero.classList.remove("hidden");
 
             // Hide manual form when ALL is selected (it's sport-specific)
@@ -142,6 +143,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     .then(function (scanData) {
                         if (scanData.success) {
                             renderScanResults(scanData.games || []);
+                            // Hide cache indicator — fresh data arrived
+                            var ci = document.getElementById("cache-indicator");
+                            if (ci) ci.classList.add("hidden");
                         }
                     })
                     .catch(function () { /* silent fail — next tick retries */ });
@@ -221,6 +225,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        if (testmodelSection) testmodelSection.classList.add("hidden");
         welcomeHero.classList.add("hidden");
 
         fetch("/api/scan", {
@@ -245,6 +250,22 @@ document.addEventListener("DOMContentLoaded", function () {
                 renderScanResults(data.games || []);
             }
 
+            // Show cache indicator if results came from cache
+            if (data.cached && data.cache_age) {
+                var mins = Math.round(data.cache_age / 60);
+                var label = mins < 1 ? "just now" : mins + " min ago";
+                var indicator = document.getElementById("cache-indicator");
+                if (indicator) {
+                    indicator.textContent = "Updated " + label + " \u2022 Refreshing...";
+                    indicator.classList.remove("hidden");
+                    // Hide after fresh data arrives (next poll)
+                    setTimeout(function () { indicator.classList.add("hidden"); }, 180000);
+                }
+            } else {
+                var indicator = document.getElementById("cache-indicator");
+                if (indicator) indicator.classList.add("hidden");
+            }
+
             closeSidebar();
         })
         .catch(function () {
@@ -267,6 +288,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        if (testmodelSection) testmodelSection.classList.add("hidden");
 
         var payload = {
             player_name: document.getElementById("player_name").value,
@@ -390,6 +412,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function renderScanResults(games) {
         welcomeHero.classList.add("hidden");
+
+        // Sort: Today's games first, then Tomorrow's, by score within each group
+        games.sort(function (a, b) {
+            var aDay = a.date_label === "Today" ? 0 : 1;
+            var bDay = b.date_label === "Today" ? 0 : 1;
+            if (aDay !== bDay) return aDay - bDay;
+            return b.confirmation_score - a.confirmation_score;
+        });
+
         if (games.length === 0) {
             scanResults.innerHTML = '<div class="scan-empty-state">' +
                 '<div class="scan-empty-headline">Gotham\'s quiet tonight.</div>' +
@@ -408,7 +439,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (filtered.length === 0) {
             // No strong plays — show top alternatives
-            var alternatives = nonSkip.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; }).slice(0, 5);
+            var alternatives = nonSkip.slice().sort(function (a, b) {
+                var aDay = a.date_label === "Today" ? 0 : 1;
+                var bDay = b.date_label === "Today" ? 0 : 1;
+                if (aDay !== bDay) return aDay - bDay;
+                return b.cover_pct - a.cover_pct;
+            }).slice(0, 5);
 
             if (alternatives.length === 0) {
                 scanResults.innerHTML = '<div class="scan-empty-state">' +
@@ -452,7 +488,12 @@ document.addEventListener("DOMContentLoaded", function () {
         var filteredIds = filtered.map(function (g) { return g.home_team + g.away_team; });
         var nearMisses = nonSkip.filter(function (g) {
             return g.cover_pct >= 58 && g.cover_pct < 68.5 && filteredIds.indexOf(g.home_team + g.away_team) === -1;
-        }).sort(function (a, b) { return b.cover_pct - a.cover_pct; }).slice(0, 5);
+        }).sort(function (a, b) {
+            var aDay = a.date_label === "Today" ? 0 : 1;
+            var bDay = b.date_label === "Today" ? 0 : 1;
+            if (aDay !== bDay) return aDay - bDay;
+            return b.cover_pct - a.cover_pct;
+        }).slice(0, 5);
 
         if (nearMisses.length > 0) {
             html += '<div class="alt-picks-section">';
@@ -477,7 +518,12 @@ document.addEventListener("DOMContentLoaded", function () {
         var allFiltered = [];
 
         sportOrder.forEach(function (sport) {
-            var games = allSports[sport] || [];
+            var games = (allSports[sport] || []).slice().sort(function (a, b) {
+                var aDay = a.date_label === "Today" ? 0 : 1;
+                var bDay = b.date_label === "Today" ? 0 : 1;
+                if (aDay !== bDay) return aDay - bDay;
+                return b.confirmation_score - a.confirmation_score;
+            });
             var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
 
             html += '<div class="all-sport-section">';
@@ -729,14 +775,38 @@ document.addEventListener("DOMContentLoaded", function () {
     function buildParlaySection(games) {
         if (games.length < 2) return "";
 
-        // Sort by cover_pct descending for parlay building
-        var sorted = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
+        // Build combined pool: spread legs + player prop legs
+        var spreadLegs = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
+
+        // Extract player props from games into parlay-compatible leg objects
+        // Only include Today's props (tomorrow's lines aren't firm yet)
+        var propLegs = [];
+        games.forEach(function (g) {
+            if (!g.player_props || !g.player_props.length) return;
+            if (g.date_label === "Tomorrow") return;
+            g.player_props.forEach(function (p) {
+                var direction = p.signal.indexOf("OVER") !== -1 ? "OVER" : "UNDER";
+                propLegs.push({
+                    cover_pct: p.confidence,
+                    action: p.player_name + " " + direction + " " + p.line + " " + p.stat_type,
+                    is_prop: true,
+                    _prop_signal: p.signal,
+                    _prop_edge: p.edge,
+                });
+            });
+        });
+        propLegs.sort(function (a, b) { return b.cover_pct - a.cover_pct; });
+
+        // Merge both pools sorted by cover_pct
+        var allLegs = spreadLegs.concat(propLegs).sort(function (a, b) {
+            return b.cover_pct - a.cover_pct;
+        });
 
         var html = '<div class="parlays-section">';
         html += '<h2 class="scan-title">The Joker\'s Parlays</h2>';
 
         // Safety Parlay: 2 legs, 80%+ each
-        var safetyLegs = sorted.filter(function (g) { return g.cover_pct >= 80; }).slice(0, 2);
+        var safetyLegs = allLegs.filter(function (g) { return g.cover_pct >= 80; }).slice(0, 2);
         if (safetyLegs.length >= 2) {
             var safetyOdds = calcParlayOdds(safetyLegs);
             var safetyProb = calcCombinedProb(safetyLegs);
@@ -744,22 +814,25 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         // Normal Parlay: 4-6 legs, 67.5%+ each
-        var normalPool = sorted.filter(function (g) { return g.cover_pct >= 67.5; });
+        var normalPool = allLegs.filter(function (g) { return g.cover_pct >= 67.5; });
         var normalLegs = normalPool.slice(0, Math.min(6, Math.max(4, normalPool.length)));
         if (normalLegs.length >= 4) {
             var normalOdds = calcParlayOdds(normalLegs);
             var normalProb = calcCombinedProb(normalLegs);
             html += buildParlayCard("Gotham Gambit", normalLegs, normalOdds, normalProb, "parlay-normal");
         } else if (normalPool.length >= 2) {
-            // Fallback: use what we have if less than 4
             var normalOdds = calcParlayOdds(normalPool);
             var normalProb = calcCombinedProb(normalPool);
             html += buildParlayCard("Gotham Gambit", normalPool, normalOdds, normalProb, "parlay-normal");
         }
 
-        // YOLO Parlay: all qualifying legs
-        var yoloPool = sorted.filter(function (g) { return g.cover_pct >= 60; });
-        if (yoloPool.length >= 4) {
+        // YOLO Parlay: spread legs + sprinkle in top player props
+        var yoloSpreads = spreadLegs.filter(function (g) { return g.cover_pct >= 60; });
+        var yoloProps = propLegs.slice(0, 3); // top 3 props by confidence
+        var yoloPool = yoloSpreads.concat(yoloProps).sort(function (a, b) {
+            return b.cover_pct - a.cover_pct;
+        });
+        if (yoloPool.length >= 3) {
             var yoloLegs = yoloPool.slice(0, Math.min(10, yoloPool.length));
             var yoloOdds = calcParlayOdds(yoloLegs);
             var yoloProb = calcCombinedProb(yoloLegs);
@@ -782,7 +855,11 @@ document.addEventListener("DOMContentLoaded", function () {
         legs.forEach(function (g) {
             var legOdds = pctToAmericanOdds(g.cover_pct);
             var pickLabel = g.action || (g.lean_team ? g.lean_team : g.home_team);
-            html += '<div class="parlay-leg">';
+            var legClass = g.is_prop ? "parlay-leg parlay-leg-prop" : "parlay-leg";
+            html += '<div class="' + legClass + '">';
+            if (g.is_prop) {
+                html += '<span class="parlay-leg-tag">PROP</span>';
+            }
             html += '<span class="parlay-leg-pick">' + pickLabel + '</span>';
             html += '<span class="parlay-leg-odds">' + legOdds + '</span>';
             html += '<span class="parlay-leg-pct">' + g.cover_pct + '%</span>';
@@ -875,6 +952,7 @@ document.addEventListener("DOMContentLoaded", function () {
         errorBanner.classList.add("hidden");
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
+        if (testmodelSection) testmodelSection.classList.add("hidden");
 
         fetch("/api/scan", {
             method: "POST",
@@ -989,6 +1067,7 @@ document.addEventListener("DOMContentLoaded", function () {
         errorBanner.classList.add("hidden");
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        if (testmodelSection) testmodelSection.classList.add("hidden");
         dashboardSection.classList.remove("hidden");
         dashboardVisible = true;
         fetchDashboard();
@@ -1222,4 +1301,415 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '</div>';
         return html;
     }
+
+    // ─── Test Model ─────────────────────────────────────────────────────
+
+    var testmodelBtn = document.getElementById("testmodel-btn");
+    var testmodelLoading = document.getElementById("testmodel-loading");
+    var testmodelSection = document.getElementById("testmodel-section");
+    var tmCollectPollTimer = null;
+    var tmBacktestPollTimer = null;
+
+    // Show Test Model section
+    testmodelBtn.addEventListener("click", function () {
+        welcomeHero.classList.add("hidden");
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
+        testmodelSection.classList.remove("hidden");
+
+        // Load metrics on first open
+        tmLoadMetrics();
+
+        if (window.innerWidth <= 768) closeSidebar();
+    });
+
+    // Hide testmodel section on home/sport change
+    var origHomeClick = document.getElementById("nav-home-btn").onclick;
+    document.getElementById("nav-home-btn").addEventListener("click", function () {
+        testmodelSection.classList.add("hidden");
+    });
+
+    // Tab switching
+    document.querySelectorAll(".tm-tab").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+            document.querySelectorAll(".tm-tab").forEach(function (t) { t.classList.remove("active"); });
+            tab.classList.add("active");
+            var target = tab.getAttribute("data-tm-tab");
+            document.querySelectorAll(".tm-panel").forEach(function (p) { p.classList.add("hidden"); });
+            document.getElementById("tm-panel-" + target).classList.remove("hidden");
+
+            if (target === "metrics") tmLoadMetrics();
+        });
+    });
+
+    // ── Collection ──
+    document.getElementById("tm-collect-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-collect-btn");
+        btn.disabled = true;
+        btn.textContent = "Collecting...";
+
+        fetch("/api/tm/collect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: currentSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.success) {
+                tmStartCollectPoll();
+            } else {
+                btn.disabled = false;
+                btn.textContent = "Start Collection";
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Start Collection";
+        });
+    });
+
+    function tmStartCollectPoll() {
+        if (tmCollectPollTimer) clearInterval(tmCollectPollTimer);
+        tmCollectPollTimer = setInterval(tmPollCollect, 5000);
+        tmPollCollect();
+    }
+
+    function tmPollCollect() {
+        fetch("/api/tm/collect/status?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var prog = data.progress || {};
+                var el = document.getElementById("tm-collect-progress");
+                var status = document.getElementById("tm-collect-status");
+
+                if (prog.status === "running") {
+                    var pct = prog.total_dates > 0 ? Math.round(prog.done_dates / prog.total_dates * 100) : 0;
+                    el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>';
+                    status.innerHTML = '<div class="tm-progress-text">Collecting ' + currentSport.toUpperCase() + ': ' + prog.done_dates + '/' + prog.total_dates + ' dates (' + (prog.games_collected || 0) + ' games) — ' + (prog.current_date || '') + '</div>';
+                } else if (prog.status === "complete") {
+                    el.innerHTML = '';
+                    status.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-green)">Collection complete! ' + (data.total_games || 0) + ' games collected.</div>';
+                    document.getElementById("tm-collect-btn").disabled = false;
+                    document.getElementById("tm-collect-btn").textContent = "Start Collection";
+                    if (tmCollectPollTimer) clearInterval(tmCollectPollTimer);
+                } else {
+                    // Not started or unknown — stop polling if timer is active
+                    if (tmCollectPollTimer) { clearInterval(tmCollectPollTimer); tmCollectPollTimer = null; }
+                    var dbProg = data.db_progress || {};
+                    var doneCount = dbProg["DONE"] || 0;
+                    var withSpreads = data.games_with_spreads || 0;
+                    var totalGames = data.total_games || 0;
+                    var txt = totalGames + ' games in DB';
+                    if (withSpreads < totalGames) {
+                        txt += ' (' + withSpreads + ' with spread data)';
+                    }
+                    txt += ', ' + doneCount + ' dates collected.';
+                    status.innerHTML = '<div class="tm-progress-text">' + txt + '</div>';
+                }
+            })
+            .catch(function () {});
+    }
+
+    // ── Compute Features ──
+    document.getElementById("tm-features-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-features-btn");
+        btn.disabled = true;
+        btn.textContent = "Computing...";
+
+        fetch("/api/tm/features", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: currentSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            btn.textContent = "Compute Features";
+            var status = document.getElementById("tm-collect-status");
+            if (data.success) {
+                status.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-green)">Features computed: ' + data.features_computed + ' games processed.</div>';
+            } else {
+                status.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Error computing features') + '</div>';
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Compute Features";
+        });
+    });
+
+    // ── Backtest ──
+    document.getElementById("tm-backtest-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-backtest-btn");
+        btn.disabled = true;
+        btn.textContent = "Running Backtest...";
+        document.getElementById("tm-backtest-results").innerHTML = "";
+
+        fetch("/api/tm/backtest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: currentSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.success) {
+                tmStartBacktestPoll();
+            } else {
+                btn.disabled = false;
+                btn.textContent = "Run Backtest";
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Run Backtest";
+        });
+    });
+
+    function tmStartBacktestPoll() {
+        if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
+        tmBacktestPollTimer = setInterval(tmPollBacktest, 5000);
+        tmPollBacktest();
+    }
+
+    function tmPollBacktest() {
+        fetch("/api/tm/backtest/status?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var prog = data.progress || {};
+                var el = document.getElementById("tm-backtest-progress");
+                var resEl = document.getElementById("tm-backtest-results");
+
+                if (prog.status === "running") {
+                    var pct = prog.total_games > 0 ? Math.round(prog.processed / prog.total_games * 100) : 0;
+                    el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>' +
+                        '<div class="tm-progress-text">Backtesting: ' + prog.processed + '/' + prog.total_games + ' games — ' + (prog.current_date || '') + '</div>';
+                } else if (prog.status === "complete") {
+                    el.innerHTML = '';
+                    document.getElementById("tm-backtest-btn").disabled = false;
+                    document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
+                    if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
+
+                    if (prog.metrics) {
+                        resEl.innerHTML = tmRenderMetrics(prog.metrics);
+                    }
+                    tmLoadMetrics();
+                } else if (prog.status === "error") {
+                    el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Backtest error') + '</div>';
+                    document.getElementById("tm-backtest-btn").disabled = false;
+                    document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
+                    if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
+                }
+            })
+            .catch(function () {});
+    }
+
+    // ── Model Scan ──
+    document.getElementById("tm-scan-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-scan-btn");
+        var loadEl = document.getElementById("tm-scan-loading");
+        btn.disabled = true;
+        loadEl.classList.remove("hidden");
+        document.getElementById("tm-scan-results").innerHTML = "";
+
+        fetch("/api/tm/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: currentSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            loadEl.classList.add("hidden");
+            if (data.success) {
+                tmRenderScanResults(data.games || []);
+            } else {
+                document.getElementById("tm-scan-results").innerHTML =
+                    '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Scan failed') + '</div>';
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            loadEl.classList.add("hidden");
+        });
+    });
+
+    function tmRenderScanResults(games) {
+        var el = document.getElementById("tm-scan-results");
+        if (games.length === 0) {
+            el.innerHTML = '<div class="scan-empty-state"><div class="scan-empty-headline">No games to scan.</div></div>';
+            return;
+        }
+
+        var html = '<h3 class="scan-title">' + currentSport.toUpperCase() + ' Model Scan</h3>';
+        html += '<div class="scan-grid">';
+
+        games.forEach(function (g) {
+            html += buildScanCard(g, currentSport);
+
+            // Add model overlay
+            var tm = g.tm_overlay || {};
+            if (tm.available) {
+                // Remove closing </div> of the scan card and append overlay
+                html = html.slice(0, html.lastIndexOf('</div>'));
+                html += tmBuildOverlay(g, tm);
+                html += '</div>';
+            }
+        });
+
+        html += '</div>';
+        el.innerHTML = html;
+    }
+
+    function tmBuildOverlay(game, tm) {
+        var html = '<div class="tm-model-overlay">';
+        html += '<div class="tm-overlay-header">ML MODEL OVERLAY</div>';
+
+        // Model probability
+        var probPct = (tm.model_prob * 100).toFixed(1);
+        var probClass = tm.model_prob >= 0.6 ? "tm-prob-high" : tm.model_prob >= 0.53 ? "tm-prob-mid" : "tm-prob-low";
+        html += '<div class="tm-prob ' + probClass + '">Model: ' + probPct + '% home covers</div>';
+
+        // Edge metrics
+        var edgeClass = tm.model_edge > 0 ? "tm-edge-pos" : "tm-edge-neg";
+        html += '<div class="tm-edge-row">';
+        html += '<div class="tm-edge-item ' + edgeClass + '">Edge: <span>' + (tm.model_edge > 0 ? '+' : '') + (tm.model_edge * 100).toFixed(1) + '%</span></div>';
+        html += '<div class="tm-edge-item ' + edgeClass + '">EV: <span>' + (tm.model_ev > 0 ? '+' : '') + (tm.model_ev * 100).toFixed(1) + 'c</span></div>';
+        html += '<div class="tm-edge-item ' + edgeClass + '">ROI: <span>' + (tm.model_roi > 0 ? '+' : '') + tm.model_roi + '%</span></div>';
+        html += '</div>';
+
+        // Comparison: model vs rules
+        var rulesPct = game.cover_pct || 0;
+        html += '<div class="tm-comparison">';
+        html += '<span class="tm-vs-label">Rules: ' + rulesPct + '%</span>';
+        html += '<span class="tm-vs-label">vs</span>';
+        html += '<span class="tm-vs-label">Model: ' + probPct + '%</span>';
+        html += '</div>';
+
+        // Cluster
+        if (tm.cluster_id >= 0) {
+            html += '<div class="tm-cluster-row">';
+            html += '<span class="tm-cluster-badge">Cluster ' + tm.cluster_id + '</span>';
+            html += '<span class="tm-alignment">Hit Rate: ' + tm.cluster_hit_rate + '% | Alignment: ' + tm.alignment_confidence + '%</span>';
+            html += '</div>';
+        }
+
+        // Sentiment
+        if (tm.sentiment && tm.sentiment.has_sentiment) {
+            html += '<div class="tm-sentiment-row">';
+            var hClass = tm.sentiment.home_sentiment > 0 ? "tm-sentiment-pos" : tm.sentiment.home_sentiment < 0 ? "tm-sentiment-neg" : "tm-sentiment-neutral";
+            var aClass = tm.sentiment.away_sentiment > 0 ? "tm-sentiment-pos" : tm.sentiment.away_sentiment < 0 ? "tm-sentiment-neg" : "tm-sentiment-neutral";
+            html += '<span class="' + hClass + '">Home: ' + tm.sentiment.home_sentiment.toFixed(2) + '</span>';
+            html += '<span class="' + aClass + '">Away: ' + tm.sentiment.away_sentiment.toFixed(2) + '</span>';
+            html += '</div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    // ── Metrics ──
+    function tmLoadMetrics() {
+        var loadEl = document.getElementById("tm-metrics-loading");
+        var contentEl = document.getElementById("tm-metrics-content");
+        loadEl.classList.remove("hidden");
+        contentEl.innerHTML = "";
+
+        fetch("/api/tm/metrics?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                loadEl.classList.add("hidden");
+                if (!data.success) return;
+
+                var html = '<div class="tm-progress-text">Games: ' + (data.total_games || 0) + ' | Features: ' + (data.total_features || 0) + '</div>';
+
+                if (data.metrics) {
+                    html += tmRenderMetrics(data.metrics);
+                } else {
+                    html += '<div class="tm-progress-text">No backtest results yet. Collect data, compute features, then run a backtest.</div>';
+                }
+
+                contentEl.innerHTML = html;
+            })
+            .catch(function () {
+                loadEl.classList.add("hidden");
+            });
+    }
+
+    function tmRenderMetrics(m) {
+        if (!m) return '';
+
+        var html = '';
+
+        // Stat cards
+        var accClass = m.accuracy >= 55 ? "stat-green" : m.accuracy >= 50 ? "stat-yellow" : "stat-red";
+        var roiClass = m.roi > 0 ? "stat-green" : m.roi >= -3 ? "stat-yellow" : "stat-red";
+        var clvClass = m.clv_avg > 0 ? "stat-green" : "stat-red";
+
+        html += '<div class="tm-stat-cards">';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Accuracy</div><div class="tm-stat-value ' + accClass + '">' + (m.accuracy || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">ROI</div><div class="tm-stat-value ' + roiClass + '">' + (m.roi > 0 ? '+' : '') + (m.roi || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">CLV</div><div class="tm-stat-value ' + clvClass + '">' + (m.clv_avg > 0 ? '+' : '') + (m.clv_avg || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">ECE</div><div class="tm-stat-value">' + (m.calibration_error || 0) + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Total</div><div class="tm-stat-value">' + (m.total_predictions || 0) + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Bets</div><div class="tm-stat-value">' + (m.qualified_bets || 0) + '</div></div>';
+        html += '</div>';
+
+        // Threshold analysis table
+        if (m.threshold_analysis && Object.keys(m.threshold_analysis).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">Threshold Analysis</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Threshold</th><th>Bets</th><th>Accuracy</th><th>ROI</th></tr></thead><tbody>';
+            Object.keys(m.threshold_analysis).sort().forEach(function (key) {
+                var t = m.threshold_analysis[key];
+                var trClass = t.roi > 0 ? 'style="color:var(--accent-green)"' : '';
+                html += '<tr ' + trClass + '><td>' + (t.threshold * 100).toFixed(0) + '%</td><td>' + t.bet_count + '</td><td>' + t.accuracy + '%</td><td>' + (t.roi > 0 ? '+' : '') + t.roi + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Confidence buckets table
+        if (m.confidence_buckets && Object.keys(m.confidence_buckets).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">Confidence Buckets</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Range</th><th>Count</th><th>Hit Rate</th></tr></thead><tbody>';
+            Object.keys(m.confidence_buckets).forEach(function (key) {
+                var b = m.confidence_buckets[key];
+                html += '<tr><td>' + key + '</td><td>' + b.count + '</td><td>' + b.hit_rate + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Feature importances
+        if (m.feature_importances) {
+            var feats = m.feature_importances;
+            var keys = Object.keys(feats).sort(function (a, b) { return feats[b] - feats[a]; }).slice(0, 15);
+            if (keys.length > 0) {
+                var maxVal = feats[keys[0]] || 0.01;
+                html += '<div class="tm-feat-section">';
+                html += '<h3 class="tm-feat-title">Top Feature Importances</h3>';
+                keys.forEach(function (k) {
+                    var pct = Math.round(feats[k] / maxVal * 100);
+                    html += '<div class="tm-feat-row">';
+                    html += '<span class="tm-feat-name">' + k + '</span>';
+                    html += '<div class="tm-feat-bar-container"><div class="tm-feat-bar" style="width:' + pct + '%"></div></div>';
+                    html += '<span class="tm-feat-value">' + (feats[k] * 100).toFixed(1) + '%</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        }
+
+        return html;
+    }
+
+    // Initial poll of collection status
+    tmPollCollect();
 });

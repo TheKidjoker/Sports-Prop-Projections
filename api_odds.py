@@ -132,27 +132,36 @@ def get_player_props_odds(sport="nba"):
         params = {
             "apiKey": api_key,
             "regions": "us",
-            "markets": "player_points",
+            "markets": "player_points,player_rebounds,player_assists",
             "oddsFormat": "american",
         }
         data = _cached_request(url, params=params, timeout=15)
         if data is None:
             return {}
 
+        # Map market keys to our stat names
+        market_to_stat = {
+            "player_points": "points",
+            "player_rebounds": "rebounds",
+            "player_assists": "assists",
+        }
+
         props = {}
         for game in data:
             for bookmaker in game.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
-                    if market.get("key") != "player_points":
+                    stat_name = market_to_stat.get(market.get("key"))
+                    if not stat_name:
                         continue
                     for outcome in market.get("outcomes", []):
                         name = outcome.get("description", "")
                         point = outcome.get("point")
                         if name and point is not None:
-                            # Normalize name: lowercase, strip
                             norm = name.strip().lower()
                             if norm not in props:
-                                props[norm] = {"points": float(point)}
+                                props[norm] = {}
+                            if stat_name not in props[norm]:
+                                props[norm][stat_name] = float(point)
         return props
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):

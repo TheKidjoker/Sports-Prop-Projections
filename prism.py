@@ -59,13 +59,21 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
         weighted_avg = season_avg
 
     # ── 2. Matchup Multiplier ──
-    if opponent_def_rating and league_avg_def:
+    # Points: full weight (opponent defense directly impacts scoring)
+    # Assists: half weight (more baskets = more assists, loosely correlated)
+    # Rebounds: neutral (we only have pts-allowed data, not reb-allowed)
+    if opponent_def_rating and league_avg_def and stat_type == "pts":
         matchup_mult = opponent_def_rating / league_avg_def
         matchup_mult = max(0.85, min(1.20, matchup_mult))
         matchup_available = True
+    elif opponent_def_rating and league_avg_def and stat_type == "ast":
+        raw_mult = opponent_def_rating / league_avg_def
+        matchup_mult = 1.0 + (raw_mult - 1.0) * 0.5
+        matchup_mult = max(0.92, min(1.10, matchup_mult))
+        matchup_available = True
     else:
         matchup_mult = 1.0
-        matchup_available = False
+        matchup_available = stat_type == "reb"  # reb uses pace instead
 
     # ── 3. Pace Factor ──
     if game_total and game_total > 0:
@@ -80,8 +88,11 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     # ── 5. Home/Away Adjustment ──
     home_away_adj = 1.03 if is_home else 0.98
 
-    # ── 6. Blowout Discount ──
-    blowout_disc = 0.88 if (spread is not None and abs(spread) > 10) else 1.0
+    # ── 6. Blowout Discount (points only — reduced minutes hit scoring most) ──
+    if stat_type == "pts" and spread is not None and abs(spread) > 10:
+        blowout_disc = 0.88
+    else:
+        blowout_disc = 1.0
 
     # ── 7. Injury Usage Boost (points only) ──
     usage_boost = 0.0
@@ -97,7 +108,7 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     # ── Edge calculation ──
     line = posted_line
     if line is None:
-        line = estimate_line_from_average(season_avg)
+        line = estimate_line_from_average(season_avg, stat_type)
     if line is None or line <= 0:
         return None
 
@@ -208,14 +219,16 @@ def calculate_minutes_volatility(recent_games):
     return stdev, stdev > 5.0
 
 
-def estimate_line_from_average(season_avg):
+def estimate_line_from_average(season_avg, stat_type="pts"):
     """
     Tier 2 fallback when no Odds API key: estimated line from season average.
     Books typically set lines slightly below the average.
+    Lower-volume stats (reb, ast) get more cushion since variance is higher.
     """
     if season_avg is None or season_avg <= 0:
         return None
-    return round(season_avg * 0.97, 1)
+    discount = {"pts": 0.97, "reb": 0.94, "ast": 0.93}.get(stat_type, 0.97)
+    return round(season_avg * discount, 1)
 
 
 def _calculate_confidence(edge, num_recent_games, matchup_available,

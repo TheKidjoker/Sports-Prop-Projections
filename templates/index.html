@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260223">
 </head>
 <body>
     <!-- Sidebar overlay -->
@@ -40,6 +40,18 @@
             </div>
 
             <button type="button" id="ledger-btn">The Ledger</button>
+
+            <button type="button" id="testmodel-btn">Test Model</button>
+            <div id="testmodel-loading" class="sonar-loading hidden">
+                <div class="sonar-container">
+                    <div class="sonar-ring ring-1"></div>
+                    <div class="sonar-ring ring-2"></div>
+                    <div class="sonar-ring ring-3"></div>
+                    <div class="sonar-sweep"></div>
+                    <div class="sonar-dot"></div>
+                </div>
+                <p class="sonar-text">Loading Test Model<span class="sonar-dots"></span></p>
+            </div>
 
             <button type="button" id="lotto-btn">Joker's Lotto</button>
             <div id="lotto-loading" class="sonar-loading hidden">
@@ -139,7 +151,7 @@
 
         <section id="dashboard-section" class="dashboard-section hidden">
             <div class="dashboard-header">
-                <h2 class="dashboard-title">The Joker's Ledger</h2>
+                <h2 class="dashboard-title ledger-title">The Joker's Ledger</h2>
                 <div class="dashboard-controls">
                     <select id="dashboard-sport-filter" class="dashboard-filter">
                         <option value="">All Sports</option>
@@ -165,6 +177,49 @@
 
         <div id="lotto-results" class="lotto-results hidden"></div>
 
+        <!-- Test Model Section -->
+        <section id="testmodel-section" class="testmodel-section hidden">
+            <h2 class="dashboard-title tm-section-title">Test Model</h2>
+            <div class="tm-tabs">
+                <button type="button" class="tm-tab active" data-tm-tab="scan">Today's Model</button>
+                <button type="button" class="tm-tab" data-tm-tab="backtest">Backtest</button>
+                <button type="button" class="tm-tab" data-tm-tab="collect">Data Collection</button>
+                <button type="button" class="tm-tab" data-tm-tab="metrics">Metrics</button>
+            </div>
+
+            <div id="tm-panel-scan" class="tm-panel">
+                <button type="button" class="tm-action-btn" id="tm-scan-btn">Run Model Scan</button>
+                <div id="tm-scan-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Running ML model scan...</p>
+                </div>
+                <div id="tm-scan-results"></div>
+            </div>
+
+            <div id="tm-panel-backtest" class="tm-panel hidden">
+                <button type="button" class="tm-action-btn" id="tm-backtest-btn">Run Backtest</button>
+                <div id="tm-backtest-progress"></div>
+                <div id="tm-backtest-results"></div>
+            </div>
+
+            <div id="tm-panel-collect" class="tm-panel hidden">
+                <div class="tm-collect-actions">
+                    <button type="button" class="tm-action-btn" id="tm-collect-btn">Start Collection</button>
+                    <button type="button" class="tm-action-btn tm-action-secondary" id="tm-features-btn">Compute Features</button>
+                </div>
+                <div id="tm-collect-progress"></div>
+                <div id="tm-collect-status"></div>
+            </div>
+
+            <div id="tm-panel-metrics" class="tm-panel hidden">
+                <div id="tm-metrics-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Loading metrics...</p>
+                </div>
+                <div id="tm-metrics-content"></div>
+            </div>
+        </section>
+
         <div id="scan-sonar" class="scan-sonar hidden">
             <div class="sonar-container sonar-lg">
                 <div class="sonar-ring ring-1"></div>
@@ -176,6 +231,7 @@
             <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
         </div>
 
+        <div id="cache-indicator" class="cache-indicator hidden"></div>
         <div id="scan-results" class="scan-results hidden"></div>
 
         <div id="results" class="results hidden">
@@ -230,6 +286,6 @@
         <div class="ticker-track" id="ticker-track"></div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260223"></script>
 </body>
 </html>
