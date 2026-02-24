@@ -566,8 +566,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      h2h_revenge_bonus=False, h2h_dominance_bonus=False,
                      vegas_trap_bonus=0):
     """
-    Scoring (backtested adjustments: * = NBA, ** = CBB):
-      +10/+5*/+5**  public slot (NBA: +5, CBB: +5, others: +10)
+    Scoring (backtested adjustments: * = NBA, ** = CBB V2):
+      +10/+5*/+3**  public slot (NBA: +5, CBB: +3, others: +10)
       +0-8/+0-5*  line movement confirms slot (NBA: reduced weights)
       +5   trell rule confirms
       +5   rank scam detected (CFB/CBB)
@@ -575,15 +575,15 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
-      -3/0*/0**  spread size penalty (NBA+CBB: removed — large spreads cover well)
+      -3/0*/special**  spread (NBA: removed; CBB V2: -3 tiny, +3 sweet, -2 big)
       +4/-3 or +2/-1*  back-to-back rest (NBA: reduced, others: original)
-      +4/-3 or +2/-1**  ATS record (CBB: reduced — noisy signal)
-      +3/+1**  home/away split (CBB: reduced — negative lift)
+      +4/-3 or 0/0**  ATS record (CBB V2: removed — penalty was backwards)
+      +3/0**  home/away split (CBB V2: removed — -7.9% lift)
       +3/+5 public betting / sharp money (all)
       -2/+3 feedback loop (all)
-      +3/+2 or +1*/+1**  head-to-head (NBA+CBB: revenge reduced to +1)
+      +3/+2 or +1*/0**  head-to-head (CBB V2: removed — noise)
       +5/+7 vegas trap (NBA only)
-      = 39 max (NBA), 42 max (NHL), 33 max (CBB), 48 max (CFB), 53 max (NFL)
+      = 39 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 53 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
@@ -597,7 +597,7 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                  "vegas_trap": 0}
 
     if slot_type == "public":
-        breakdown["slot"] = 5 if sport in ("nba", "cbb") else 10
+        breakdown["slot"] = 5 if sport == "nba" else (3 if sport == "cbb" else 10)
     if line_confirms:
         breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
@@ -618,27 +618,35 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["b2b"] = 2 if sport == "nba" else 4
     elif b2b_penalty:
         breakdown["b2b"] = -1 if sport == "nba" else -3
-    # ATS: CBB reduced (backtested — noisy signal)
+    # ATS: CBB V2 removed (backtested — penalty was backwards, bonus flat)
     if ats_bonus:
-        breakdown["ats_record"] = 2 if sport == "cbb" else 4
+        breakdown["ats_record"] = 0 if sport == "cbb" else 4
     elif ats_penalty:
-        breakdown["ats_record"] = -1 if sport == "cbb" else -3
-    # Home/away split: CBB reduced (backtested — negative lift)
+        breakdown["ats_record"] = 0 if sport == "cbb" else -3
+    # Home/away split: CBB V2 removed (backtested — -7.9% lift)
     if home_away_applies:
-        breakdown["home_away_split"] = 1 if sport == "cbb" else 3
+        breakdown["home_away_split"] = 0 if sport == "cbb" else 3
     breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
-    # H2H: NBA + CBB revenge reduced (backtested — minimal lift)
+    # H2H: NBA revenge reduced, CBB V2 removed (backtested — noise)
     if h2h_revenge_bonus:
-        breakdown["head_to_head"] = 1 if sport in ("nba", "cbb") else 3
+        breakdown["head_to_head"] = 0 if sport == "cbb" else (1 if sport == "nba" else 3)
     elif h2h_dominance_bonus:
-        breakdown["head_to_head"] = 2
+        breakdown["head_to_head"] = 0 if sport == "cbb" else 2
     breakdown["vegas_trap"] = vegas_trap_bonus
 
-    # Spread size penalty: NBA + CBB removed (backtested — large spreads cover well)
-    if spread_value is not None and sport not in ("nba", "cbb"):
+    # Spread size: NBA removed; CBB V2 has sweet spot + penalties; others penalize big spreads
+    if spread_value is not None and sport != "nba":
         spread_abs = abs(spread_value)
-        if sport == "nfl" and spread_abs > 10:
+        if sport == "cbb":
+            # CBB V2: 6-10 sweet spot (+3), tiny spreads (-3), big spreads (-2)
+            if 6 <= spread_abs < 10:
+                breakdown["spread_penalty"] = 3   # sweet spot bonus
+            elif spread_abs < 3:
+                breakdown["spread_penalty"] = -3  # coin-flip territory
+            elif spread_abs >= 15:
+                breakdown["spread_penalty"] = -2  # blowout territory
+        elif sport == "nfl" and spread_abs > 10:
             breakdown["spread_penalty"] = -3
         elif sport == "nhl" and spread_abs > 8:
             breakdown["spread_penalty"] = -3

@@ -380,6 +380,14 @@ def run_rules_backtest(sport):
                     recommendation = "LEAN"
                 else:
                     recommendation = "MONITOR"
+        elif sport == "cbb":
+            # CBB V2: lower thresholds based on score bucket accuracy
+            if score >= 13:
+                recommendation = "STRONG PLAY"
+            elif score >= 10:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
         else:
             if score >= 15:
                 recommendation = "STRONG PLAY"

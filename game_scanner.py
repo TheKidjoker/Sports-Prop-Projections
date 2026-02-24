@@ -458,7 +458,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     elif sport == "cfb":
         max_score = 48
     elif sport == "cbb":
-        max_score = 33  # Reduced after backtesting adjustments
+        max_score = 37  # CBB V2 backtested adjustments
     elif sport == "nba":
         max_score = 39  # Reduced after backtesting adjustments
     else:
@@ -484,10 +484,10 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             else:
                 recommendation = "MONITOR"
     elif sport == "cbb":
-        # CBB backtested: raise LEAN bar to avoid 10-14 dead zone
-        if score >= 15:
+        # CBB V2 backtested: score 10-13 is 62.5% acc, lower thresholds
+        if score >= 13:
             recommendation = "STRONG PLAY"
-        elif score >= 12:
+        elif score >= 10:
             recommendation = "LEAN"
         else:
             recommendation = "MONITOR"
