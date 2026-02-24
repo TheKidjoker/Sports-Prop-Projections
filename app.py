@@ -38,11 +38,15 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
+_jwks_client = None
+if SUPABASE_URL:
+    _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/jwks")
+
 
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not SUPABASE_JWT_SECRET:
+        if not SUPABASE_JWT_SECRET and not _jwks_client:
             # Auth not configured — allow through (local dev)
             return f(*args, **kwargs)
         auth_header = request.headers.get("Authorization", "")
@@ -51,12 +55,20 @@ def require_auth(f):
         token = auth_header[7:]
         try:
             header = jwt.get_unverified_header(token)
-            print(f"[AUTH] Token alg: {header.get('alg')}", flush=True)
-            jwt.decode(
-                token, SUPABASE_JWT_SECRET,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
+            alg = header.get("alg", "HS256")
+            if alg == "ES256" and _jwks_client:
+                signing_key = _jwks_client.get_signing_key_from_jwt(token)
+                jwt.decode(
+                    token, signing_key.key,
+                    algorithms=["ES256"],
+                    audience="authenticated",
+                )
+            else:
+                jwt.decode(
+                    token, SUPABASE_JWT_SECRET,
+                    algorithms=["HS256"],
+                    audience="authenticated",
+                )
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError as e:

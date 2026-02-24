@@ -5,4 +5,4 @@ supabase
 scikit-learn
 vaderSentiment
 numpy
-PyJWT
+PyJWT[crypto]
