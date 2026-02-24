@@ -9,7 +9,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 DB_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "test_model.db"
 )
