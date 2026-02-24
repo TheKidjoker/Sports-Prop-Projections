@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260223a">
+    <link rel="stylesheet" href="/static/style.css?v=20260224a">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -206,7 +206,39 @@
 
         <!-- Test Model Section -->
         <section id="testmodel-section" class="testmodel-section hidden">
-            <h2 class="dashboard-title tm-section-title">Test Model</h2>
+            <div class="tm-title-row">
+                <h2 class="dashboard-title tm-section-title">Test Model</h2>
+                <button type="button" class="tm-legend-btn" id="tm-legend-btn" aria-label="Terminology legend" title="Terminology legend">?</button>
+            </div>
+            <div class="tm-sport-bar">
+                <button type="button" class="tm-sport-btn active" data-tm-sport="nba">NBA</button>
+                <button type="button" class="tm-sport-btn" data-tm-sport="nhl">NHL</button>
+                <button type="button" class="tm-sport-btn" data-tm-sport="nfl">NFL</button>
+                <button type="button" class="tm-sport-btn" data-tm-sport="cfb">CFB</button>
+                <button type="button" class="tm-sport-btn" data-tm-sport="cbb">CBB</button>
+            </div>
+            <div id="tm-legend-panel" class="tm-legend-panel hidden">
+                <div class="tm-legend-grid">
+                    <div class="tm-legend-item"><span class="tm-legend-term">Accuracy</span><span class="tm-legend-def">Win rate of predictions (% of correct ATS picks)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">ROI</span><span class="tm-legend-def">Return on investment assuming -110 vig on each bet</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">CLV</span><span class="tm-legend-def">Closing Line Value — average edge at time of pick</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Lift</span><span class="tm-legend-def">% improvement when a factor fires vs when it doesn't</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Slot</span><span class="tm-legend-def">Time-based classification (public = casual money, vegas = sharp money)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Lean</span><span class="tm-legend-def">Predicted ATS side (team expected to cover the spread)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Trell Rule</span><span class="tm-legend-def">+5 bonus when opponent's star player is injured</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">PRISM</span><span class="tm-legend-def">Player Rating & Inference Statistical Model (player props engine)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Confirmation Score</span><span class="tm-legend-def">Total weighted score from all analysis factors</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">ATS</span><span class="tm-legend-def">Against The Spread — did the team cover?</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">B2B</span><span class="tm-legend-def">Back-to-back games (fatigue factor)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">H2H</span><span class="tm-legend-def">Head-to-head history between the two teams</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Line Movement</span><span class="tm-legend-def">How the spread changed from open to close</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Rank Scam</span><span class="tm-legend-def">Ranked team spread doesn't match expected tier range</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">Vegas Trap</span><span class="tm-legend-def">Large underdog with strong recent form (sharp money expected)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">STRONG PLAY</span><span class="tm-legend-def">Highest confidence tier (score >= threshold)</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">LEAN</span><span class="tm-legend-def">Medium confidence tier</span></div>
+                    <div class="tm-legend-item"><span class="tm-legend-term">MONITOR</span><span class="tm-legend-def">Low confidence, no bet recommended</span></div>
+                </div>
+            </div>
             <div class="tm-tabs">
                 <button type="button" class="tm-tab active" data-tm-tab="scan">Today's Model</button>
                 <button type="button" class="tm-tab" data-tm-tab="backtest">Backtest</button>
@@ -323,6 +355,6 @@
 
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260223a"></script>
+    <script src="/static/app.js?v=20260224a"></script>
 </body>
 </html>

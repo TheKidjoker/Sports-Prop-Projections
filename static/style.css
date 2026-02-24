@@ -2599,6 +2599,140 @@ button[type="submit"]:disabled {
     text-transform: uppercase;
 }
 
+/* ── Test Model Title Row ── */
+.tm-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+/* ── Test Model Sport Switcher ── */
+.tm-sport-bar {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.tm-sport-btn {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-base);
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.2s;
+}
+
+.tm-sport-btn:hover:not(.active) {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border-color: var(--text-muted);
+}
+
+.tm-sport-btn.active {
+    background: var(--accent-red);
+    color: #fff;
+    border-color: var(--accent-red);
+}
+
+/* ── Terminology Legend ── */
+.tm-legend-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-base);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.tm-legend-btn:hover {
+    background: var(--accent-red-dim);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.tm-legend-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    animation: tm-legend-slide 0.2s ease-out;
+}
+
+@keyframes tm-legend-slide {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.tm-legend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1.5rem;
+}
+
+.tm-legend-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.tm-legend-item:nth-last-child(-n+2) {
+    border-bottom: none;
+}
+
+.tm-legend-term {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--accent-red);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.tm-legend-def {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* ── Historical Accuracy Badge ── */
+.scan-backtest-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    background: rgba(88, 166, 255, 0.08);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 4px;
+    margin-bottom: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--accent-blue);
+}
+
+.scan-backtest-badge .backtest-rate {
+    font-weight: 700;
+}
+
+.scan-backtest-badge .backtest-sample {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
 /* =========================================
    Auth Gate (Login Screen)
    ========================================= */
@@ -2873,6 +3007,19 @@ button[type="submit"]:disabled {
     .tm-edge-row {
         flex-direction: column;
         gap: 0.2rem;
+    }
+
+    .tm-sport-bar {
+        flex-wrap: wrap;
+    }
+
+    .tm-sport-btn {
+        padding: 0.35rem 0.7rem;
+        font-size: 0.7rem;
+    }
+
+    .tm-legend-grid {
+        grid-template-columns: 1fr;
     }
 
     .cache-indicator {

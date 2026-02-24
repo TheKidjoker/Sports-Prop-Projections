@@ -24,7 +24,9 @@ try:
     from test_model.scanner import scan_today_with_model
     from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
     HAS_TEST_MODEL = True
-except ImportError:
+except Exception as _tm_err:
+    import traceback
+    print("[test_model] Import failed:", traceback.format_exc())
     HAS_TEST_MODEL = False
 
 app = Flask(__name__)

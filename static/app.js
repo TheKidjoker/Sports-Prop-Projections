@@ -897,6 +897,14 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
+        // Historical accuracy badge (backtested data)
+        if (g.historical_accuracy && g.historical_sample_size) {
+            html += '<div class="scan-backtest-badge">';
+            html += '<span class="backtest-rate">' + g.historical_accuracy + '% hit rate</span>';
+            html += '<span class="backtest-sample">(' + g.historical_sample_size + ' similar picks)</span>';
+            html += '</div>';
+        }
+
         html += '</div>';
         return html;
     }
@@ -1439,6 +1447,53 @@ document.addEventListener("DOMContentLoaded", function () {
     var tmCollectPollTimer = null;
     var tmBacktestPollTimer = null;
     var tmRulesPollTimer = null;
+    var tmSport = "nba";
+
+    // TM Sport switcher
+    var tmSportBtns = document.querySelectorAll(".tm-sport-btn");
+    tmSportBtns.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var newSport = btn.getAttribute("data-tm-sport");
+            if (newSport === tmSport) return;
+            tmSport = newSport;
+            tmSportBtns.forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            // Clear progress/results in all panels
+            document.getElementById("tm-scan-results").innerHTML = "";
+            document.getElementById("tm-backtest-progress").innerHTML = "";
+            document.getElementById("tm-backtest-results").innerHTML = "";
+            document.getElementById("tm-rules-progress").innerHTML = "";
+            document.getElementById("tm-rules-results").innerHTML = "";
+            document.getElementById("tm-collect-progress").innerHTML = "";
+            document.getElementById("tm-collect-status").innerHTML = "";
+            document.getElementById("tm-metrics-content").innerHTML = "";
+            // Stop any active poll timers
+            if (tmCollectPollTimer) { clearInterval(tmCollectPollTimer); tmCollectPollTimer = null; }
+            if (tmBacktestPollTimer) { clearInterval(tmBacktestPollTimer); tmBacktestPollTimer = null; }
+            if (tmRulesPollTimer) { clearInterval(tmRulesPollTimer); tmRulesPollTimer = null; }
+            // Re-enable buttons
+            document.getElementById("tm-collect-btn").disabled = false;
+            document.getElementById("tm-collect-btn").textContent = "Start Collection";
+            document.getElementById("tm-backtest-btn").disabled = false;
+            document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
+            document.getElementById("tm-rules-btn").disabled = false;
+            document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
+            // Reload data for active tab
+            var activeTab = document.querySelector(".tm-tab.active");
+            var target = activeTab ? activeTab.getAttribute("data-tm-tab") : "scan";
+            if (target === "metrics") tmLoadMetrics();
+            if (target === "rules") tmLoadRulesMetrics();
+            if (target === "collect") tmPollCollect();
+        });
+    });
+
+    // TM Legend toggle
+    var tmLegendBtn = document.getElementById("tm-legend-btn");
+    if (tmLegendBtn) {
+        tmLegendBtn.addEventListener("click", function () {
+            document.getElementById("tm-legend-panel").classList.toggle("hidden");
+        });
+    }
 
     // Show Test Model section
     testmodelBtn.addEventListener("click", function () {
@@ -1488,7 +1543,7 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/tm/collect", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: tmSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -1497,11 +1552,13 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 btn.disabled = false;
                 btn.textContent = "Start Collection";
+                document.getElementById("tm-collect-status").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Collection failed') + '</div>';
             }
         })
         .catch(function () {
             btn.disabled = false;
             btn.textContent = "Start Collection";
+            document.getElementById("tm-collect-status").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Connection error</div>';
         });
     });
 
@@ -1512,7 +1569,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function tmPollCollect() {
-        authFetch("/api/tm/collect/status?sport=" + currentSport)
+        authFetch("/api/tm/collect/status?sport=" + tmSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1523,7 +1580,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (prog.status === "running") {
                     var pct = prog.total_dates > 0 ? Math.round(prog.done_dates / prog.total_dates * 100) : 0;
                     el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>';
-                    status.innerHTML = '<div class="tm-progress-text">Collecting ' + currentSport.toUpperCase() + ': ' + prog.done_dates + '/' + prog.total_dates + ' dates (' + (prog.games_collected || 0) + ' games) — ' + (prog.current_date || '') + '</div>';
+                    status.innerHTML = '<div class="tm-progress-text">Collecting ' + tmSport.toUpperCase() + ': ' + prog.done_dates + '/' + prog.total_dates + ' dates (' + (prog.games_collected || 0) + ' games) — ' + (prog.current_date || '') + '</div>';
                 } else if (prog.status === "complete") {
                     el.innerHTML = '';
                     status.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-green)">Collection complete! ' + (data.total_games || 0) + ' games collected.</div>';
@@ -1557,7 +1614,7 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/tm/features", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: tmSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -1586,7 +1643,7 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/tm/backtest", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: tmSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -1595,11 +1652,13 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 btn.disabled = false;
                 btn.textContent = "Run Backtest";
+                document.getElementById("tm-backtest-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Backtest failed') + '</div>';
             }
         })
         .catch(function () {
             btn.disabled = false;
             btn.textContent = "Run Backtest";
+            document.getElementById("tm-backtest-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Connection error</div>';
         });
     });
 
@@ -1610,7 +1669,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function tmPollBacktest() {
-        authFetch("/api/tm/backtest/status?sport=" + currentSport)
+        authFetch("/api/tm/backtest/status?sport=" + tmSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1652,7 +1711,7 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/tm/rules-backtest", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: tmSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -1661,11 +1720,13 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 btn.disabled = false;
                 btn.textContent = "Run Rules Replay";
+                document.getElementById("tm-rules-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Rules replay failed') + '</div>';
             }
         })
         .catch(function () {
             btn.disabled = false;
             btn.textContent = "Run Rules Replay";
+            document.getElementById("tm-rules-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Connection error</div>';
         });
     });
 
@@ -1676,7 +1737,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function tmPollRules() {
-        authFetch("/api/tm/rules-backtest/status?sport=" + currentSport)
+        authFetch("/api/tm/rules-backtest/status?sport=" + tmSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1709,7 +1770,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function tmLoadRulesMetrics() {
         var resEl = document.getElementById("tm-rules-results");
-        authFetch("/api/tm/rules-backtest/metrics?sport=" + currentSport)
+        authFetch("/api/tm/rules-backtest/metrics?sport=" + tmSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -1837,7 +1898,7 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/tm/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: tmSport })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -1863,11 +1924,11 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var html = '<h3 class="scan-title">' + currentSport.toUpperCase() + ' Model Scan</h3>';
+        var html = '<h3 class="scan-title">' + tmSport.toUpperCase() + ' Model Scan</h3>';
         html += '<div class="scan-grid">';
 
         games.forEach(function (g) {
-            html += buildScanCard(g, currentSport);
+            html += buildScanCard(g, tmSport);
 
             // Add model overlay
             var tm = g.tm_overlay || {};
@@ -1937,7 +1998,7 @@ document.addEventListener("DOMContentLoaded", function () {
         loadEl.classList.remove("hidden");
         contentEl.innerHTML = "";
 
-        authFetch("/api/tm/metrics?sport=" + currentSport)
+        authFetch("/api/tm/metrics?sport=" + tmSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 loadEl.classList.add("hidden");

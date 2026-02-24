@@ -534,6 +534,15 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         "current_spread": current_spread,
     }
 
+    # Historical accuracy from backtesting (NBA V4 tuned data)
+    if sport == "nba" and recommendation != "MONITOR":
+        if score >= 10:
+            result["historical_accuracy"] = 68.9
+            result["historical_sample_size"] = 29
+        elif score >= 5:
+            result["historical_accuracy"] = 62.7
+            result["historical_sample_size"] = 51
+
     # Include PRISM player props (NBA)
     if player_props:
         result["player_props"] = player_props
