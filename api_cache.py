@@ -7,6 +7,7 @@ import requests
 
 # ─── TTL Response Cache ─────────────────────────────────────────────────────
 CACHE_TTL = 600  # 10 minutes — ESPN data doesn't change every 2 min
+CACHE_MAX_SIZE = 200  # Evict oldest entries above this to cap memory
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -34,6 +35,11 @@ def _cached_request(url, params=None, timeout=10):
 
     with _cache_lock:
         _cache[key] = {"data": data, "ts": time.time()}
+        # Evict oldest entries if cache too large
+        if len(_cache) > CACHE_MAX_SIZE:
+            oldest = sorted(_cache, key=lambda k: _cache[k]["ts"])
+            for old_key in oldest[:len(_cache) - CACHE_MAX_SIZE]:
+                del _cache[old_key]
 
     return data
 

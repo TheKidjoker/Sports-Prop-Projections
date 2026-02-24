@@ -104,6 +104,7 @@ def run_rules_backtest(sport):
         and g.get("home_covered") in (0, 1)
         and g.get("game_status") == "STATUS_FINAL"
     ]
+    del games  # Free raw games list
 
     if len(eligible) < MIN_WARMUP_GAMES + 5:
         with _rules_lock:
@@ -143,7 +144,9 @@ def run_rules_backtest(sport):
     games_by_date = _group_games_by_date(eligible)
 
     # Predictions and factor tracking
+    # Only keep last 200 predictions in memory (rest are counted in trackers)
     predictions = []
+    _MAX_PREDICTIONS_IN_MEMORY = 200
     factor_tracker = defaultdict(lambda: {"fired": 0, "correct_when_fired": 0,
                                            "correct_when_not_fired": 0,
                                            "not_fired": 0})
@@ -480,6 +483,9 @@ def run_rules_backtest(sport):
             "spread": closing_spread,
             "breakdown": breakdown,
         })
+        # Cap in-memory predictions to avoid unbounded growth
+        if len(predictions) > _MAX_PREDICTIONS_IN_MEMORY * 2:
+            predictions = predictions[-_MAX_PREDICTIONS_IN_MEMORY:]
 
         # ── Update team state AFTER scoring ──
         _update_team_state(game, home_st, away_st)
@@ -574,8 +580,11 @@ def _check_nfl_ou_from_state(home_st, away_st, over_under):
     return abs(over_under - combined) >= 6
 
 
+_TEAM_STATE_MAX = 20  # Only need last ~4-10 games for lookups
+
+
 def _update_team_state(game, home_st, away_st):
-    """Record game result into both teams' state."""
+    """Record game result into both teams' state, trimmed to rolling window."""
     home_score = game.get("home_score", 0) or 0
     away_score = game.get("away_score", 0) or 0
     home_won = 1 if home_score > away_score else 0
@@ -595,6 +604,12 @@ def _update_team_state(game, home_st, away_st):
     away_st["dates"].append(game_date)
     away_st["opponents"].append(game["home_team"])
     away_st["margins"].append(away_score - home_score)
+
+    # Trim lists to rolling window to save memory
+    for st in (home_st, away_st):
+        for key in ("results", "scores", "opp_scores", "dates", "opponents", "margins"):
+            if len(st[key]) > _TEAM_STATE_MAX:
+                st[key] = st[key][-_TEAM_STATE_MAX:]
 
     # ATS tracking
     if home_covered == 1:

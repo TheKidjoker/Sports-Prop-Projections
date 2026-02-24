@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 # ─── Thread Pool Config ─────────────────────────────────────────────────────
 # Configurable via env vars for deployment tuning.
 # Defaults are fast for local dev. For Render free tier, set lower values.
-_GAME_WORKERS = int(os.environ.get("SCAN_GAME_WORKERS", 10))
-_API_WORKERS = int(os.environ.get("SCAN_API_WORKERS", 8))
+_GAME_WORKERS = int(os.environ.get("SCAN_GAME_WORKERS", 4))
+_API_WORKERS = int(os.environ.get("SCAN_API_WORKERS", 4))
 from api_client import (
     get_todays_games, get_all_injuries, get_game_spread,
     get_player_season_averages, get_game_overunder,
