@@ -38,6 +38,12 @@ def _cached_request(url, params=None, timeout=10):
     return data
 
 
+def clear_cache():
+    """Flush all cached responses. Useful during long-running collection."""
+    with _cache_lock:
+        _cache.clear()
+
+
 # ESPN URL builder
 SPORT_MAP = {
     "nba": {"category": "basketball", "league": "nba"},

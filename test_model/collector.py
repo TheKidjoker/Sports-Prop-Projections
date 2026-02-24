@@ -15,6 +15,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from api_client import get_todays_games, get_game_spread, get_game_final_score, get_game_overunder
+from api_cache import clear_cache
 from test_model import db as tm_db
 
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
@@ -122,6 +123,7 @@ def collect_sport(sport):
             "errors": 0,
         }
 
+    dates_processed = 0
     for date_str in pending_dates:
         with _collection_lock:
             _collection_progress[sport]["current_date"] = date_str
@@ -183,6 +185,10 @@ def collect_sport(sport):
 
         # Be polite to ESPN
         time.sleep(0.5)
+        dates_processed += 1
+        # Flush ESPN response cache every 25 dates to prevent memory bloat
+        if dates_processed % 25 == 0:
+            clear_cache()
 
     # Run Odds API backfill for games missing spreads
     if ODDS_API_KEY:

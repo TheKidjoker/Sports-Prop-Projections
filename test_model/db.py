@@ -170,14 +170,44 @@ def upsert_historical_game(game_dict):
         conn.close()
 
 
+def _supabase_fetch_all(table, select_cols, filters, order_col=None):
+    """Paginate through Supabase to get ALL rows (bypasses 1000-row default)."""
+    sb = _get_supabase()
+    page_size = 1000
+    offset = 0
+    all_rows = []
+    while True:
+        query = sb.table(table).select(select_cols)
+        for col, val in filters:
+            query = query.eq(col, val)
+        if order_col:
+            query = query.order(order_col)
+        query = query.range(offset, offset + page_size - 1)
+        rows = query.execute().data
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return all_rows
+
+
 def get_historical_games(sport, before_date=None):
     if _use_supabase():
         sb = _get_supabase()
-        query = sb.table("tm_historical_games").select("*").eq("sport", sport)
-        if before_date:
-            query = query.lt("game_date", before_date)
-        rows = query.order("game_date").execute().data
-        return rows
+        page_size = 1000
+        offset = 0
+        all_rows = []
+        while True:
+            query = sb.table("tm_historical_games").select("*").eq("sport", sport)
+            if before_date:
+                query = query.lt("game_date", before_date)
+            query = query.order("game_date").range(offset, offset + page_size - 1)
+            rows = query.execute().data
+            all_rows.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return all_rows
     else:
         conn = _get_sqlite()
         cur = conn.cursor()
@@ -403,14 +433,9 @@ def get_collection_progress(sport):
 
 def get_done_dates(sport):
     if _use_supabase():
-        sb = _get_supabase()
-        rows = (
-            sb.table("tm_collection_progress")
-            .select("date_str")
-            .eq("sport", sport)
-            .eq("status", "DONE")
-            .execute()
-            .data
+        rows = _supabase_fetch_all(
+            "tm_collection_progress", "date_str",
+            [("sport", sport), ("status", "DONE")],
         )
         return {row["date_str"] for row in rows}
     else:
