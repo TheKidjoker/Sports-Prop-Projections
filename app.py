@@ -108,6 +108,12 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/auth/<path:subpath>")
+def auth_redirect(subpath):
+    """Handle Supabase email confirmation/callback redirects."""
+    return render_template("index.html")
+
+
 @app.route("/api/auth/config", methods=["GET"])
 def auth_config():
     return jsonify({
