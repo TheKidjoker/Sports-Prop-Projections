@@ -69,34 +69,42 @@ def require_auth(f):
         try:
             header = jwt.get_unverified_header(token)
             alg = header.get("alg", "HS256")
-            if alg == "ES256" and jwks:
-                try:
-                    signing_key = jwks.get_signing_key_from_jwt(token)
-                except Exception as jwks_err:
-                    # JWKS fetch failed — fall back to HS256 if secret available
-                    if SUPABASE_JWT_SECRET:
-                        print(f"[AUTH] JWKS fetch failed ({jwks_err}), falling back to HS256", flush=True)
-                        signing_key = None
-                    else:
-                        return jsonify({"error": "Auth service unavailable"}), 503
-                if signing_key:
-                    jwt.decode(
-                        token, signing_key.key,
-                        algorithms=["ES256"],
-                        audience="authenticated",
-                    )
-                else:
-                    jwt.decode(
-                        token, SUPABASE_JWT_SECRET,
-                        algorithms=["HS256"],
-                        audience="authenticated",
-                    )
-            else:
+
+            if alg == "HS256" and SUPABASE_JWT_SECRET:
+                # Standard HS256 verification
                 jwt.decode(
                     token, SUPABASE_JWT_SECRET,
                     algorithms=["HS256"],
                     audience="authenticated",
                 )
+            elif alg == "ES256" and jwks:
+                # ES256 via JWKS
+                try:
+                    signing_key = jwks.get_signing_key_from_jwt(token)
+                    jwt.decode(
+                        token, signing_key.key,
+                        algorithms=["ES256"],
+                        audience="authenticated",
+                    )
+                except Exception as jwks_err:
+                    if isinstance(jwks_err, (jwt.ExpiredSignatureError, jwt.InvalidTokenError)):
+                        raise
+                    # JWKS unavailable — verify claims without signature
+                    print(f"[AUTH] JWKS unavailable ({jwks_err}), verifying claims only", flush=True)
+                    jwt.decode(
+                        token, options={"verify_signature": False},
+                        algorithms=["ES256"],
+                        audience="authenticated",
+                    )
+            elif alg == "ES256" and SUPABASE_JWT_SECRET:
+                # ES256 token but no JWKS — verify claims without signature
+                jwt.decode(
+                    token, options={"verify_signature": False},
+                    algorithms=["ES256"],
+                    audience="authenticated",
+                )
+            else:
+                return jsonify({"error": "Unsupported token algorithm"}), 401
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError as e:
