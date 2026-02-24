@@ -57,7 +57,8 @@ def require_auth(f):
             )
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            print(f"[AUTH] JWT error: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": "Invalid token"}), 401
         return f(*args, **kwargs)
     return decorated
