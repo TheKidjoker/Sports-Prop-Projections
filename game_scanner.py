@@ -502,17 +502,19 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     # Build clear action string with spread numbers
     action = None
     if lean_team and current_spread is not None:
-        if moneyline_recommend:
-            action = "Take " + lean_team + " Moneyline"
+        # Get the spread from the lean team's perspective
+        if lean_team == home_team:
+            lean_spread = current_spread
         else:
-            # Get the spread from the lean team's perspective
-            if lean_team == home_team:
-                lean_spread = current_spread
-            else:
-                lean_spread = -current_spread
-            limit = lean_spread - 1.5
-            action = ("Take " + lean_team + " " + _fmt_spread(lean_spread) +
-                      " or better — don't take past " + _fmt_spread(limit))
+            lean_spread = -current_spread
+        limit = lean_spread - 1.5
+        spread_action = ("Take " + lean_team + " " + _fmt_spread(lean_spread) +
+                         " or better — don't take past " + _fmt_spread(limit))
+        if moneyline_recommend:
+            action = (spread_action + " (Best Bet)"
+                      + " | " + lean_team + " ML (Aggressive)")
+        else:
+            action = spread_action
 
     result = {
         "home_team": home_team,

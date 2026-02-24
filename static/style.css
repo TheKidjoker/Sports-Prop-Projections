@@ -919,6 +919,27 @@ button[type="submit"]:disabled {
     color: var(--accent-red);
     margin-bottom: 0.4rem;
 }
+.scan-action-dual {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.scan-action-primary {
+    color: var(--accent-red);
+}
+.scan-action-secondary {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+.action-text-secondary {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 0.3rem;
+}
 
 .scan-rec {
     text-align: center;

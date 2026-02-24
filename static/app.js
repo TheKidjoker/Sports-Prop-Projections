@@ -522,7 +522,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var leanBody = document.getElementById("lean-body");
         if (data.action) {
             leanCard.classList.remove("hidden");
-            leanBody.innerHTML = '<div class="action-text">' + data.action + '</div>';
+            var aParts = data.action.split(' | ');
+            if (aParts.length === 2) {
+                leanBody.innerHTML = '<div class="action-text">' + aParts[0] + '</div>'
+                    + '<div class="action-text action-text-secondary">' + aParts[1] + '</div>';
+            } else {
+                leanBody.innerHTML = '<div class="action-text">' + data.action + '</div>';
+            }
         } else {
             leanCard.classList.add("hidden");
         }
@@ -881,9 +887,17 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';
         }
 
-        // Action — what to do
+        // Action — what to do (split spread vs ML when both exist)
         if (g.action) {
-            html += '<div class="scan-action">' + g.action + '</div>';
+            var parts = g.action.split(' | ');
+            if (parts.length === 2) {
+                html += '<div class="scan-action scan-action-dual">';
+                html += '<div class="scan-action-primary">' + parts[0] + '</div>';
+                html += '<div class="scan-action-secondary">' + parts[1] + '</div>';
+                html += '</div>';
+            } else {
+                html += '<div class="scan-action">' + g.action + '</div>';
+            }
         }
 
         // Recommendation

@@ -520,17 +520,19 @@ def predict():
         # Build clear action string with spread numbers
         action = None
         if lean_team and current_spread is not None:
-            if moneyline_recommend:
-                action = "Take " + lean_team + " Moneyline"
+            if lean_team == matched_game["home_team"]:
+                lean_spread = current_spread
             else:
-                if lean_team == matched_game["home_team"]:
-                    lean_spread = current_spread
-                else:
-                    lean_spread = -current_spread
-                limit = lean_spread - 1.5
-                fs = lambda v: ("+" + str(v)) if v > 0 else str(v)
-                action = ("Take " + lean_team + " " + fs(lean_spread) +
-                          " or better — don't take past " + fs(limit))
+                lean_spread = -current_spread
+            limit = lean_spread - 1.5
+            fs = lambda v: ("+" + str(v)) if v > 0 else str(v)
+            spread_action = ("Take " + lean_team + " " + fs(lean_spread) +
+                             " or better — don't take past " + fs(limit))
+            if moneyline_recommend:
+                action = (spread_action + " (Best Bet)"
+                          + " | " + lean_team + " ML (Aggressive)")
+            else:
+                action = spread_action
 
         response_data = {
             "success": True,
