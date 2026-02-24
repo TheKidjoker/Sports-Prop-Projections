@@ -69,14 +69,23 @@ def require_auth(f):
         try:
             header = jwt.get_unverified_header(token)
             alg = header.get("alg", "HS256")
+            verified = False
             if alg == "ES256" and jwks:
-                signing_key = jwks.get_signing_key_from_jwt(token)
-                jwt.decode(
-                    token, signing_key.key,
-                    algorithms=["ES256"],
-                    audience="authenticated",
-                )
-            else:
+                try:
+                    signing_key = jwks.get_signing_key_from_jwt(token)
+                    jwt.decode(
+                        token, signing_key.key,
+                        algorithms=["ES256"],
+                        audience="authenticated",
+                    )
+                    verified = True
+                except (jwt.exceptions.PyJWKClientConnectionError, Exception) as jwks_err:
+                    # JWKS fetch failed — fall back to HS256 if secret available
+                    if SUPABASE_JWT_SECRET:
+                        print(f"[AUTH] JWKS failed ({jwks_err}), falling back to HS256", flush=True)
+                    else:
+                        raise
+            if not verified:
                 jwt.decode(
                     token, SUPABASE_JWT_SECRET,
                     algorithms=["HS256"],
