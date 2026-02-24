@@ -873,7 +873,16 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
-        // PRISM Player Props — now loaded day-level via "Generate Top Props" button
+        // PRISM Player Props — per-game Load Props button (NBA today only)
+        if (sport === "nba" && g.date_label === "Today" && !g.skip) {
+            html += '<div class="scan-prism-section" id="prism-section-' + g.event_id + '">';
+            if (loadedProps[g.event_id] && loadedProps[g.event_id].length > 0) {
+                html += buildPrismBody(loadedProps[g.event_id]);
+            } else {
+                html += '<button type="button" class="load-props-btn" data-event-id="' + g.event_id + '">Load Props</button>';
+            }
+            html += '</div>';
+        }
 
         // NFL: Skip badge
         if (g.skip) {
@@ -912,6 +921,81 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    function buildPrismBody(props) {
+        if (!props || props.length === 0) return '<div class="prism-empty">No actionable props found</div>';
+        var actionable = props.filter(function (p) { return p.signal && p.signal !== "SKIP"; });
+        if (actionable.length === 0) return '<div class="prism-empty">No actionable props found</div>';
+
+        var html = '<div class="prism-expanded">';
+        html += '<div class="prism-header" onclick="this.parentElement.classList.toggle(\'prism-expanded\')">';
+        html += '<span class="prism-label">PRISM Props <span class="prism-count">' + actionable.length + '</span></span>';
+        html += '<span class="prism-chevron">&#9660;</span>';
+        html += '</div>';
+        html += '<div class="prism-body">';
+
+        actionable.forEach(function (p) {
+            var signalClass = "prism-skip";
+            if (p.signal === "STRONG OVER") signalClass = "prism-strong-over";
+            else if (p.signal === "STRONG UNDER") signalClass = "prism-strong-under";
+            else if (p.signal === "LEAN OVER") signalClass = "prism-lean-over";
+            else if (p.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+
+            html += '<div class="prism-prop">';
+            html += '<div class="prism-prop-info">';
+            html += '<span class="prism-player-name">' + p.player_name + '</span>';
+            html += '<span class="prism-stat-line">' + p.stat_type + ': ' + p.projection + ' proj vs ' + p.line + ' line (' + (p.edge > 0 ? '+' : '') + p.edge + ')</span>';
+            html += '</div>';
+            html += '<div class="prism-prop-signal">';
+            html += '<span class="prism-signal-badge ' + signalClass + '">' + p.signal + '</span>';
+            html += '<span class="prism-confidence">' + p.confidence + '%</span>';
+            if (p.streak && p.streak.count >= 3) {
+                html += '<span class="prism-streak-badge">' + p.streak.count + '/5 ' + p.streak.direction + '</span>';
+            }
+            if (p.minutes_volatile) {
+                html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
+            }
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div>'; // close prism-body
+        html += '</div>'; // close prism-expanded wrapper
+        return html;
+    }
+
+    function loadPropsForGame(eventId) {
+        var section = document.getElementById("prism-section-" + eventId);
+        if (!section) return;
+        // Show loading state
+        section.innerHTML = '<div class="prism-loading"><div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div><span style="font-size:0.8rem;color:var(--text-muted)">Loading props...</span></div>';
+
+        authFetch("/api/props?event_id=" + eventId + "&sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    var props = data.props || [];
+                    loadedProps[eventId] = props;
+                    section.innerHTML = buildPrismBody(props);
+                    // Rebuild parlays to include new prop legs
+                    rebuildParlays();
+                } else {
+                    section.innerHTML = '<div class="prism-empty">Failed to load props</div>';
+                }
+            })
+            .catch(function () {
+                section.innerHTML = '<div class="prism-empty">Connection error</div>';
+            });
+    }
+
+    // Delegate click handler for Load Props buttons
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest(".load-props-btn");
+        if (btn) {
+            var eventId = btn.getAttribute("data-event-id");
+            if (eventId) loadPropsForGame(eventId);
+        }
+    });
+
     function generateTopProps() {
         var btn = document.getElementById("generate-top-props-btn");
         if (!btn) return;
@@ -930,6 +1014,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     props.forEach(function (p) {
                         if (!loadedProps[p.event_id]) loadedProps[p.event_id] = [];
                         loadedProps[p.event_id].push(p);
+                    });
+                    // Inject props into per-game PRISM sections
+                    Object.keys(loadedProps).forEach(function (eid) {
+                        var section = document.getElementById("prism-section-" + eid);
+                        if (section) section.innerHTML = buildPrismBody(loadedProps[eid]);
                     });
                     // Render top props section
                     renderTopProps(props);
