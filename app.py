@@ -12,7 +12,7 @@ from api_client import (
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
-from game_scanner import scan_all_games, get_game_props
+from game_scanner import scan_all_games, get_game_props, get_top_props
 import tracker
 import scan_cache
 
@@ -279,6 +279,20 @@ def api_props():
         if sport not in ("nba",):
             return jsonify({"success": True, "props": []})
         props = get_game_props(event_id, sport)
+        return jsonify({"success": True, "props": props})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/top-props", methods=["GET"])
+@require_auth
+def api_top_props():
+    """Generate PRISM player props for ALL today's games at once."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba",):
+            return jsonify({"success": True, "props": []})
+        props = get_top_props(sport)
         return jsonify({"success": True, "props": props})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

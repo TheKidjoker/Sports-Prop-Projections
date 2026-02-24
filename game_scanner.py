@@ -782,6 +782,51 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     return results
 
 
+def get_top_props(sport="nba"):
+    """
+    Fetch today's games and run PRISM analysis for ALL games in parallel.
+    Returns a flat list of prop dicts sorted by confidence, each tagged with matchup info.
+    """
+    if sport != "nba":
+        return []
+
+    games = get_todays_games(sport)
+    # Filter out stale/final games
+    games = [
+        g for g in games
+        if not is_game_stale(g.get("game_date", ""))
+        and g.get("game_status") != "STATUS_FINAL"
+    ]
+
+    if not games:
+        return []
+
+    def _fetch_props(game):
+        eid = str(game["event_id"])
+        matchup = game["away_team"] + " @ " + game["home_team"]
+        try:
+            props = get_game_props(eid, sport)
+        except Exception:
+            props = []
+        for p in props:
+            p["matchup"] = matchup
+            p["event_id"] = eid
+        return props
+
+    all_props = []
+    with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
+        futures = {pool.submit(_fetch_props, g): g for g in games}
+        for future in as_completed(futures):
+            try:
+                all_props.extend(future.result())
+            except Exception:
+                pass
+
+    # Sort by confidence descending
+    all_props.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    return all_props
+
+
 def get_game_props(event_id, sport="nba"):
     """
     Standalone PRISM analysis for a single game, invoked on-demand.

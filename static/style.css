@@ -293,8 +293,8 @@ body.sidebar-open .sidebar {
 }
 
 #scan-btn:disabled {
-    background: rgba(230, 57, 70, 0.08);
-    color: rgba(230, 57, 70, 0.3);
+    background: rgba(230, 57, 70, 0.15);
+    color: rgba(255, 255, 255, 0.3);
     cursor: not-allowed;
 }
 
@@ -1685,20 +1685,19 @@ button[type="submit"]:disabled {
     width: 100%;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border: 1px solid var(--border-primary);
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
     border-radius: var(--radius-md);
     font-size: 0.95rem;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s;
     letter-spacing: 0.5px;
 }
 
 #ledger-btn:hover {
-    background: var(--accent-red-dim);
-    border-color: var(--accent-red);
+    background: var(--accent-red-hover);
 }
 
 /* =========================================
@@ -1995,27 +1994,25 @@ button[type="submit"]:disabled {
     width: 100%;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
-    background: linear-gradient(135deg, #b71c1c, var(--accent-red));
+    background: var(--accent-red);
     color: #fff;
     border: none;
     border-radius: var(--radius-md);
     font-size: 0.95rem;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.2s, box-shadow 0.2s;
+    transition: background 0.2s;
     letter-spacing: 0.5px;
 }
 
 #lotto-btn:hover {
-    background: linear-gradient(135deg, var(--accent-red), var(--accent-red-hover));
-    box-shadow: 0 0 12px rgba(230, 57, 70, 0.3);
+    background: var(--accent-red-hover);
 }
 
 #lotto-btn:disabled {
-    background: rgba(230, 57, 70, 0.08);
-    color: rgba(230, 57, 70, 0.3);
+    background: rgba(230, 57, 70, 0.15);
+    color: rgba(255, 255, 255, 0.3);
     cursor: not-allowed;
-    box-shadow: none;
 }
 
 .lotto-results {
@@ -2263,43 +2260,40 @@ button[type="submit"]:disabled {
 /* =========================================
    Load Props Button
    ========================================= */
-.load-props-btn {
-    display: block;
-    width: 100%;
-    padding: 0.55rem 0.75rem;
-    background: rgba(187, 134, 252, 0.08);
+.generate-top-props-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem 1.5rem;
+    margin-bottom: 1rem;
+    background: rgba(187, 134, 252, 0.1);
     color: var(--accent-purple);
-    border: 1px solid rgba(187, 134, 252, 0.25);
+    border: 1px solid rgba(187, 134, 252, 0.3);
     border-radius: var(--radius-sm);
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
     text-transform: uppercase;
 }
 
-.load-props-btn:hover {
-    background: rgba(187, 134, 252, 0.15);
+.generate-top-props-btn:hover:not(:disabled) {
+    background: rgba(187, 134, 252, 0.2);
     border-color: var(--accent-purple);
+    transform: translateY(-1px);
 }
 
-.load-props-loading {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0;
-    color: var(--accent-purple);
-    font-size: 0.8rem;
-    font-weight: 600;
+.generate-top-props-btn:disabled {
+    cursor: default;
+    opacity: 0.7;
 }
 
-.load-props-loading .spinner {
-    width: 18px;
-    height: 18px;
-    border-width: 2px;
-    border-top-color: var(--accent-purple);
-    margin-bottom: 0;
+.generate-top-props-btn.top-props-done {
+    background: rgba(76, 175, 80, 0.12);
+    border-color: rgba(76, 175, 80, 0.4);
+    color: #4caf50;
+    cursor: default;
 }
 
 /* =========================================
@@ -2370,20 +2364,19 @@ button[type="submit"]:disabled {
     width: 100%;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border: 1px solid var(--border-primary);
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
     border-radius: var(--radius-md);
     font-size: 0.95rem;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s;
     letter-spacing: 0.5px;
 }
 
 #testmodel-btn:hover {
-    background: var(--accent-red-dim);
-    border-color: var(--accent-red);
+    background: var(--accent-red-hover);
 }
 
 /* =========================================
@@ -3002,20 +2995,19 @@ button[type="submit"]:disabled {
     width: 100%;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border: 1px solid var(--border-primary);
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
     border-radius: var(--radius-md);
     font-size: 0.95rem;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s;
     letter-spacing: 0.5px;
 }
 
 #player-search-btn:hover {
-    background: var(--accent-red-dim);
-    border-color: var(--accent-red);
+    background: var(--accent-red-hover);
 }
 
 /* =========================================

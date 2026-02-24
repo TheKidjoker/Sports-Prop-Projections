@@ -626,6 +626,12 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
+
+        // "Generate Top Props" button (NBA only, when today's games exist)
+        if (currentSport === "nba" && currentSlate.has_today) {
+            html += '<button id="generate-top-props-btn" class="generate-top-props-btn">Generate Top Props</button>';
+        }
+
         html += '<div class="scan-grid">';
 
         filtered.forEach(function (g) {
@@ -867,20 +873,7 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
-        // PRISM Player Props — on-demand loading (NBA only)
-        if (sport === "nba" && g.date_label !== "Tomorrow") {
-            html += '<div class="scan-prism-section" id="prism-' + g.event_id + '">';
-            if (loadedProps[g.event_id]) {
-                // Already loaded — render inline
-                html += renderPropsBody(g.event_id, loadedProps[g.event_id]);
-            } else {
-                // Show "Load Props" button
-                html += '<button class="load-props-btn" data-event-id="' + g.event_id + '" data-sport="' + sport + '">';
-                html += 'Load Player Props';
-                html += '</button>';
-            }
-            html += '</div>';
-        }
+        // PRISM Player Props — now loaded day-level via "Generate Top Props" button
 
         // NFL: Skip badge
         if (g.skip) {
@@ -919,83 +912,53 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
-    function renderPropsBody(eventId, props) {
-        if (!props || props.length === 0) {
-            return '<div class="prism-empty">No prop signals found for this game.</div>';
-        }
-        var html = '<div class="prism-header" onclick="(function(el){el.closest(\'.scan-prism-section\').classList.toggle(\'prism-expanded\')})(this)">';
-        html += '<span><span class="prism-label">PRISM PLAYER PROPS</span>';
-        html += '<span class="prism-count">' + props.length + '</span></span>';
-        html += '<span class="prism-chevron">&#9660;</span>';
-        html += '</div>';
-        html += '<div class="prism-body">';
-
-        props.forEach(function (prop) {
-            var signalClass = "prism-skip";
-            if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
-            else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
-            else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
-            else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
-
-            html += '<div class="prism-prop">';
-            html += '<div class="prism-prop-info">';
-            html += '<span class="prism-player-name">' + prop.player_name + '</span>';
-            html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
-            html += '</div>';
-            html += '<div class="prism-prop-signal">';
-            html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
-            html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
-            if (prop.streak) {
-                html += '<span class="prism-streak-badge">' + prop.streak.count + '/5 ' + prop.streak.direction + '</span>';
-            }
-            if (prop.minutes_unstable) {
-                html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
-            }
-            html += '</div>';
-            html += '</div>';
-        });
-
-        html += '</div>';
-        return html;
-    }
-
-    function loadPropsForGame(eventId, sport) {
-        var section = document.getElementById("prism-" + eventId);
-        if (!section) return;
+    function generateTopProps() {
+        var btn = document.getElementById("generate-top-props-btn");
+        if (!btn) return;
 
         // Show loading state
-        section.innerHTML = '<div class="load-props-loading"><div class="spinner"></div><span>Loading PRISM props...</span></div>';
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div>Generating Props...';
 
-        authFetch("/api/props?event_id=" + eventId + "&sport=" + sport)
+        authFetch("/api/top-props?sport=" + currentSport)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (data.success) {
-                    loadedProps[eventId] = data.props || [];
-                    section.innerHTML = renderPropsBody(eventId, loadedProps[eventId]);
-                    // Auto-expand after loading
-                    section.classList.add("prism-expanded");
-                    // Rebuild parlays to include new props + show top props
-                    rebuildParlaysAndTopProps();
+                    var props = data.props || [];
+                    // Populate loadedProps by event_id
+                    loadedProps = {};
+                    props.forEach(function (p) {
+                        if (!loadedProps[p.event_id]) loadedProps[p.event_id] = [];
+                        loadedProps[p.event_id].push(p);
+                    });
+                    // Render top props section
+                    renderTopProps(props);
+                    // Rebuild parlays to include prop legs
+                    rebuildParlays();
+                    // Replace button with success state
+                    btn.innerHTML = 'Props Generated (' + props.length + ' signals)';
+                    btn.classList.add("top-props-done");
                 } else {
-                    section.innerHTML = '<div class="prism-empty">Failed to load props: ' + (data.error || 'Unknown error') + '</div>';
+                    btn.disabled = false;
+                    btn.innerHTML = 'Generate Top Props';
+                    alert("Failed to generate props: " + (data.error || "Unknown error"));
                 }
             })
             .catch(function () {
-                section.innerHTML = '<div class="prism-empty">Connection error loading props.</div>';
+                btn.disabled = false;
+                btn.innerHTML = 'Generate Top Props';
+                alert("Connection error generating props.");
             });
     }
 
-    // Delegate click handler for Load Props buttons
+    // Delegate click handler for Generate Top Props button
     document.addEventListener("click", function (e) {
-        var btn = e.target.closest(".load-props-btn");
-        if (btn) {
-            var eventId = btn.getAttribute("data-event-id");
-            var sport = btn.getAttribute("data-sport");
-            loadPropsForGame(eventId, sport);
+        if (e.target.closest("#generate-top-props-btn")) {
+            generateTopProps();
         }
     });
 
-    function rebuildParlaysAndTopProps() {
+    function rebuildParlays() {
         if (!lastScanGames.length) return;
 
         // Inject loaded props into game objects for parlay builder
@@ -1017,32 +980,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 parlaysEl.outerHTML = newParlayHtml;
             }
         }
-
-        // Build top props summary
-        renderTopProps();
     }
 
-    function renderTopProps() {
-        // Collect all loaded props across games
-        var allProps = [];
-        Object.keys(loadedProps).forEach(function (eid) {
-            loadedProps[eid].forEach(function (p) {
-                allProps.push(p);
-            });
-        });
-
-        if (allProps.length === 0) {
+    function renderTopProps(allProps) {
+        if (!allProps || allProps.length === 0) {
             var existing = document.getElementById("top-props-section");
             if (existing) existing.remove();
             return;
         }
 
-        // Sort by confidence descending
-        allProps.sort(function (a, b) { return b.confidence - a.confidence; });
-        var topProps = allProps.slice(0, 8);
+        // Already sorted by confidence from backend; show top 15
+        var topProps = allProps.slice(0, 15);
 
         var html = '<div id="top-props-section" class="top-props-section">';
-        html += '<h2 class="scan-title">Top Props Across All Games</h2>';
+        html += '<h2 class="scan-title">Top Player Props</h2>';
         html += '<div class="top-props-grid">';
 
         topProps.forEach(function (prop) {
@@ -1054,19 +1005,25 @@ document.addEventListener("DOMContentLoaded", function () {
 
             html += '<div class="top-prop-card">';
             html += '<div class="prism-prop-info">';
-            html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + (prop.team || '') + ')</span></span>';
+            html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + (prop.matchup || prop.team || '') + ')</span></span>';
             html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
             html += '</div>';
             html += '<div class="prism-prop-signal">';
             html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
             html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
+            if (prop.streak) {
+                html += '<span class="prism-streak-badge">' + prop.streak.count + '/5 ' + prop.streak.direction + '</span>';
+            }
+            if (prop.minutes_unstable) {
+                html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
+            }
             html += '</div>';
             html += '</div>';
         });
 
         html += '</div></div>';
 
-        // Insert before parlays section
+        // Insert before parlays section (or after scan grid)
         var existing = document.getElementById("top-props-section");
         if (existing) {
             existing.outerHTML = html;
@@ -1075,7 +1032,6 @@ document.addEventListener("DOMContentLoaded", function () {
             if (parlaysEl) {
                 parlaysEl.insertAdjacentHTML("beforebegin", html);
             } else {
-                // Append at end of scan results
                 scanResults.insertAdjacentHTML("beforeend", html);
             }
         }
