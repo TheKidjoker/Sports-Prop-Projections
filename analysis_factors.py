@@ -526,8 +526,8 @@ def _determine_lean(slot_type, home_team, away_team, current_spread, sport="nba"
     """
     Determine which team to lean towards based on slot type and spread.
 
-    NBA (backtested): always lean underdog regardless of slot — the public
-    inflates favorite lines in all time slots, creating underdog value.
+    NBA (backtested): always lean underdog — public inflates favorite lines.
+    NHL (backtested): always lean underdog — favorite lean was 37.5%, underdog 71.2%.
 
     Other sports:
       Public/caution slot -> lean favorite (public money tends to be right).
@@ -538,8 +538,8 @@ def _determine_lean(slot_type, home_team, away_team, current_spread, sport="nba"
     if current_spread is None:
         return None
 
-    if sport == "nba":
-        # NBA: lean underdog in all slots (backtested +17.5% ROI)
+    if sport in ("nba", "nhl"):
+        # NBA + NHL: lean underdog in all slots (backtested)
         return away_team if current_spread < 0 else home_team
 
     if slot_type in ("public", "caution"):
@@ -597,7 +597,14 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                  "vegas_trap": 0}
 
     if slot_type == "public":
-        breakdown["slot"] = 5 if sport == "nba" else (3 if sport == "cbb" else 10)
+        if sport == "nba":
+            breakdown["slot"] = 5
+        elif sport == "cbb":
+            breakdown["slot"] = 3
+        elif sport == "nhl":
+            breakdown["slot"] = 3   # NHL V1: public slot only 37.5% with fav lean, reduced
+        else:
+            breakdown["slot"] = 10
     if line_confirms:
         breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
@@ -613,11 +620,11 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if weather_applies:
         breakdown["weather"] = 5
 
-    # B2B: NBA uses reduced weights (backtested — minimal lift)
+    # B2B: NBA reduced (minimal lift); NHL V1: bonus hurts (-8%), penalty helps (+7.4%)
     if b2b_bonus:
-        breakdown["b2b"] = 2 if sport == "nba" else 4
+        breakdown["b2b"] = 2 if sport == "nba" else (0 if sport == "nhl" else 4)
     elif b2b_penalty:
-        breakdown["b2b"] = -1 if sport == "nba" else -3
+        breakdown["b2b"] = -1 if sport == "nba" else (-1 if sport == "nhl" else -3)
     # ATS: CBB V2 removed (backtested — penalty was backwards, bonus flat)
     if ats_bonus:
         breakdown["ats_record"] = 0 if sport == "cbb" else 4
@@ -628,9 +635,9 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["home_away_split"] = 0 if sport == "cbb" else 3
     breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
-    # H2H: NBA revenge reduced, CBB V2 removed (backtested — noise)
+    # H2H: NBA revenge reduced; CBB V2 removed; NHL V1 revenge removed (-13.8% lift)
     if h2h_revenge_bonus:
-        breakdown["head_to_head"] = 0 if sport == "cbb" else (1 if sport == "nba" else 3)
+        breakdown["head_to_head"] = 0 if sport in ("cbb", "nhl") else (1 if sport == "nba" else 3)
     elif h2h_dominance_bonus:
         breakdown["head_to_head"] = 0 if sport == "cbb" else 2
     breakdown["vegas_trap"] = vegas_trap_bonus

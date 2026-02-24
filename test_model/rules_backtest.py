@@ -388,6 +388,20 @@ def run_rules_backtest(sport):
                 recommendation = "LEAN"
             else:
                 recommendation = "MONITOR"
+        elif sport == "nhl":
+            # NHL V1: low scores hit best, public slot capped at LEAN
+            if slot_type == "public":
+                if score >= 5:
+                    recommendation = "LEAN"
+                else:
+                    recommendation = "MONITOR"
+            else:
+                if score >= 8:
+                    recommendation = "STRONG PLAY"
+                elif score >= 3:
+                    recommendation = "LEAN"
+                else:
+                    recommendation = "MONITOR"
         else:
             if score >= 15:
                 recommendation = "STRONG PLAY"

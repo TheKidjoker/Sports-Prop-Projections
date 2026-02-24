@@ -491,6 +491,21 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             recommendation = "LEAN"
         else:
             recommendation = "MONITOR"
+    elif sport == "nhl":
+        # NHL V1 backtested: low scores (0-5) hit 72-82%, high scores hurt
+        # Public slot capped at LEAN (favorite lean was 37.5%, now underdog)
+        if slot_type == "public":
+            if score >= 5:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
+        else:
+            if score >= 8:
+                recommendation = "STRONG PLAY"
+            elif score >= 3:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
     else:
         if score >= 15:
             recommendation = "STRONG PLAY"

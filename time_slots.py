@@ -33,17 +33,27 @@ DAY_SLOTS = {
 
 
 # ─── NHL SLOT RULES ──────────────────────────────────────────────────────────
-# NHL uses CST (UTC-6) for classification. Slate size determines behavior.
-# 1 game  → vegas
-# 2 games → 1st = public, 2nd = vegas
-# 3+ games → time-based (CST):
+# NHL uses CST (UTC-6) for classification.
+# V1 backtested framework (NBA-style day-type + slate-size + time-based):
+#   Public days: Mon, Thu, Fri (57-65% dog cover)
+#   Vegas days: Tue, Wed, Sat, Sun (67-70% dog cover)
+#   1 game  → vegas
+#   2 games → 1st = public, 2nd = vegas
+#   3+ games → 1st = opposite of day type, rest = time-based (CST)
+
+NHL_PUBLIC_DAYS = {"monday", "thursday", "friday"}
+NHL_VEGAS_DAYS = {"tuesday", "wednesday", "saturday", "sunday"}
+
+# Time-based slots for non-first games on 3+ game slates (hour, minute, slot_type)
+# Backtested from 529 games: vegas hours ~70% dog cover, public hours ~57-65%
 NHL_TIME_SLOTS = [
-    (19, 0, "vegas"),    # 7:00 PM CST
-    (20, 0, "public"),   # 8:00 PM CST
-    (20, 30, "vegas"),   # 8:30 PM CST
-    (21, 0, "public"),   # 9:00 PM CST
-    (21, 30, "vegas"),   # 9:30 PM CST
-    (22, 0, "public"),   # 10:00 PM CST
+    (12, 0, "public"),    # 12:00 PM CST — matinee
+    (14, 0, "vegas"),     # 2:00 PM CST — afternoon (72.2%)
+    (16, 0, "public"),    # 4:00 PM CST — early evening (64.3%)
+    (18, 0, "public"),    # 6:00 PM CST — prime time bulk (65.1%)
+    (19, 0, "vegas"),     # 7:00 PM CST (71.0%)
+    (20, 0, "public"),    # 8:00 PM CST (56.7%)
+    (21, 0, "vegas"),     # 9:00 PM CST (70.4%)
 ]
 
 
@@ -242,26 +252,46 @@ def classify_cfb_slot(day_of_week, hour_est, minute_est):
     return "unknown"
 
 
-def classify_nhl_slot(total_games, game_index, hour_cst, minute_cst):
+def classify_nhl_slot(total_games, game_index, hour_cst, minute_cst,
+                      day_of_week=""):
     """
-    Classifies an NHL game slot based on slate size and time.
+    Classifies an NHL game slot using NBA-style framework.
+
+    Backtested on 529 games → 100% classification (0% unknown).
+    Vegas slots: 70.0% dog cover. Public slots: 63.6% dog cover.
+
+    Rules:
+        1 game  → vegas
+        2 games → 1st public, 2nd vegas
+        3+ games → 1st = opposite of day type, rest = time-based (CST)
 
     Args:
         total_games: Total number of NHL games on today's slate
         game_index: 0-based index of this game (sorted by start time)
         hour_cst: Game start hour in 24hr CST
         minute_cst: Game start minute
+        day_of_week: Day name (e.g., 'tuesday')
 
     Returns:
         'public', 'vegas', or 'unknown'
     """
+    day = day_of_week.lower()
+
+    # Slate-size rules
     if total_games == 1:
         return "vegas"
-
     if total_games == 2:
         return "public" if game_index == 0 else "vegas"
 
-    # 3+ games: time-based classification
+    # 3+ game slate: first game is opposite of day type
+    if game_index == 0:
+        if day in NHL_PUBLIC_DAYS:
+            return "vegas"
+        elif day in NHL_VEGAS_DAYS:
+            return "public"
+        return "vegas"  # fallback
+
+    # Time-based for remaining games (60-min tolerance)
     game_time = hour_cst * 60 + minute_cst
     best_match = None
     best_distance = float("inf")
@@ -273,7 +303,7 @@ def classify_nhl_slot(total_games, game_index, hour_cst, minute_cst):
             best_distance = distance
             best_match = slot_type
 
-    if best_distance <= 20:
+    if best_distance <= 60:
         return best_match
 
     return "unknown"
@@ -313,7 +343,8 @@ def classify_slot(day_of_week, hour, minute, sport="nba",
 
     if sport == "nhl":
         if total_games_on_slate is not None and game_index is not None:
-            return classify_nhl_slot(total_games_on_slate, game_index, hour, minute)
+            return classify_nhl_slot(total_games_on_slate, game_index, hour, minute,
+                                     day_of_week=day_of_week)
         return "unknown"
 
     # NBA logic
