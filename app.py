@@ -12,7 +12,7 @@ from api_client import (
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
-from game_scanner import scan_all_games
+from game_scanner import scan_all_games, get_game_props
 import tracker
 import scan_cache
 
@@ -42,14 +42,24 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
 _jwks_client = None
-if SUPABASE_URL:
-    _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/jwks")
+
+
+def _get_jwks_client():
+    """Lazily initialize JWKS client to avoid startup crash if Supabase is unreachable."""
+    global _jwks_client
+    if _jwks_client is None and SUPABASE_URL:
+        try:
+            _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/jwks")
+        except Exception:
+            pass
+    return _jwks_client
 
 
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not SUPABASE_JWT_SECRET and not _jwks_client:
+        jwks = _get_jwks_client()
+        if not SUPABASE_JWT_SECRET and not jwks:
             # Auth not configured — allow through (local dev)
             return f(*args, **kwargs)
         auth_header = request.headers.get("Authorization", "")
@@ -59,8 +69,8 @@ def require_auth(f):
         try:
             header = jwt.get_unverified_header(token)
             alg = header.get("alg", "HS256")
-            if alg == "ES256" and _jwks_client:
-                signing_key = _jwks_client.get_signing_key_from_jwt(token)
+            if alg == "ES256" and jwks:
+                signing_key = jwks.get_signing_key_from_jwt(token)
                 jwt.decode(
                     token, signing_key.key,
                     algorithms=["ES256"],
@@ -253,6 +263,23 @@ def api_scan():
         except Exception:
             pass
         return jsonify({"success": True, "games": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/props", methods=["GET"])
+@require_auth
+def api_props():
+    """On-demand PRISM player props for a single game."""
+    try:
+        event_id = request.args.get("event_id", "")
+        sport = request.args.get("sport", "nba").lower()
+        if not event_id:
+            return jsonify({"success": False, "error": "event_id required"}), 400
+        if sport not in ("nba",):
+            return jsonify({"success": True, "props": []})
+        props = get_game_props(event_id, sport)
+        return jsonify({"success": True, "props": props})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

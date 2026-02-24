@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260224a">
+    <link rel="stylesheet" href="/static/style.css?v=20260224b">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -65,6 +65,8 @@
                 <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
             </div>
 
+            <button type="button" id="player-search-btn">Player Search</button>
+
             <button type="button" id="ledger-btn">The Ledger</button>
 
             <button type="button" id="testmodel-btn">Test Model</button>
@@ -89,44 +91,6 @@
                     <div class="sonar-dot"></div>
                 </div>
                 <p class="sonar-text">Scanning all of Gotham<span class="sonar-dots"></span></p>
-            </div>
-
-            <div class="sidebar-divider"></div>
-
-            <form id="predict-form">
-                <div class="form-stack">
-                    <div class="form-group">
-                        <label for="player_name">Player Name</label>
-                        <input type="text" id="player_name" name="player_name" placeholder="e.g., LeBron James">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="team_name">Team Name</label>
-                        <div class="autocomplete-wrapper">
-                            <input type="text" id="team_name" name="team_name" placeholder="e.g., Lakers" autocomplete="off">
-                            <ul id="team-dropdown" class="autocomplete-dropdown hidden"></ul>
-                        </div>
-                    </div>
-
-                    <div class="form-row-2">
-                        <div class="form-group">
-                            <label for="vegas_line">Vegas Line</label>
-                            <input type="number" id="vegas_line" name="vegas_line" step="0.5" placeholder="e.g., 25.5" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="games">Recent Games</label>
-                            <input type="number" id="games" name="games" min="1" max="20" value="5" required>
-                        </div>
-                    </div>
-                </div>
-
-                <button type="submit" id="submit-btn">Play the Hand</button>
-            </form>
-
-            <div id="loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Reading Gotham's cards...</p>
             </div>
         </div>
     </aside>
@@ -172,6 +136,40 @@
                 </button>
             </div>
             <button type="button" class="hero-cta" id="hero-cta">Get Picks</button>
+        </section>
+
+        <section id="player-search-section" class="player-search-section hidden">
+            <div class="search-hero">
+                <h2 class="search-hero-title">Search a Player</h2>
+                <p class="search-hero-sub">Find the edge on any player prop</p>
+            </div>
+            <form id="predict-form" class="search-form">
+                <div class="search-bar-wrapper">
+                    <input type="text" id="team_name" name="team_name" class="search-bar" placeholder="Type a team name..." autocomplete="off">
+                    <ul id="team-dropdown" class="autocomplete-dropdown hidden"></ul>
+                </div>
+                <div class="search-inline-row">
+                    <div class="search-inline-field search-inline-field-wide">
+                        <label for="player_name">Player Name</label>
+                        <input type="text" id="player_name" name="player_name" placeholder="e.g., LeBron James">
+                    </div>
+                </div>
+                <div class="search-inline-row">
+                    <div class="search-inline-field">
+                        <label for="vegas_line">Vegas Line</label>
+                        <input type="number" id="vegas_line" name="vegas_line" step="0.5" placeholder="25.5" required>
+                    </div>
+                    <div class="search-inline-field">
+                        <label for="games">Recent Games</label>
+                        <input type="number" id="games" name="games" min="1" max="20" value="5" required>
+                    </div>
+                </div>
+                <button type="submit" id="submit-btn" class="search-submit">Play the Hand</button>
+            </form>
+            <div id="predict-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Reading Gotham's cards...</p>
+            </div>
         </section>
 
         <div id="error-banner" class="error-banner hidden"></div>
@@ -355,6 +353,6 @@
 
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260224a"></script>
+    <script src="/static/app.js?v=20260224b"></script>
 </body>
 </html>

@@ -6,8 +6,14 @@ from api_cache import _cached_request
 
 BASE_URL = "https://www.balldontlie.io/api/v1"
 
+# In-memory cache for player ID lookups (avoids redundant HTTP requests)
+_player_id_cache = {}
+
 
 def get_player_id(player_name):
+    if player_name in _player_id_cache:
+        return _player_id_cache[player_name]
+
     response = requests.get(
         f"{BASE_URL}/players",
         params={"search": player_name}
@@ -19,8 +25,11 @@ def get_player_id(player_name):
     data = response.json()
 
     if data["data"]:
-        return data["data"][0]["id"]
+        result = data["data"][0]["id"]
+        _player_id_cache[player_name] = result
+        return result
 
+    _player_id_cache[player_name] = None
     return None
 
 

@@ -155,7 +155,11 @@ def _detect_spread_discrepancy(home_rank, away_rank, current_spread, slot_type, 
         if tier == "frontend":
             result["discrepancy_action"] = f"Line is suspiciously low for #{rank} — frontend team, don't expect cover"
         elif tier == "backend":
-            result["discrepancy_action"] = f"Line looks off for #{rank} — backend team, expect cover"
+            # CBB backend (#20-25) covers only 46% — opposite of CFB
+            if sport == "cbb":
+                result["discrepancy_action"] = f"Line looks off for #{rank} — backend team, don't expect cover in CBB"
+            else:
+                result["discrepancy_action"] = f"Line looks off for #{rank} — backend team, expect cover"
         else:
             result["discrepancy_action"] = f"Spread discrepancy for #{rank} — investigate"
 

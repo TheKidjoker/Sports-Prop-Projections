@@ -79,14 +79,6 @@ def scan_all_games(sport="nba", date_str=None):
     except Exception:
         odds_data = []
 
-    # Fetch player props odds once for PRISM (NBA only, graceful)
-    player_props_lines = {}
-    if sport == "nba":
-        try:
-            player_props_lines = get_player_props_odds(sport)
-        except Exception:
-            player_props_lines = {}
-
     # Sort by game_date to determine first game / game index
     sorted_games = sorted(games, key=lambda g: g.get("game_date", ""))
 
@@ -132,7 +124,6 @@ def scan_all_games(sport="nba", date_str=None):
             sport=sport, total_games_on_slate=total_games, game_index=i,
             is_last_sunday_game=is_last_sunday,
             odds_data=odds_data,
-            player_props_lines=player_props_lines,
             lightweight=is_tomorrow,
         )
 
@@ -147,7 +138,7 @@ def scan_all_games(sport="nba", date_str=None):
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
                           is_last_sunday_game=False, odds_data=None,
-                          player_props_lines=None, lightweight=False):
+                          lightweight=False):
     """
     Returns analysis dict for one game.
     lightweight=True skips expensive API calls (PRISM, B2B, H2H, NFL weather/trends)
@@ -375,7 +366,6 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     ats_result = {"ats_bonus": False, "ats_penalty": False, "detail": ""}
     public_betting_result = {"public_betting_bonus": 0, "detail": ""}
     feedback_adj = 0
-    player_props = []
 
     # Home/Away Splits — no API call
     home_away_applies = _analyze_home_away_split(
@@ -435,14 +425,8 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         )
         feedback_adj = _get_feedback_adjustment(slot_type, sport)
 
-        # PRISM Player Props (NBA only)
-        if sport == "nba" and home_team_id and away_team_id:
-            player_props = _run_prism_analysis(
-                home_team_id, away_team_id, home_team, away_team,
-                event_id, game_date_str, current_spread, slot_type,
-                injured_stars, player_props_lines or {},
-                sport,
-            )
+        # PRISM Player Props — now loaded on-demand via /api/props
+        # (removed from scan loop to speed up Quick Picks)
 
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
@@ -471,8 +455,10 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     )
     if sport == "nfl":
         max_score = 53
-    elif sport in ("cfb", "cbb"):
+    elif sport == "cfb":
         max_score = 48
+    elif sport == "cbb":
+        max_score = 33  # Reduced after backtesting adjustments
     elif sport == "nba":
         max_score = 39  # Reduced after backtesting adjustments
     else:
@@ -482,6 +468,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     # Recommendation label
     # NBA backtested: sweet spot is score 4-7, public slot drags accuracy.
     # Use lower thresholds + demote public-slot picks.
+    # CBB backtested: STRONG PLAY (>=15) at 56.9%, LEAN 10-14 bucket is dead zone.
     if sport == "nba":
         if slot_type == "public":
             # Public slot NBA: never STRONG PLAY, cap at LEAN
@@ -496,6 +483,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                 recommendation = "LEAN"
             else:
                 recommendation = "MONITOR"
+    elif sport == "cbb":
+        # CBB backtested: raise LEAN bar to avoid 10-14 dead zone
+        if score >= 15:
+            recommendation = "STRONG PLAY"
+        elif score >= 12:
+            recommendation = "LEAN"
+        else:
+            recommendation = "MONITOR"
     else:
         if score >= 15:
             recommendation = "STRONG PLAY"
@@ -543,10 +538,6 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             result["historical_accuracy"] = 62.7
             result["historical_sample_size"] = 51
 
-    # Include PRISM player props (NBA)
-    if player_props:
-        result["player_props"] = player_props
-
     # Include venue for NHL, CFB, CBB, and NFL
     if sport in ("nhl", "cfb", "cbb", "nfl"):
         result["venue_name"] = game.get("venue_name", "")
@@ -593,10 +584,15 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
 def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                         event_id, game_date_str, current_spread, slot_type,
-                        injured_stars, player_props_lines, sport):
+                        injured_stars, player_props_lines, sport,
+                        home_b2b=None, away_b2b=None, game_total=None):
     """
     Runs PRISM player prop analysis for a single game.
     Gets roster leaders, game logs, defensive stats, and generates projections.
+
+    Pre-fetched data can be passed in to avoid redundant API calls:
+        home_b2b / away_b2b: bool results from check_back_to_back()
+        game_total: float from get_game_overunder()
 
     Returns:
         List of prop signal dicts sorted by abs(edge) descending,
@@ -604,23 +600,34 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     """
     results = []
 
-    # ── Fire roster leaders, O/U, B2B, and defensive stats all in parallel ──
+    # ── Fire roster leaders, defensive stats, and any missing data in parallel ──
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as prism_pool:
         home_leaders_f = prism_pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=3)
         away_leaders_f = prism_pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=3)
-        game_total_f = prism_pool.submit(get_game_overunder, event_id, sport=sport)
-        home_b2b_f = prism_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
-        away_b2b_f = prism_pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
         home_def_f = prism_pool.submit(get_team_defensive_stats, home_team_id, sport=sport)
         away_def_f = prism_pool.submit(get_team_defensive_stats, away_team_id, sport=sport)
 
+        # Only fetch if not pre-supplied
+        game_total_f = None
+        home_b2b_f = None
+        away_b2b_f = None
+        if game_total is None:
+            game_total_f = prism_pool.submit(get_game_overunder, event_id, sport=sport)
+        if home_b2b is None:
+            home_b2b_f = prism_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+        if away_b2b is None:
+            away_b2b_f = prism_pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+
         home_leaders = home_leaders_f.result()
         away_leaders = away_leaders_f.result()
-        game_total = game_total_f.result()
-        home_b2b = home_b2b_f.result()
-        away_b2b = away_b2b_f.result()
         home_def = home_def_f.result()
         away_def = away_def_f.result()
+        if game_total_f is not None:
+            game_total = game_total_f.result()
+        if home_b2b_f is not None:
+            home_b2b = home_b2b_f.result()
+        if away_b2b_f is not None:
+            away_b2b = away_b2b_f.result()
 
     # Tag each leader with their team info
     for p in home_leaders:
@@ -738,3 +745,104 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     # Sort by abs(edge) descending
     results.sort(key=lambda x: abs(x["edge"]), reverse=True)
     return results
+
+
+def get_game_props(event_id, sport="nba"):
+    """
+    Standalone PRISM analysis for a single game, invoked on-demand.
+    Fetches all needed context from ESPN API and runs _run_prism_analysis().
+
+    Returns:
+        List of prop signal dicts, or empty list on failure.
+    """
+    if sport != "nba":
+        return []
+
+    # Find the game across today + tomorrow
+    now_utc = datetime.now(timezone.utc)
+    tomorrow_str = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
+
+    game = None
+    for date_str in [None, tomorrow_str]:
+        games = get_todays_games(sport, date_str=date_str)
+        for g in games:
+            if str(g["event_id"]) == str(event_id):
+                game = g
+                break
+        if game:
+            break
+
+    if not game:
+        return []
+
+    home_team = game["home_team"]
+    away_team = game["away_team"]
+    home_team_id = game.get("home_team_id")
+    away_team_id = game.get("away_team_id")
+    game_date_str = game.get("game_date", "")
+
+    if not home_team_id or not away_team_id:
+        return []
+
+    # Classify slot for this game
+    hour, minute = None, None
+    slot_type = "unknown"
+    if game_date_str:
+        try:
+            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+            classify_dt = game_dt - timedelta(hours=8)  # PST for NBA
+            hour, minute = classify_dt.hour, classify_dt.minute
+            day_of_week = classify_dt.strftime("%A")
+            slot_type = classify_slot(day_of_week, hour, minute)
+        except (ValueError, TypeError):
+            pass
+
+    # Parallel fetch: spread, injuries, B2B, O/U, player props odds
+    with ThreadPoolExecutor(max_workers=_API_WORKERS) as pool:
+        spread_f = pool.submit(get_game_spread, event_id, sport)
+        injuries_f = pool.submit(get_all_injuries, sport)
+        b2b_home_f = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
+        b2b_away_f = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
+        ou_f = pool.submit(get_game_overunder, event_id, sport=sport)
+        props_odds_f = pool.submit(get_player_props_odds, sport)
+
+        opening, current = spread_f.result()
+        all_injuries = injuries_f.result()
+        home_b2b = b2b_home_f.result()
+        away_b2b = b2b_away_f.result()
+        game_total = ou_f.result()
+        try:
+            player_props_lines = props_odds_f.result()
+        except Exception:
+            player_props_lines = {}
+
+    # Build injured_stars list
+    injured_stars = []
+    for team_name in [home_team, away_team]:
+        for injury in all_injuries.get(team_name, []):
+            if injury.get("status", "").lower() == "out":
+                pid = injury.get("player_id")
+                player_stats = None
+                star = False
+                star_reason = ""
+                if pid:
+                    player_stats = get_player_season_averages(pid, sport)
+                    if player_stats:
+                        star, star_reason = is_star_player(player_stats, sport)
+                injured_stars.append({
+                    "player_name": injury["player_name"],
+                    "is_star": star,
+                    "star_reason": star_reason,
+                    "is_recent": is_recent_injury(injury.get("injury_date", "")),
+                    "status": injury["status"],
+                    "team": team_name,
+                    "ppg": player_stats.get("ppg", 0) if player_stats else 0,
+                })
+
+    return _run_prism_analysis(
+        home_team_id, away_team_id, home_team, away_team,
+        event_id, game_date_str, current, slot_type,
+        injured_stars, player_props_lines or {},
+        sport,
+        home_b2b=home_b2b, away_b2b=away_b2b, game_total=game_total,
+    )

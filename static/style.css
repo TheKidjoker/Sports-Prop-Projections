@@ -227,11 +227,6 @@ body.sidebar-open .sidebar {
     overflow-y: auto;
 }
 
-.sidebar-divider {
-    height: 1px;
-    background: var(--border-subtle);
-    margin: 1.25rem 0;
-}
 
 /* =========================================
    Sport Toggle (Pill Grid)
@@ -307,10 +302,9 @@ body.sidebar-open .sidebar {
    Form (Single-column stack)
    ========================================= */
 #predict-form {
-    background: var(--bg-base);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 1.25rem;
+    background: none;
+    border: none;
+    padding: 0;
 }
 
 .form-stack {
@@ -2233,6 +2227,88 @@ button[type="submit"]:disabled {
     letter-spacing: 0.3px;
 }
 
+.prism-empty {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 0.5rem 0;
+}
+
+/* =========================================
+   Load Props Button
+   ========================================= */
+.load-props-btn {
+    display: block;
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    background: rgba(187, 134, 252, 0.08);
+    color: var(--accent-purple);
+    border: 1px solid rgba(187, 134, 252, 0.25);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    text-transform: uppercase;
+}
+
+.load-props-btn:hover {
+    background: rgba(187, 134, 252, 0.15);
+    border-color: var(--accent-purple);
+}
+
+.load-props-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    color: var(--accent-purple);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.load-props-loading .spinner {
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+    border-top-color: var(--accent-purple);
+    margin-bottom: 0;
+}
+
+/* =========================================
+   Top Props Summary Section
+   ========================================= */
+.top-props-section {
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.top-props-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.top-prop-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.55rem 0.75rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent-purple);
+    border-radius: var(--radius-sm);
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.top-prop-team {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
 /* =========================================
    Alternative Picks
    ========================================= */
@@ -2893,6 +2969,158 @@ button[type="submit"]:disabled {
 }
 
 /* =========================================
+   Player Search Button (sidebar)
+   ========================================= */
+#player-search-btn {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    letter-spacing: 0.5px;
+}
+
+#player-search-btn:hover {
+    background: var(--accent-red-dim);
+    border-color: var(--accent-red);
+}
+
+/* =========================================
+   Player Search Section (main content)
+   ========================================= */
+.player-search-section {
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+.search-hero {
+    text-align: center;
+    padding: 2.5rem 0 1.5rem;
+}
+
+.search-hero-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+}
+
+.search-hero-sub {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+}
+
+.search-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.search-bar-wrapper {
+    position: relative;
+}
+
+.search-bar {
+    width: 100%;
+    padding: 0.85rem 1rem;
+    font-size: 1.1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-bar:focus {
+    border-color: var(--accent-red);
+    box-shadow: 0 0 0 3px rgba(230, 57, 70, 0.15);
+}
+
+.search-bar::placeholder {
+    color: var(--text-muted);
+}
+
+.search-bar-wrapper .autocomplete-dropdown {
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    max-height: 280px;
+}
+
+.search-inline-row {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.search-inline-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.search-inline-field-wide {
+    flex: 1;
+}
+
+.search-inline-field label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+    font-weight: 500;
+}
+
+.search-inline-field input {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.7rem;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.search-inline-field input:focus {
+    border-color: var(--accent-red);
+}
+
+.search-inline-field input::placeholder {
+    color: var(--text-muted);
+}
+
+.search-submit {
+    display: block;
+    width: 100%;
+    padding: 0.85rem;
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+    letter-spacing: 0.5px;
+    margin-top: 0.25rem;
+}
+
+.search-submit:hover {
+    background: var(--accent-red-hover);
+}
+
+.search-submit:disabled {
+    background: rgba(230, 57, 70, 0.08);
+    color: rgba(230, 57, 70, 0.3);
+    cursor: not-allowed;
+}
+
+/* =========================================
    Hidden
    ========================================= */
 .hidden {
@@ -3038,5 +3266,27 @@ button[type="submit"]:disabled {
 
     .prism-prop-info {
         min-width: 110px;
+    }
+
+    .top-props-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .search-hero {
+        padding: 1.5rem 0 1rem;
+    }
+
+    .search-hero-title {
+        font-size: 1.35rem;
+    }
+
+    .search-bar {
+        font-size: 1rem;
+        padding: 0.75rem 0.85rem;
+    }
+
+    .search-inline-row {
+        flex-direction: column;
+        gap: 0.6rem;
     }
 }

@@ -128,7 +128,7 @@ def classify_cbb_slot(day_of_week, hour_est, minute_est):
                 best_distance = distance
                 best_match = slot_type
 
-        if best_distance <= 20:
+        if best_distance <= 60:  # 60-min tolerance (backtested — recovers 84 unknown-slot games)
             return best_match
 
     return "unknown"

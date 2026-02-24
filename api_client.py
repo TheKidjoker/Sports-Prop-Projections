@@ -1,5 +1,6 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from api_cache import _cached_request, _espn_url, SPORT_MAP, CACHE_TTL  # noqa: F401
 
@@ -645,20 +646,27 @@ def get_team_roster_leaders(team_id, sport="nba", limit=3):
 
             candidates.append({"athlete_id": a_id, "name": name})
 
-        # Fetch season averages for each candidate (cached, fast)
+        # Fetch season averages for each candidate in parallel
         # Limit to first 8 to avoid excessive API calls
+        top_candidates = candidates[:8]
         leaders = []
-        for cand in candidates[:8]:
-            stats = get_player_season_averages(cand["athlete_id"], sport)
-            if stats and stats.get("ppg", 0) > 0:
-                leaders.append({
-                    "athlete_id": cand["athlete_id"],
-                    "name": cand["name"],
-                    "ppg": stats.get("ppg", 0),
-                    "rpg": stats.get("rpg", 0),
-                    "apg": stats.get("apg", 0),
-                    "mpg": stats.get("mpg", 0),
-                })
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {
+                pool.submit(get_player_season_averages, cand["athlete_id"], sport): cand
+                for cand in top_candidates
+            }
+            for future in futures:
+                cand = futures[future]
+                stats = future.result()
+                if stats and stats.get("ppg", 0) > 0:
+                    leaders.append({
+                        "athlete_id": cand["athlete_id"],
+                        "name": cand["name"],
+                        "ppg": stats.get("ppg", 0),
+                        "rpg": stats.get("rpg", 0),
+                        "apg": stats.get("apg", 0),
+                        "mpg": stats.get("mpg", 0),
+                    })
 
         leaders.sort(key=lambda x: x["ppg"], reverse=True)
         return leaders[:limit]

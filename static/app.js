@@ -133,7 +133,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // ─── Main App ───────────────────────────────────────────────────────
     var form = document.getElementById("predict-form");
     var submitBtn = document.getElementById("submit-btn");
-    var loading = document.getElementById("loading");
+    var loading = document.getElementById("predict-loading");
     var errorBanner = document.getElementById("error-banner");
     var results = document.getElementById("results");
     var scanBtn = document.getElementById("scan-btn");
@@ -141,6 +141,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var scanResults = document.getElementById("scan-results");
     var teamInput = document.getElementById("team_name");
     var teamDropdown = document.getElementById("team-dropdown");
+    var playerSearchBtn = document.getElementById("player-search-btn");
+    var playerSearchSection = document.getElementById("player-search-section");
 
     var welcomeHero = document.getElementById("welcome-hero");
     var dashboardSection = document.getElementById("dashboard-section");
@@ -159,6 +161,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var currentSlate = { game_count: 0, has_today: true, has_tomorrow: false };
     var scanResultsVisible = false;
     var dashboardVisible = false;
+    var loadedProps = {};       // event_id -> props array
+    var lastScanGames = [];    // games from last scan (for parlay rebuild)
 
     // Sidebar toggle
     var navSportBadge = document.getElementById("nav-sport-badge");
@@ -191,6 +195,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        playerSearchSection.classList.add("hidden");
         welcomeHero.classList.remove("hidden");
         closeSidebar();
     });
@@ -203,9 +208,6 @@ document.addEventListener("DOMContentLoaded", function () {
             sportBtns.forEach(function (b) { b.classList.remove("active"); });
             document.querySelector('.sport-btn[data-sport="' + sport + '"]').classList.add("active");
             navSportBadge.textContent = sport.toUpperCase();
-            if (sport !== "all") {
-                form.classList.remove("hidden");
-            }
             fetchGames();
             runScan();
         });
@@ -239,15 +241,11 @@ document.addEventListener("DOMContentLoaded", function () {
             dashboardVisible = false;
             lottoResults.classList.add("hidden");
             lottoResults.innerHTML = "";
+            loadedProps = {};
+            lastScanGames = [];
             if (testmodelSection) testmodelSection.classList.add("hidden");
+            playerSearchSection.classList.add("hidden");
             welcomeHero.classList.remove("hidden");
-
-            // Hide manual form when ALL is selected (it's sport-specific)
-            if (newSport === "all") {
-                form.classList.add("hidden");
-            } else {
-                form.classList.remove("hidden");
-            }
 
             // Re-fetch games for ticker + autocomplete
             if (newSport !== "all") {
@@ -355,6 +353,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        playerSearchSection.classList.add("hidden");
         welcomeHero.classList.add("hidden");
 
         authFetch("/api/scan", {
@@ -407,12 +406,32 @@ document.addEventListener("DOMContentLoaded", function () {
 
     scanBtn.addEventListener("click", runScan);
 
+    // Player Search sidebar button
+    playerSearchBtn.addEventListener("click", function () {
+        welcomeHero.classList.add("hidden");
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
+        scanSonar.classList.add("hidden");
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
+        if (testmodelSection) testmodelSection.classList.add("hidden");
+        playerSearchSection.classList.remove("hidden");
+
+        if (window.innerWidth <= 768) closeSidebar();
+    });
+
     // Form submit
     form.addEventListener("submit", function (e) {
         e.preventDefault();
 
         results.classList.add("hidden");
         errorBanner.classList.add("hidden");
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
@@ -450,9 +469,6 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             renderResults(result.data);
-
-            // Auto-close sidebar on mobile
-            if (window.innerWidth <= 768) closeSidebar();
         })
         .catch(function (err) {
             loading.classList.add("hidden");
@@ -541,6 +557,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function renderScanResults(games) {
         welcomeHero.classList.add("hidden");
+        loadedProps = {};  // Reset loaded props on new scan
+        lastScanGames = games;  // Store for parlay rebuilding
 
         // Sort: Today's games first, then Tomorrow's, by score within each group
         games.sort(function (a, b) {
@@ -843,42 +861,19 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
-        // PRISM Player Props (collapsible)
-        if (g.player_props && g.player_props.length > 0) {
+        // PRISM Player Props — on-demand loading (NBA only)
+        if (sport === "nba" && g.date_label !== "Tomorrow") {
             html += '<div class="scan-prism-section" id="prism-' + g.event_id + '">';
-            html += '<div class="prism-header" onclick="(function(el){el.closest(\'.scan-prism-section\').classList.toggle(\'prism-expanded\')})(this)">';
-            html += '<span><span class="prism-label">PRISM PLAYER PROPS</span>';
-            html += '<span class="prism-count">' + g.player_props.length + '</span></span>';
-            html += '<span class="prism-chevron">&#9660;</span>';
+            if (loadedProps[g.event_id]) {
+                // Already loaded — render inline
+                html += renderPropsBody(g.event_id, loadedProps[g.event_id]);
+            } else {
+                // Show "Load Props" button
+                html += '<button class="load-props-btn" data-event-id="' + g.event_id + '" data-sport="' + sport + '">';
+                html += 'Load Player Props';
+                html += '</button>';
+            }
             html += '</div>';
-            html += '<div class="prism-body">';
-
-            g.player_props.forEach(function (prop) {
-                var signalClass = "prism-skip";
-                if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
-                else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
-                else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
-                else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
-
-                html += '<div class="prism-prop">';
-                html += '<div class="prism-prop-info">';
-                html += '<span class="prism-player-name">' + prop.player_name + '</span>';
-                html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
-                html += '</div>';
-                html += '<div class="prism-prop-signal">';
-                html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
-                html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
-                if (prop.streak) {
-                    html += '<span class="prism-streak-badge">' + prop.streak.count + '/5 ' + prop.streak.direction + '</span>';
-                }
-                if (prop.minutes_unstable) {
-                    html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
-                }
-                html += '</div>';
-                html += '</div>';
-            });
-
-            html += '</div></div>';
         }
 
         // NFL: Skip badge
@@ -909,19 +904,182 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    function renderPropsBody(eventId, props) {
+        if (!props || props.length === 0) {
+            return '<div class="prism-empty">No prop signals found for this game.</div>';
+        }
+        var html = '<div class="prism-header" onclick="(function(el){el.closest(\'.scan-prism-section\').classList.toggle(\'prism-expanded\')})(this)">';
+        html += '<span><span class="prism-label">PRISM PLAYER PROPS</span>';
+        html += '<span class="prism-count">' + props.length + '</span></span>';
+        html += '<span class="prism-chevron">&#9660;</span>';
+        html += '</div>';
+        html += '<div class="prism-body">';
+
+        props.forEach(function (prop) {
+            var signalClass = "prism-skip";
+            if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
+            else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
+            else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
+            else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+
+            html += '<div class="prism-prop">';
+            html += '<div class="prism-prop-info">';
+            html += '<span class="prism-player-name">' + prop.player_name + '</span>';
+            html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
+            html += '</div>';
+            html += '<div class="prism-prop-signal">';
+            html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
+            html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
+            if (prop.streak) {
+                html += '<span class="prism-streak-badge">' + prop.streak.count + '/5 ' + prop.streak.direction + '</span>';
+            }
+            if (prop.minutes_unstable) {
+                html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
+            }
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function loadPropsForGame(eventId, sport) {
+        var section = document.getElementById("prism-" + eventId);
+        if (!section) return;
+
+        // Show loading state
+        section.innerHTML = '<div class="load-props-loading"><div class="spinner"></div><span>Loading PRISM props...</span></div>';
+
+        authFetch("/api/props?event_id=" + eventId + "&sport=" + sport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    loadedProps[eventId] = data.props || [];
+                    section.innerHTML = renderPropsBody(eventId, loadedProps[eventId]);
+                    // Auto-expand after loading
+                    section.classList.add("prism-expanded");
+                    // Rebuild parlays to include new props + show top props
+                    rebuildParlaysAndTopProps();
+                } else {
+                    section.innerHTML = '<div class="prism-empty">Failed to load props: ' + (data.error || 'Unknown error') + '</div>';
+                }
+            })
+            .catch(function () {
+                section.innerHTML = '<div class="prism-empty">Connection error loading props.</div>';
+            });
+    }
+
+    // Delegate click handler for Load Props buttons
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest(".load-props-btn");
+        if (btn) {
+            var eventId = btn.getAttribute("data-event-id");
+            var sport = btn.getAttribute("data-sport");
+            loadPropsForGame(eventId, sport);
+        }
+    });
+
+    function rebuildParlaysAndTopProps() {
+        if (!lastScanGames.length) return;
+
+        // Inject loaded props into game objects for parlay builder
+        var gamesWithProps = lastScanGames.map(function (g) {
+            var copy = Object.assign({}, g);
+            if (loadedProps[g.event_id]) {
+                copy.player_props = loadedProps[g.event_id];
+            }
+            return copy;
+        });
+
+        // Rebuild parlays section
+        var parlaysEl = document.querySelector(".parlays-section");
+        if (parlaysEl) {
+            var filtered = gamesWithProps.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
+            if (filtered.length < 2) filtered = gamesWithProps;
+            var newParlayHtml = buildParlaySection(filtered);
+            if (newParlayHtml) {
+                parlaysEl.outerHTML = newParlayHtml;
+            }
+        }
+
+        // Build top props summary
+        renderTopProps();
+    }
+
+    function renderTopProps() {
+        // Collect all loaded props across games
+        var allProps = [];
+        Object.keys(loadedProps).forEach(function (eid) {
+            loadedProps[eid].forEach(function (p) {
+                allProps.push(p);
+            });
+        });
+
+        if (allProps.length === 0) {
+            var existing = document.getElementById("top-props-section");
+            if (existing) existing.remove();
+            return;
+        }
+
+        // Sort by confidence descending
+        allProps.sort(function (a, b) { return b.confidence - a.confidence; });
+        var topProps = allProps.slice(0, 8);
+
+        var html = '<div id="top-props-section" class="top-props-section">';
+        html += '<h2 class="scan-title">Top Props Across All Games</h2>';
+        html += '<div class="top-props-grid">';
+
+        topProps.forEach(function (prop) {
+            var signalClass = "prism-skip";
+            if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
+            else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
+            else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
+            else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+
+            html += '<div class="top-prop-card">';
+            html += '<div class="prism-prop-info">';
+            html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + (prop.team || '') + ')</span></span>';
+            html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
+            html += '</div>';
+            html += '<div class="prism-prop-signal">';
+            html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
+            html += '<span class="prism-confidence">' + prop.confidence + '%</span>';
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div></div>';
+
+        // Insert before parlays section
+        var existing = document.getElementById("top-props-section");
+        if (existing) {
+            existing.outerHTML = html;
+        } else {
+            var parlaysEl = document.querySelector(".parlays-section");
+            if (parlaysEl) {
+                parlaysEl.insertAdjacentHTML("beforebegin", html);
+            } else {
+                // Append at end of scan results
+                scanResults.insertAdjacentHTML("beforeend", html);
+            }
+        }
+    }
+
     function buildParlaySection(games) {
         if (games.length < 2) return "";
 
         // Build combined pool: spread legs + player prop legs
         var spreadLegs = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
 
-        // Extract player props from games into parlay-compatible leg objects
+        // Extract player props from games (loaded on-demand) into parlay-compatible leg objects
         // Only include Today's props (tomorrow's lines aren't firm yet)
         var propLegs = [];
         games.forEach(function (g) {
-            if (!g.player_props || !g.player_props.length) return;
+            var props = g.player_props || loadedProps[g.event_id] || [];
+            if (!props.length) return;
             if (g.date_label === "Tomorrow") return;
-            g.player_props.forEach(function (p) {
+            props.forEach(function (p) {
                 var direction = p.signal.indexOf("OVER") !== -1 ? "OVER" : "UNDER";
                 propLegs.push({
                     cover_pct: p.confidence,
@@ -1090,6 +1248,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        playerSearchSection.classList.add("hidden");
 
         authFetch("/api/scan", {
             method: "POST",
@@ -1205,6 +1364,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        playerSearchSection.classList.add("hidden");
         dashboardSection.classList.remove("hidden");
         dashboardVisible = true;
         fetchDashboard();
@@ -1506,6 +1666,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
+        playerSearchSection.classList.add("hidden");
         testmodelSection.classList.remove("hidden");
 
         // Load metrics on first open
