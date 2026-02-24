@@ -91,7 +91,7 @@ def collect_sport(sport):
     # Only process dates up through today (skip future dates)
     today_str = datetime.now().strftime("%Y%m%d")
     all_dates = [d for d in all_dates if d <= today_str]
-    pending_dates = [d for d in all_dates if d not in done_dates]
+    pending_dates = sorted([d for d in all_dates if d not in done_dates], reverse=True)
     total = len(all_dates)
     done_count = len(done_dates)
 
@@ -122,13 +122,6 @@ def collect_sport(sport):
                 # Get final score
                 home_score, away_score, is_final = get_game_final_score(event_id, sport)
 
-                if not is_final:
-                    continue
-
-                # Skip games where ESPN no longer has spread data
-                if closing is None:
-                    continue
-
                 # Get over/under
                 ou = get_game_overunder(event_id, sport)
 
@@ -151,7 +144,7 @@ def collect_sport(sport):
                     "home_score": home_score,
                     "away_score": away_score,
                     "home_covered": home_covered,
-                    "game_status": "STATUS_FINAL",
+                    "game_status": "STATUS_FINAL" if is_final else "STATUS_IN_PROGRESS",
                 })
                 games_found += 1
 
