@@ -50,6 +50,8 @@ def require_auth(f):
             return jsonify({"error": "Missing or invalid token"}), 401
         token = auth_header[7:]
         try:
+            header = jwt.get_unverified_header(token)
+            print(f"[AUTH] Token alg: {header.get('alg')}", flush=True)
             jwt.decode(
                 token, SUPABASE_JWT_SECRET,
                 algorithms=["HS256"],
