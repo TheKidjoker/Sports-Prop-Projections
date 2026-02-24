@@ -903,6 +903,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Recommendation
         var recClass = "rec-monitor";
         if (g.recommendation === "STRONG PLAY") recClass = "rec-strong";
+        else if (g.recommendation === "CONFIDENT") recClass = "rec-confident";
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
@@ -2050,7 +2051,7 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="tm-feat-section">';
             html += '<h3 class="tm-feat-title">By Recommendation</h3>';
             html += '<table class="tm-table"><thead><tr><th>Rec</th><th>Games</th><th>Correct</th><th>Accuracy</th></tr></thead><tbody>';
-            ["STRONG PLAY", "LEAN", "MONITOR"].forEach(function (key) {
+            ["STRONG PLAY", "CONFIDENT", "LEAN", "MONITOR"].forEach(function (key) {
                 var r = m.rec_breakdown[key];
                 if (!r) return;
                 var accClass = r.accuracy >= 55 ? 'style="color:var(--accent-green)"' : r.accuracy < 50 ? 'style="color:var(--accent-red)"' : '';

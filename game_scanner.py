@@ -290,6 +290,8 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     line_movement_data = {"available": False}
     line_confirms = False
     line_magnitude = 0.0
+    line_toward_dog = False
+    line_toward_fav = False
 
     if opening is not None and current is not None:
         movement, line_magnitude = detect_movement(opening, current)
@@ -303,6 +305,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             "magnitude": line_magnitude,
             "confirms_slot": confirmed,
         }
+        # NBA V5: raw line direction toward dog/fav
+        raw_movement = current - opening
+        if current < 0:  # home favored
+            line_toward_dog = raw_movement > 0.5
+            line_toward_fav = raw_movement < -0.5
+        elif current > 0:  # away favored
+            line_toward_dog = raw_movement < -0.5
+            line_toward_fav = raw_movement > 0.5
 
     # ── Build injured_stars from parallel results ──
     injured_stars = []
@@ -452,6 +462,9 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         h2h_revenge_bonus=h2h_result["h2h_revenge_bonus"],
         h2h_dominance_bonus=h2h_result["h2h_dominance_bonus"],
         vegas_trap_bonus=vegas_trap_result["bonus"],
+        line_toward_dog=line_toward_dog,
+        line_toward_fav=line_toward_fav,
+        day_of_week=day_of_week,
     )
     if sport == "nfl":
         max_score = 53
@@ -460,7 +473,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     elif sport == "cbb":
         max_score = 37  # CBB V2 backtested adjustments
     elif sport == "nba":
-        max_score = 39  # Reduced after backtesting adjustments
+        max_score = 44  # V5: added line direction +3, spread sweet spot +2
     else:
         max_score = 42
     cover_pct = round(50 + (score / max_score) * 45, 1)
@@ -471,14 +484,19 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     # CBB backtested: STRONG PLAY (>=15) at 56.9%, LEAN 10-14 bucket is dead zone.
     if sport == "nba":
         if slot_type == "public":
-            # Public slot NBA: never STRONG PLAY, cap at LEAN
-            if score >= 7:
+            # Public V5: >= 10 = 73.3% (45 bets), score 8-9 is dead zone
+            if score >= 10:
+                recommendation = "STRONG PLAY"
+            elif score >= 7:
                 recommendation = "LEAN"
             else:
                 recommendation = "MONITOR"
         else:
+            # Vegas V5: >= 10 = 81.8%, 7-9 = 64.3% (28 bets), 5-6 = 53.8%
             if score >= 10:
                 recommendation = "STRONG PLAY"
+            elif score >= 7:
+                recommendation = "CONFIDENT"
             elif score >= 5:
                 recommendation = "LEAN"
             else:

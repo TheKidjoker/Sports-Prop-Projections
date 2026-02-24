@@ -1,6 +1,10 @@
 # ─── NBA SLOT RULES ───────────────────────────────────────────────────────────
 # Public day slots — used for Monday, Wednesday, Friday (hour in 24hr PST, minute, slot_type)
+# V5: Added afternoon slots (12, 15, 16) to eliminate unknown-slot games
 PUBLIC_DAY_SLOTS = [
+    (12, 0, "public"),   # 12:00 PM — matinee
+    (15, 0, "vegas"),    # 3:00 PM — afternoon
+    (16, 0, "public"),   # 4:00 PM — early evening (V5: was missing, 27 unknown)
     (17, 0, "vegas"),    # 5:00 PM
     (18, 0, "public"),   # 6:00 PM
     (19, 0, "vegas"),    # 7:00 PM
@@ -10,7 +14,10 @@ PUBLIC_DAY_SLOTS = [
 ]
 
 # Vegas day slots — used for Tuesday, Thursday, Saturday, Sunday (hour in 24hr PST, minute, slot_type)
+# V5: Added afternoon slots (12, 15) for matinee/early games
 VEGAS_DAY_SLOTS = [
+    (12, 0, "public"),   # 12:00 PM — matinee
+    (15, 0, "vegas"),    # 3:00 PM — afternoon
     (16, 0, "public"),   # 4:00 PM
     (17, 0, "vegas"),    # 5:00 PM
     (18, 0, "public"),   # 6:00 PM
@@ -363,8 +370,8 @@ def classify_slot(day_of_week, hour, minute, sport="nba",
             best_distance = distance
             best_match = slot_type
 
-    # Only match if within 20 minutes of a known slot
-    if best_distance <= 20:
+    # V5: expanded from 20 to 30 min (recovers 150+ unknown-slot games)
+    if best_distance <= 30:
         return best_match
 
     return "unknown"

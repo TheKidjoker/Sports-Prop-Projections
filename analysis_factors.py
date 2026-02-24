@@ -564,18 +564,21 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      public_betting_bonus=0,
                      feedback_adjustment=0,
                      h2h_revenge_bonus=False, h2h_dominance_bonus=False,
-                     vegas_trap_bonus=0):
+                     vegas_trap_bonus=0,
+                     line_toward_dog=False, line_toward_fav=False,
+                     day_of_week=""):
     """
-    Scoring (backtested adjustments: * = NBA, ** = CBB V2):
+    Scoring (backtested adjustments: * = NBA V5, ** = CBB V2):
       +10/+5*/+3**  public slot (NBA: +5, CBB: +3, others: +10)
       +0-8/+0-5*  line movement confirms slot (NBA: reduced weights)
+      +3/-2*  line direction toward dog/fav (NBA V5: 62.4% vs 47.2%)
       +5   trell rule confirms
       +5   rank scam detected (CFB/CBB)
       +5   spread discrepancy detected (CFB/CBB)
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
-      -3/0*/special**  spread (NBA: removed; CBB V2: -3 tiny, +3 sweet, -2 big)
+      special*/special**  spread (NBA V5: +2 sweet, -3 death zone, -3 blowout)
       +4/-3 or +2/-1*  back-to-back rest (NBA: reduced, others: original)
       +4/-3 or 0/0**  ATS record (CBB V2: removed — penalty was backwards)
       +3/0**  home/away split (CBB V2: removed — -7.9% lift)
@@ -583,15 +586,17 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
       -2/+3 feedback loop (all)
       +3/+2 or +1*/0**  head-to-head (CBB V2: removed — noise)
       +5/+7 vegas trap (NBA only)
-      = 39 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 53 max (NFL)
+      -3*  Tuesday penalty (NBA V5: 40.8% dog cover)
+      = 44 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 53 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
     """
-    breakdown = {"slot": 0, "line_movement": 0, "trell": 0,
+    breakdown = {"slot": 0, "line_movement": 0, "line_direction": 0,
+                 "trell": 0,
                  "rank_scam": 0, "spread_discrepancy": 0,
                  "trend_discrepancy": 0, "overunder": 0, "weather": 0,
-                 "spread_penalty": 0,
+                 "spread_penalty": 0, "day_penalty": 0,
                  "b2b": 0, "ats_record": 0, "home_away_split": 0,
                  "public_betting": 0, "feedback": 0, "head_to_head": 0,
                  "vegas_trap": 0}
@@ -642,10 +647,30 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["head_to_head"] = 0 if sport == "cbb" else 2
     breakdown["vegas_trap"] = vegas_trap_bonus
 
-    # Spread size: NBA removed; CBB V2 has sweet spot + penalties; others penalize big spreads
-    if spread_value is not None and sport != "nba":
+    # NBA V5: line direction toward dog is strongest signal (62.4% vs 47.2%)
+    if sport == "nba":
+        if line_toward_dog:
+            breakdown["line_direction"] = 3
+        elif line_toward_fav:
+            breakdown["line_direction"] = -2
+
+    # NBA V5: Tuesday penalty (40.8% dog cover — worst day by far)
+    if sport == "nba" and day_of_week.lower() == "tuesday":
+        breakdown["day_penalty"] = -3
+
+    # Spread size: NBA V5 has sweet spot + penalties; CBB V2 same; others penalize big spreads
+    if spread_value is not None:
         spread_abs = abs(spread_value)
-        if sport == "cbb":
+        if sport == "nba":
+            # NBA V5: 3-4.5 sweet spot (+2, 57.1%), 5-6.5 death zone (-3, 47.6%),
+            # 13+ blowout (-3, 46.0%)
+            if 3 <= spread_abs < 5:
+                breakdown["spread_penalty"] = 2    # sweet spot
+            elif 5 <= spread_abs < 7:
+                breakdown["spread_penalty"] = -3   # death zone
+            elif spread_abs >= 13:
+                breakdown["spread_penalty"] = -3   # blowout territory
+        elif sport == "cbb":
             # CBB V2: 6-10 sweet spot (+3), tiny spreads (-3), big spreads (-2)
             if 6 <= spread_abs < 10:
                 breakdown["spread_penalty"] = 3   # sweet spot bonus

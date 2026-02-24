@@ -244,9 +244,19 @@ def run_rules_backtest(sport):
         # ── Line movement ──
         line_confirms = False
         line_magnitude = 0.0
+        line_toward_dog = False
+        line_toward_fav = False
         if opening_spread is not None and closing_spread is not None:
             movement, line_magnitude = detect_movement(opening_spread, closing_spread)
             line_confirms = confirms_slot(movement, slot_type)
+            # NBA V5: raw line direction toward dog/fav
+            raw_movement = closing_spread - opening_spread
+            if closing_spread < 0:  # home favored
+                line_toward_dog = raw_movement > 0.5
+                line_toward_fav = raw_movement < -0.5
+            else:  # away favored
+                line_toward_dog = raw_movement < -0.5
+                line_toward_fav = raw_movement > 0.5
 
         # ── Determine lean ──
         lean_team = _determine_lean(slot_type, home, away, closing_spread, sport=sport)
@@ -363,19 +373,28 @@ def run_rules_backtest(sport):
             h2h_revenge_bonus=h2h_revenge,
             h2h_dominance_bonus=h2h_dominance,
             vegas_trap_bonus=vegas_trap_bonus,
+            line_toward_dog=line_toward_dog,
+            line_toward_fav=line_toward_fav,
+            day_of_week=day_of_week,
         )
 
         # ── Recommendation ──
         # NBA backtested: lower thresholds, demote public slot picks
         if sport == "nba":
             if slot_type == "public":
-                if score >= 7:
+                # Public V5: >= 10 = 73.3% (45 bets), score 8-9 is dead zone
+                if score >= 10:
+                    recommendation = "STRONG PLAY"
+                elif score >= 7:
                     recommendation = "LEAN"
                 else:
                     recommendation = "MONITOR"
             else:
+                # Vegas V5: >= 10 = 81.8%, 7-9 = 64.3% (28 bets), 5-6 = 53.8%
                 if score >= 10:
                     recommendation = "STRONG PLAY"
+                elif score >= 7:
+                    recommendation = "CONFIDENT"
                 elif score >= 5:
                     recommendation = "LEAN"
                 else:
@@ -435,6 +454,9 @@ def run_rules_backtest(sport):
         _track_factor(factor_tracker, "ats_bonus", ats_bonus, correct)
         _track_factor(factor_tracker, "ats_penalty", ats_penalty, correct)
         _track_factor(factor_tracker, "spread_penalty", breakdown.get("spread_penalty", 0) < 0, correct)
+        _track_factor(factor_tracker, "line_toward_dog", line_toward_dog, correct)
+        _track_factor(factor_tracker, "line_toward_fav", line_toward_fav, correct)
+        _track_factor(factor_tracker, "day_penalty", breakdown.get("day_penalty", 0) < 0, correct)
 
         # Track by slot type
         slot_tracker[slot_type]["total"] += 1
