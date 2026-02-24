@@ -873,14 +873,19 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
-        // PRISM Player Props — per-game Load Props button (NBA today only)
+        // PRISM Player Props — dropdown arrow (NBA today only)
         if (sport === "nba" && g.date_label === "Today" && !g.skip) {
-            html += '<div class="scan-prism-section" id="prism-section-' + g.event_id + '">';
-            if (loadedProps[g.event_id] && loadedProps[g.event_id].length > 0) {
-                html += buildPrismBody(loadedProps[g.event_id]);
-            } else {
-                html += '<button type="button" class="load-props-btn" data-event-id="' + g.event_id + '">Load Props</button>';
+            var alreadyLoaded = loadedProps[g.event_id] && loadedProps[g.event_id].length > 0;
+            html += '<div class="scan-prism-section' + (alreadyLoaded ? ' prism-expanded' : '') + '" id="prism-section-' + g.event_id + '">';
+            html += '<div class="prism-dropdown-toggle" data-event-id="' + g.event_id + '">';
+            html += '<span class="prism-dropdown-label">Player Props</span>';
+            html += '<span class="prism-dropdown-chevron">&#9660;</span>';
+            html += '</div>';
+            html += '<div class="prism-dropdown-body" id="prism-body-' + g.event_id + '">';
+            if (alreadyLoaded) {
+                html += buildPrismInner(loadedProps[g.event_id]);
             }
+            html += '</div>';
             html += '</div>';
         }
 
@@ -921,18 +926,12 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
-    function buildPrismBody(props) {
+    function buildPrismInner(props) {
         if (!props || props.length === 0) return '<div class="prism-empty">No actionable props found</div>';
         var actionable = props.filter(function (p) { return p.signal && p.signal !== "SKIP"; });
         if (actionable.length === 0) return '<div class="prism-empty">No actionable props found</div>';
 
-        var html = '<div class="prism-expanded">';
-        html += '<div class="prism-header" onclick="this.parentElement.classList.toggle(\'prism-expanded\')">';
-        html += '<span class="prism-label">PRISM Props <span class="prism-count">' + actionable.length + '</span></span>';
-        html += '<span class="prism-chevron">&#9660;</span>';
-        html += '</div>';
-        html += '<div class="prism-body">';
-
+        var html = '';
         actionable.forEach(function (p) {
             var signalClass = "prism-skip";
             if (p.signal === "STRONG OVER") signalClass = "prism-strong-over";
@@ -958,16 +957,18 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         });
 
-        html += '</div>'; // close prism-body
-        html += '</div>'; // close prism-expanded wrapper
         return html;
     }
 
     function loadPropsForGame(eventId) {
-        var section = document.getElementById("prism-section-" + eventId);
-        if (!section) return;
+        var body = document.getElementById("prism-body-" + eventId);
+        if (!body) return;
+
+        // Already loaded
+        if (loadedProps[eventId]) return;
+
         // Show loading state
-        section.innerHTML = '<div class="prism-loading"><div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div><span style="font-size:0.8rem;color:var(--text-muted)">Loading props...</span></div>';
+        body.innerHTML = '<div class="prism-loading"><div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div><span style="font-size:0.8rem;color:var(--text-muted)">Loading props...</span></div>';
 
         authFetch("/api/props?event_id=" + eventId + "&sport=" + currentSport)
             .then(function (res) { return res.json(); })
@@ -975,24 +976,45 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (data.success) {
                     var props = data.props || [];
                     loadedProps[eventId] = props;
-                    section.innerHTML = buildPrismBody(props);
-                    // Rebuild parlays to include new prop legs
+                    body.innerHTML = buildPrismInner(props);
+                    // Update the toggle label with count
+                    var section = document.getElementById("prism-section-" + eventId);
+                    if (section) {
+                        var label = section.querySelector(".prism-dropdown-label");
+                        var actionable = props.filter(function (p) { return p.signal && p.signal !== "SKIP"; });
+                        if (label && actionable.length > 0) {
+                            label.innerHTML = 'Player Props <span class="prism-count">' + actionable.length + '</span>';
+                        }
+                    }
                     rebuildParlays();
                 } else {
-                    section.innerHTML = '<div class="prism-empty">Failed to load props</div>';
+                    body.innerHTML = '<div class="prism-empty">Failed to load props</div>';
                 }
             })
             .catch(function () {
-                section.innerHTML = '<div class="prism-empty">Connection error</div>';
+                body.innerHTML = '<div class="prism-empty">Connection error</div>';
             });
     }
 
-    // Delegate click handler for Load Props buttons
+    // Delegate click handler for dropdown toggle
     document.addEventListener("click", function (e) {
-        var btn = e.target.closest(".load-props-btn");
-        if (btn) {
-            var eventId = btn.getAttribute("data-event-id");
-            if (eventId) loadPropsForGame(eventId);
+        var toggle = e.target.closest(".prism-dropdown-toggle");
+        if (toggle) {
+            var eventId = toggle.getAttribute("data-event-id");
+            var section = document.getElementById("prism-section-" + eventId);
+            if (!section) return;
+
+            var isExpanded = section.classList.contains("prism-expanded");
+            if (isExpanded) {
+                // Collapse
+                section.classList.remove("prism-expanded");
+            } else {
+                // Expand — load props if not yet loaded
+                section.classList.add("prism-expanded");
+                if (!loadedProps[eventId]) {
+                    loadPropsForGame(eventId);
+                }
+            }
         }
     });
 
@@ -1015,10 +1037,20 @@ document.addEventListener("DOMContentLoaded", function () {
                         if (!loadedProps[p.event_id]) loadedProps[p.event_id] = [];
                         loadedProps[p.event_id].push(p);
                     });
-                    // Inject props into per-game PRISM sections
+                    // Inject props into per-game dropdown bodies
                     Object.keys(loadedProps).forEach(function (eid) {
+                        var body = document.getElementById("prism-body-" + eid);
+                        if (body) body.innerHTML = buildPrismInner(loadedProps[eid]);
+                        // Expand and update label
                         var section = document.getElementById("prism-section-" + eid);
-                        if (section) section.innerHTML = buildPrismBody(loadedProps[eid]);
+                        if (section) {
+                            section.classList.add("prism-expanded");
+                            var label = section.querySelector(".prism-dropdown-label");
+                            var actionable = (loadedProps[eid] || []).filter(function (p) { return p.signal && p.signal !== "SKIP"; });
+                            if (label && actionable.length > 0) {
+                                label.innerHTML = 'Player Props <span class="prism-count">' + actionable.length + '</span>';
+                            }
+                        }
                     });
                     // Render top props section
                     renderTopProps(props);

@@ -2130,27 +2130,50 @@ button[type="submit"]:disabled {
 .scan-prism-section {
     border-top: 1px solid var(--border-glass);
     margin-top: 0.5rem;
-    padding-top: 0.4rem;
+    padding-top: 0;
 }
 
-.load-props-btn {
-    display: block;
-    width: 100%;
-    padding: 0.35rem;
-    background: transparent;
-    color: var(--accent-purple);
-    border: 1px solid rgba(187, 134, 252, 0.3);
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
-    font-weight: 600;
+.prism-dropdown-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.15rem;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
-    letter-spacing: 0.3px;
+    user-select: none;
+    transition: opacity 0.2s;
 }
 
-.load-props-btn:hover {
-    background: rgba(187, 134, 252, 0.08);
-    border-color: var(--accent-purple);
+.prism-dropdown-toggle:hover {
+    opacity: 0.8;
+}
+
+.prism-dropdown-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent-purple);
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.prism-dropdown-chevron {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.prism-expanded .prism-dropdown-chevron {
+    transform: rotate(180deg);
+}
+
+.prism-dropdown-body {
+    display: none;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding-bottom: 0.25rem;
+}
+
+.prism-expanded .prism-dropdown-body {
+    display: flex;
 }
 
 .prism-loading {
