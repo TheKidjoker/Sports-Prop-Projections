@@ -2,14 +2,31 @@
 Test Model Collector — iterates 2 years of in-season dates per sport,
 fetches games, spreads, and final scores from ESPN, and stores in
 tm_historical_games.  Runs as background thread with progress polling.
+
+After ESPN collection, optionally backfills missing spreads from The Odds API
+(requires ODDS_API_KEY env var — graceful degradation when not set).
 """
 
+import os
 import time
 import threading
+import requests
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from api_client import get_todays_games, get_game_spread, get_game_final_score, get_game_overunder
 from test_model import db as tm_db
+
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
+
+# The Odds API sport keys
+ODDS_API_SPORT_KEYS = {
+    "nba": "basketball_nba",
+    "nhl": "icehockey_nhl",
+    "nfl": "americanfootball_nfl",
+    "cfb": "americanfootball_ncaaf",
+    "cbb": "basketball_ncaab",
+}
 
 # Season date ranges by sport (approximate)
 SEASON_RANGES = {
@@ -167,9 +184,19 @@ def collect_sport(sport):
         # Be polite to ESPN
         time.sleep(0.5)
 
+    # Run Odds API backfill for games missing spreads
+    if ODDS_API_KEY:
+        with _collection_lock:
+            _collection_progress[sport]["current_date"] = "Backfilling spreads..."
+        try:
+            backfill_spreads_from_odds_api(sport)
+        except Exception as e:
+            print(f"[ODDS API] Backfill error: {e}", flush=True)
+
     with _collection_lock:
         _collection_progress[sport]["status"] = "complete"
         _collection_progress[sport]["current_date"] = ""
+        _collection_progress[sport]["games_collected"] = tm_db.count_historical_games(sport)
 
 
 def start_collection_thread(sport):
@@ -182,3 +209,165 @@ def start_collection_thread(sport):
     t = threading.Thread(target=collect_sport, args=(sport,), daemon=True)
     t.start()
     return True
+
+
+# ─── The Odds API Spread Backfill ──────────────────────────────────────────
+
+def _normalize_team_name(name):
+    """Normalize team name for fuzzy matching between ESPN and Odds API."""
+    return name.strip().lower().replace(".", "").replace("'", "")
+
+
+def _match_odds_to_game(odds_game, home_team, away_team):
+    """Check if an Odds API game matches an ESPN game by team names."""
+    oh = _normalize_team_name(odds_game.get("home_team", ""))
+    oa = _normalize_team_name(odds_game.get("away_team", ""))
+    eh = _normalize_team_name(home_team)
+    ea = _normalize_team_name(away_team)
+    # Match if either name is a substring of the other (handles "Los Angeles Lakers" vs "Lakers")
+    return (oh in eh or eh in oh) and (oa in ea or ea in oa)
+
+
+def fetch_odds_api_spreads(sport_key, date_iso):
+    """
+    Fetch historical spreads from The Odds API for a given date.
+
+    Args:
+        sport_key: Odds API sport key (e.g., "basketball_nba")
+        date_iso: ISO 8601 date string (e.g., "2024-01-15T00:00:00Z")
+
+    Returns:
+        List of dicts: [{home_team, away_team, opening_spread, closing_spread}]
+        Empty list on error or no data.
+    """
+    if not ODDS_API_KEY:
+        return []
+
+    url = f"https://api.the-odds-api.com/v4/historical/sports/{sport_key}/odds"
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "spreads",
+        "oddsFormat": "american",
+        "date": date_iso,
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code == 422:
+            return []  # No data for this date
+        resp.raise_for_status()
+
+        # Track remaining credits from headers
+        remaining = resp.headers.get("x-requests-remaining", "?")
+        used = resp.headers.get("x-requests-used", "?")
+        print(f"[ODDS API] Credits: {used} used, {remaining} remaining", flush=True)
+
+        data = resp.json()
+        games = data.get("data", [])
+        results = []
+
+        for game in games:
+            home = game.get("home_team", "")
+            away = game.get("away_team", "")
+            bookmakers = game.get("bookmakers", [])
+
+            # Find FanDuel or DraftKings as primary, fallback to first available
+            closing_spread = None
+            opening_spread = None
+            for bk in bookmakers:
+                bk_key = bk.get("key", "")
+                markets = bk.get("markets", [])
+                for market in markets:
+                    if market.get("key") != "spreads":
+                        continue
+                    outcomes = market.get("outcomes", [])
+                    for outcome in outcomes:
+                        if _normalize_team_name(outcome.get("name", "")) in _normalize_team_name(home) or \
+                           _normalize_team_name(home) in _normalize_team_name(outcome.get("name", "")):
+                            spread_val = outcome.get("point")
+                            if spread_val is not None:
+                                if closing_spread is None or bk_key in ("fanduel", "draftkings"):
+                                    closing_spread = float(spread_val)
+                                if opening_spread is None:
+                                    opening_spread = float(spread_val)
+
+            if closing_spread is not None:
+                results.append({
+                    "home_team": home,
+                    "away_team": away,
+                    "opening_spread": opening_spread,
+                    "closing_spread": closing_spread,
+                })
+
+        return results
+
+    except Exception as e:
+        print(f"[ODDS API] Error fetching {sport_key} for {date_iso}: {e}", flush=True)
+        return []
+
+
+def backfill_spreads_from_odds_api(sport):
+    """
+    Second pass: find games with NULL closing_spread and try to fill from The Odds API.
+    Groups games by date and makes one API call per date.
+    Rate limited to 1 request per second.
+    """
+    if not ODDS_API_KEY:
+        print("[ODDS API] No ODDS_API_KEY set, skipping backfill.", flush=True)
+        return 0
+
+    sport_key = ODDS_API_SPORT_KEYS.get(sport)
+    if not sport_key:
+        return 0
+
+    # Get all games without spreads
+    games = tm_db.get_historical_games(sport)
+    no_spread = [g for g in games if g.get("closing_spread") is None
+                 and g.get("game_status") == "STATUS_FINAL"]
+
+    if not no_spread:
+        print(f"[ODDS API] No games without spreads for {sport}.", flush=True)
+        return 0
+
+    # Group by date
+    by_date = defaultdict(list)
+    for g in no_spread:
+        date_key = g.get("game_date", "")[:10]  # "2024-01-15"
+        if date_key:
+            by_date[date_key].append(g)
+
+    print(f"[ODDS API] Backfilling {len(no_spread)} games across {len(by_date)} dates for {sport}.", flush=True)
+
+    updated = 0
+    for date_str in sorted(by_date.keys()):
+        date_games = by_date[date_str]
+        # Format as ISO for API: "2024-01-15T12:00:00Z"
+        date_iso = f"{date_str}T12:00:00Z"
+
+        odds_data = fetch_odds_api_spreads(sport_key, date_iso)
+        if not odds_data:
+            time.sleep(1)
+            continue
+
+        for game in date_games:
+            for odds_game in odds_data:
+                if _match_odds_to_game(odds_game, game["home_team"], game["away_team"]):
+                    closing = odds_game["closing_spread"]
+                    opening = odds_game.get("opening_spread")
+                    home_covered = _compute_home_covered(
+                        game.get("home_score"), game.get("away_score"), closing
+                    )
+                    tm_db.upsert_historical_game({
+                        **game,
+                        "closing_spread": closing,
+                        "opening_spread": opening or game.get("opening_spread"),
+                        "home_covered": home_covered,
+                    })
+                    updated += 1
+                    break
+
+        time.sleep(1)  # Rate limit: 1 request per second
+
+    print(f"[ODDS API] Backfilled {updated} games for {sport}.", flush=True)
+    return updated

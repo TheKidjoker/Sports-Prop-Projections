@@ -522,16 +522,25 @@ def _fmt_spread(val):
     return str(val)
 
 
-def _determine_lean(slot_type, home_team, away_team, current_spread):
+def _determine_lean(slot_type, home_team, away_team, current_spread, sport="nba"):
     """
     Determine which team to lean towards based on slot type and spread.
 
-    Public/caution slot -> lean favorite (public money tends to be right).
-    Vegas/trap slot -> lean underdog (sharp money fades the public).
+    NBA (backtested): always lean underdog regardless of slot — the public
+    inflates favorite lines in all time slots, creating underdog value.
+
+    Other sports:
+      Public/caution slot -> lean favorite (public money tends to be right).
+      Vegas/trap slot -> lean underdog (sharp money fades the public).
+
     Negative spread = home team favored.
     """
     if current_spread is None:
         return None
+
+    if sport == "nba":
+        # NBA: lean underdog in all slots (backtested +17.5% ROI)
+        return away_team if current_spread < 0 else home_team
 
     if slot_type in ("public", "caution"):
         # Lean with the favorite (expect sensible/public outcome)
@@ -557,24 +566,24 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      h2h_revenge_bonus=False, h2h_dominance_bonus=False,
                      vegas_trap_bonus=0):
     """
-    Scoring:
-      +10  public slot
-      +0-8 line movement confirms slot (graduated by magnitude)
+    Scoring (NBA backtested adjustments noted with *):
+      +10/+5*  public slot (NBA: +5, others: +10)
+      +0-8/+0-5*  line movement confirms slot (NBA: reduced weights)
       +5   trell rule confirms
       +5   rank scam detected (CFB/CBB)
       +5   spread discrepancy detected (CFB/CBB)
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
-      -3   spread size penalty (large spreads are harder to cover)
-      +4/-3 back-to-back rest (NBA/NHL)
+      -3/0*  spread size penalty (NBA: removed — large spreads cover well)
+      +4/-3 or +2/-1*  back-to-back rest (NBA: reduced, others: original)
       +4/-3 ATS record (all)
       +3   home/away split (all)
       +3/+5 public betting / sharp money (all)
       -2/+3 feedback loop (all)
-      +3/+2 head-to-head revenge/dominance (all)
+      +3/+2 or +1*/+2  head-to-head (NBA: revenge reduced to +1)
       +5/+7 vegas trap (NBA only)
-      = 49 max (NBA), 42 max (NHL), 48 max (CFB/CBB), 53 max (NFL)
+      = 39 max (NBA), 42 max (NHL), 48 max (CFB/CBB), 53 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
@@ -588,9 +597,9 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                  "vegas_trap": 0}
 
     if slot_type == "public":
-        breakdown["slot"] = 10
+        breakdown["slot"] = 5 if sport == "nba" else 10
     if line_confirms:
-        breakdown["line_movement"] = score_line_movement(line_magnitude)
+        breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
         breakdown["trell"] = 5
     if rank_scam_applies:
@@ -604,11 +613,11 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if weather_applies:
         breakdown["weather"] = 5
 
-    # New factors
+    # B2B: NBA uses reduced weights (backtested — minimal lift)
     if b2b_bonus:
-        breakdown["b2b"] = 4
+        breakdown["b2b"] = 2 if sport == "nba" else 4
     elif b2b_penalty:
-        breakdown["b2b"] = -3
+        breakdown["b2b"] = -1 if sport == "nba" else -3
     if ats_bonus:
         breakdown["ats_record"] = 4
     elif ats_penalty:
@@ -617,18 +626,19 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["home_away_split"] = 3
     breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
+    # H2H: NBA revenge reduced (backtested — negative lift)
     if h2h_revenge_bonus:
-        breakdown["head_to_head"] = 3
+        breakdown["head_to_head"] = 1 if sport == "nba" else 3
     elif h2h_dominance_bonus:
         breakdown["head_to_head"] = 2
     breakdown["vegas_trap"] = vegas_trap_bonus
 
-    # Spread size penalty: large spreads are harder to cover
-    if spread_value is not None:
+    # Spread size penalty: NBA removed (backtested — large spreads cover well in vegas)
+    if spread_value is not None and sport != "nba":
         spread_abs = abs(spread_value)
         if sport == "nfl" and spread_abs > 10:
             breakdown["spread_penalty"] = -3
-        elif sport in ("nba", "nhl") and spread_abs > 8:
+        elif sport == "nhl" and spread_abs > 8:
             breakdown["spread_penalty"] = -3
         elif sport in ("cfb", "cbb") and spread_abs > 14:
             breakdown["spread_penalty"] = -3

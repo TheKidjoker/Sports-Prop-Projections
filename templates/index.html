@@ -210,6 +210,7 @@
             <div class="tm-tabs">
                 <button type="button" class="tm-tab active" data-tm-tab="scan">Today's Model</button>
                 <button type="button" class="tm-tab" data-tm-tab="backtest">Backtest</button>
+                <button type="button" class="tm-tab" data-tm-tab="rules">Rules Replay</button>
                 <button type="button" class="tm-tab" data-tm-tab="collect">Data Collection</button>
                 <button type="button" class="tm-tab" data-tm-tab="metrics">Metrics</button>
             </div>
@@ -227,6 +228,13 @@
                 <button type="button" class="tm-action-btn" id="tm-backtest-btn">Run Backtest</button>
                 <div id="tm-backtest-progress"></div>
                 <div id="tm-backtest-results"></div>
+            </div>
+
+            <div id="tm-panel-rules" class="tm-panel hidden">
+                <p class="tm-panel-desc">Replays the actual scoring system against historical outcomes. Tests every factor except injury data, sharp money, feedback loop, and weather.</p>
+                <button type="button" class="tm-action-btn" id="tm-rules-btn">Run Rules Replay</button>
+                <div id="tm-rules-progress"></div>
+                <div id="tm-rules-results"></div>
             </div>
 
             <div id="tm-panel-collect" class="tm-panel hidden">

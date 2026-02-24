@@ -13,7 +13,7 @@ from test_model.model import train_model, predict_game, compute_edge_metrics
 from test_model.clustering import train_clusters, assign_cluster
 from test_model.metrics import compute_metrics
 
-MIN_TRAINING_GAMES = 500
+MIN_TRAINING_GAMES = 100  # Adaptive: works with smaller datasets, ideal is 500+
 RETRAIN_INTERVAL_DAYS = 30
 
 # Global progress dict for polling
@@ -32,11 +32,11 @@ def run_backtest(sport):
     Call via start_backtest_thread() for background execution.
     """
     rows = tm_db.get_game_features_for_training(sport)
-    if len(rows) < MIN_TRAINING_GAMES + 50:
+    if len(rows) < MIN_TRAINING_GAMES + 20:
         with _backtest_lock:
             _backtest_progress[sport] = {
                 "status": "error",
-                "message": f"Need at least {MIN_TRAINING_GAMES + 50} games, have {len(rows)}",
+                "message": f"Need at least {MIN_TRAINING_GAMES + 20} games with features, have {len(rows)}. Collect more data and compute features first.",
             }
         return
 

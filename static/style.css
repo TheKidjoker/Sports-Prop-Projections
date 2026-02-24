@@ -2578,6 +2578,13 @@ button[type="submit"]:disabled {
     margin-bottom: 0.5rem;
 }
 
+.tm-panel-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
 .tm-comparison {
     display: flex;
     gap: 1rem;

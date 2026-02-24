@@ -350,7 +350,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             moneyline_recommend = True
 
     # Determine lean team
-    lean_team = _determine_lean(slot_type, home_team, away_team, current_spread)
+    lean_team = _determine_lean(slot_type, home_team, away_team, current_spread, sport=sport)
 
     # Trell Rule lean override
     if trell_result.get("applies"):
@@ -474,18 +474,35 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     elif sport in ("cfb", "cbb"):
         max_score = 48
     elif sport == "nba":
-        max_score = 49
+        max_score = 39  # Reduced after backtesting adjustments
     else:
         max_score = 42
     cover_pct = round(50 + (score / max_score) * 45, 1)
 
     # Recommendation label
-    if score >= 15:
-        recommendation = "STRONG PLAY"
-    elif score >= 10:
-        recommendation = "LEAN"
+    # NBA backtested: sweet spot is score 4-7, public slot drags accuracy.
+    # Use lower thresholds + demote public-slot picks.
+    if sport == "nba":
+        if slot_type == "public":
+            # Public slot NBA: never STRONG PLAY, cap at LEAN
+            if score >= 7:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
+        else:
+            if score >= 10:
+                recommendation = "STRONG PLAY"
+            elif score >= 5:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
     else:
-        recommendation = "MONITOR"
+        if score >= 15:
+            recommendation = "STRONG PLAY"
+        elif score >= 10:
+            recommendation = "LEAN"
+        else:
+            recommendation = "MONITOR"
 
     # Build clear action string with spread numbers
     action = None

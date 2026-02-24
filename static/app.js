@@ -1438,6 +1438,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var testmodelSection = document.getElementById("testmodel-section");
     var tmCollectPollTimer = null;
     var tmBacktestPollTimer = null;
+    var tmRulesPollTimer = null;
 
     // Show Test Model section
     testmodelBtn.addEventListener("click", function () {
@@ -1474,6 +1475,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("tm-panel-" + target).classList.remove("hidden");
 
             if (target === "metrics") tmLoadMetrics();
+            if (target === "rules") tmLoadRulesMetrics();
         });
     });
 
@@ -1638,6 +1640,190 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             })
             .catch(function () {});
+    }
+
+    // ── Rules Replay ──
+    document.getElementById("tm-rules-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-rules-btn");
+        btn.disabled = true;
+        btn.textContent = "Running Replay...";
+        document.getElementById("tm-rules-results").innerHTML = "";
+
+        authFetch("/api/tm/rules-backtest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: currentSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.success) {
+                tmStartRulesPoll();
+            } else {
+                btn.disabled = false;
+                btn.textContent = "Run Rules Replay";
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Run Rules Replay";
+        });
+    });
+
+    function tmStartRulesPoll() {
+        if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
+        tmRulesPollTimer = setInterval(tmPollRules, 5000);
+        tmPollRules();
+    }
+
+    function tmPollRules() {
+        authFetch("/api/tm/rules-backtest/status?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var prog = data.progress || {};
+                var el = document.getElementById("tm-rules-progress");
+                var resEl = document.getElementById("tm-rules-results");
+
+                if (prog.status === "running") {
+                    var pct = prog.total_games > 0 ? Math.round(prog.processed / prog.total_games * 100) : 0;
+                    el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>' +
+                        '<div class="tm-progress-text">Rules Replay: ' + prog.processed + '/' + prog.total_games + ' games — ' + (prog.current_date || '') + '</div>';
+                } else if (prog.status === "complete") {
+                    el.innerHTML = '';
+                    document.getElementById("tm-rules-btn").disabled = false;
+                    document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
+                    if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
+
+                    if (prog.metrics) {
+                        resEl.innerHTML = tmRenderRulesMetrics(prog.metrics);
+                    }
+                } else if (prog.status === "error") {
+                    el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Rules replay error') + '</div>';
+                    document.getElementById("tm-rules-btn").disabled = false;
+                    document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
+                    if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
+                }
+            })
+            .catch(function () {});
+    }
+
+    function tmLoadRulesMetrics() {
+        var resEl = document.getElementById("tm-rules-results");
+        authFetch("/api/tm/rules-backtest/metrics?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                if (!data.rules_metrics && !data.ml_metrics) {
+                    resEl.innerHTML = '<div class="tm-progress-text">No rules replay results yet. Collect data first, then run a rules replay.</div>';
+                    return;
+                }
+                var html = '';
+                if (data.rules_metrics && data.ml_metrics) {
+                    html += tmRenderComparison(data.rules_metrics, data.ml_metrics);
+                }
+                if (data.rules_metrics) {
+                    html += tmRenderRulesMetrics(data.rules_metrics.feature_importances ? {
+                        accuracy: data.rules_metrics.accuracy,
+                        roi: data.rules_metrics.roi,
+                        clv_avg: data.rules_metrics.clv_avg,
+                        total_predictions: data.rules_metrics.total_predictions,
+                        qualified_bets: data.rules_metrics.qualified_bets,
+                        factor_breakdown: data.rules_metrics.feature_importances,
+                        threshold_analysis: data.rules_metrics.threshold_analysis,
+                        slot_breakdown: {},
+                        rec_breakdown: {},
+                    } : {});
+                }
+                resEl.innerHTML = html;
+            })
+            .catch(function () {});
+    }
+
+    function tmRenderComparison(rules, ml) {
+        var html = '<div class="tm-feat-section"><h3 class="tm-feat-title">Rules Engine vs ML Model</h3>';
+        html += '<table class="tm-table"><thead><tr><th>Metric</th><th>Rules Engine</th><th>ML Model</th></tr></thead><tbody>';
+        html += '<tr><td>Accuracy</td><td>' + (rules.accuracy || 0) + '%</td><td>' + (ml.accuracy || 0) + '%</td></tr>';
+        html += '<tr><td>ROI</td><td>' + (rules.roi > 0 ? '+' : '') + (rules.roi || 0) + '%</td><td>' + (ml.roi > 0 ? '+' : '') + (ml.roi || 0) + '%</td></tr>';
+        html += '<tr><td>CLV</td><td>' + (rules.clv_avg > 0 ? '+' : '') + (rules.clv_avg || 0) + '%</td><td>' + (ml.clv_avg > 0 ? '+' : '') + (ml.clv_avg || 0) + '%</td></tr>';
+        html += '<tr><td>Total Predictions</td><td>' + (rules.total_predictions || 0) + '</td><td>' + (ml.total_predictions || 0) + '</td></tr>';
+        html += '<tr><td>Qualified Bets</td><td>' + (rules.qualified_bets || 0) + '</td><td>' + (ml.qualified_bets || 0) + '</td></tr>';
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    function tmRenderRulesMetrics(m) {
+        if (!m || !m.accuracy) return '';
+        var html = '';
+
+        // Stat cards
+        var accClass = m.accuracy >= 55 ? "stat-green" : m.accuracy >= 50 ? "stat-yellow" : "stat-red";
+        var roiClass = m.roi > 0 ? "stat-green" : m.roi >= -3 ? "stat-yellow" : "stat-red";
+
+        html += '<div class="tm-stat-cards">';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Accuracy</div><div class="tm-stat-value ' + accClass + '">' + (m.accuracy || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">ROI</div><div class="tm-stat-value ' + roiClass + '">' + (m.roi > 0 ? '+' : '') + (m.roi || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">CLV</div><div class="tm-stat-value">' + (m.clv_avg > 0 ? '+' : '') + (m.clv_avg || 0) + '%</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Predictions</div><div class="tm-stat-value">' + (m.total_predictions || 0) + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Bets (10+)</div><div class="tm-stat-value">' + (m.qualified_bets || 0) + '</div></div>';
+        html += '</div>';
+
+        // Threshold analysis
+        if (m.threshold_analysis && Object.keys(m.threshold_analysis).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">Score Threshold Analysis</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Score &ge;</th><th>Bets</th><th>Accuracy</th><th>ROI</th></tr></thead><tbody>';
+            Object.keys(m.threshold_analysis).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (key) {
+                var t = m.threshold_analysis[key];
+                var trClass = t.roi > 0 ? 'style="color:var(--accent-green)"' : '';
+                html += '<tr ' + trClass + '><td>' + t.threshold + '</td><td>' + t.bet_count + '</td><td>' + t.accuracy + '%</td><td>' + (t.roi > 0 ? '+' : '') + t.roi + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Factor breakdown
+        if (m.factor_breakdown && Object.keys(m.factor_breakdown).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">Factor Performance</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Factor</th><th>Fired</th><th>Acc (Fired)</th><th>Acc (Not)</th><th>Lift</th></tr></thead><tbody>';
+            var factors = Object.keys(m.factor_breakdown).sort(function (a, b) {
+                return (m.factor_breakdown[b].lift || 0) - (m.factor_breakdown[a].lift || 0);
+            });
+            factors.forEach(function (key) {
+                var f = m.factor_breakdown[key];
+                if (f.fired === 0) return;
+                var liftClass = f.lift > 2 ? 'style="color:var(--accent-green)"' : f.lift < -2 ? 'style="color:var(--accent-red)"' : '';
+                html += '<tr ' + liftClass + '><td>' + key.replace(/_/g, ' ') + '</td><td>' + f.fired + '</td><td>' + f.accuracy_when_fired + '%</td><td>' + f.accuracy_when_not_fired + '%</td><td>' + (f.lift > 0 ? '+' : '') + f.lift + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Slot breakdown
+        if (m.slot_breakdown && Object.keys(m.slot_breakdown).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">By Slot Type</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Slot</th><th>Games</th><th>Correct</th><th>Accuracy</th></tr></thead><tbody>';
+            Object.keys(m.slot_breakdown).forEach(function (key) {
+                var s = m.slot_breakdown[key];
+                html += '<tr><td>' + key + '</td><td>' + s.total + '</td><td>' + s.correct + '</td><td>' + s.accuracy + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Recommendation breakdown
+        if (m.rec_breakdown && Object.keys(m.rec_breakdown).length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">By Recommendation</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Rec</th><th>Games</th><th>Correct</th><th>Accuracy</th></tr></thead><tbody>';
+            ["STRONG PLAY", "LEAN", "MONITOR"].forEach(function (key) {
+                var r = m.rec_breakdown[key];
+                if (!r) return;
+                var accClass = r.accuracy >= 55 ? 'style="color:var(--accent-green)"' : r.accuracy < 50 ? 'style="color:var(--accent-red)"' : '';
+                html += '<tr ' + accClass + '><td>' + key + '</td><td>' + r.total + '</td><td>' + r.correct + '</td><td>' + r.accuracy + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        return html;
     }
 
     // ── Model Scan ──

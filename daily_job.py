@@ -25,7 +25,7 @@ import tracker
 
 SPORTS = ["nba", "nhl", "nfl", "cfb", "cbb"]
 LOG_PATH = os.path.join(PROJECT_DIR, "daily_job.log")
-IS_PRODUCTION = bool(os.environ.get("DATABASE_URL"))
+IS_PRODUCTION = bool(os.environ.get("SUPABASE_URL"))
 
 
 def setup_logging():

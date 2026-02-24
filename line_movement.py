@@ -50,23 +50,32 @@ def confirms_slot(movement_direction, slot_type):
     return False
 
 
-def score_line_movement(magnitude):
+def score_line_movement(magnitude, sport="nba"):
     """
     Converts line movement magnitude to a graduated score.
 
-    0-1 pts   = 0  (noise, no signal)
-    1-2 pts   = 3  (mild signal)
-    2-3 pts   = 5  (solid signal)
-    3+ pts    = 8  (strong signal)
+    NBA (backtested — line movement has minimal lift):
+      0-1 pts = 0, 1-2 pts = 2, 2-3 pts = 3, 3+ pts = 5
+
+    Other sports (default):
+      0-1 pts = 0, 1-2 pts = 3, 2-3 pts = 5, 3+ pts = 8
 
     Args:
         magnitude: absolute points the line moved
+        sport: sport key for sport-specific scoring
 
     Returns:
         int score
     """
     if magnitude < 1:
         return 0
+    if sport == "nba":
+        if magnitude < 2:
+            return 2
+        if magnitude < 3:
+            return 3
+        return 5
+    # All other sports — original weights
     if magnitude < 2:
         return 3
     if magnitude < 3:

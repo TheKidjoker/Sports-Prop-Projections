@@ -22,6 +22,7 @@ try:
     from test_model.features import compute_all_features
     from test_model.backtest import start_backtest_thread, get_backtest_status
     from test_model.scanner import scan_today_with_model
+    from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
     HAS_TEST_MODEL = True
 except ImportError:
     HAS_TEST_MODEL = False
@@ -455,7 +456,10 @@ def predict():
 
                 # Determine lean team
                 if current_spread is not None:
-                    if slot_type == "public":
+                    if sport == "nba":
+                        # NBA: always lean underdog (backtested)
+                        lean_team = away_team if current_spread < 0 else home_team
+                    elif slot_type == "public":
                         lean_team = home_team if current_spread < 0 else away_team
                     elif slot_type == "vegas":
                         lean_team = away_team if current_spread < 0 else home_team
@@ -693,6 +697,63 @@ def api_tm_metrics():
             "metrics": metrics,
             "total_games": total_games,
             "total_features": total_features,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/rules-backtest", methods=["POST"])
+@require_auth
+def api_tm_rules_backtest():
+    """Start background rules-based replay backtest for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        started = start_rules_backtest_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/rules-backtest/status", methods=["GET"])
+@require_auth
+def api_tm_rules_backtest_status():
+    """Poll rules backtest progress for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        progress = get_rules_backtest_status(sport)
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/rules-backtest/metrics", methods=["GET"])
+@require_auth
+def api_tm_rules_backtest_metrics():
+    """Get rules backtest metrics with optional ML comparison."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        rules_metrics = tm_db.get_latest_model_run(sport, "rules_backtest")
+        ml_metrics = tm_db.get_latest_model_run(sport, "backtest")
+        return jsonify({
+            "success": True,
+            "rules_metrics": rules_metrics,
+            "ml_metrics": ml_metrics,
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

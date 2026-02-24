@@ -1,0 +1,694 @@
+"""
+Test Model Rules Backtest — replays the actual game_scanner.py scoring weights
+against historical outcomes to validate the rules-based system.
+
+Imports and calls the same functions used in production (classify_slot,
+detect_movement, confirms_slot, score_line_movement, _determine_lean,
+_calculate_score, _analyze_home_away_split, _detect_rank_scam,
+_detect_spread_discrepancy) so results reflect the real scoring system.
+
+Factors NOT replayable (set to 0, documented):
+  - Trell Rule (+5): requires real-time injury reports
+  - Public betting (+3/+5): requires Pinnacle odds
+  - Feedback loop (-2/+3): requires tracker ledger
+  - NFL weather (+5): requires weather API at game time
+"""
+
+import threading
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+from time_slots import classify_slot
+from line_movement import detect_movement, confirms_slot, score_line_movement
+from rank_analysis import _detect_rank_scam, _detect_spread_discrepancy
+from analysis_factors import (
+    _determine_lean, _calculate_score, _analyze_home_away_split,
+    H2H_REVENGE_THRESHOLDS,
+)
+from test_model import db as tm_db
+
+MIN_WARMUP_GAMES = 10  # Need some team_state history before scoring
+
+MISSING_FACTORS = [
+    "Trell Rule (+5): requires real-time injury reports",
+    "Public betting (+3/+5): requires Pinnacle odds at game time",
+    "Feedback loop (-2/+3): requires tracker ledger at game time",
+    "NFL weather (+5): requires weather API at game time",
+]
+
+# Progress dict for polling
+_rules_progress = {}
+_rules_lock = threading.Lock()
+
+
+def get_rules_backtest_status(sport):
+    with _rules_lock:
+        return dict(_rules_progress.get(sport, {}))
+
+
+def _tz_offset_hours(sport):
+    """Classification timezone offset from UTC."""
+    if sport in ("cfb", "cbb"):
+        return 5   # EST
+    elif sport == "nhl":
+        return 6   # CST
+    else:
+        return 8   # PST (NBA, NFL)
+
+
+def _parse_game_dt(game_date_str, sport):
+    """Parse game_date ISO string to timezone-adjusted datetime for classification."""
+    try:
+        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+        offset = _tz_offset_hours(sport)
+        local_dt = game_dt - timedelta(hours=offset)
+        return local_dt
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _group_games_by_date(games):
+    """Group games by calendar date string (YYYY-MM-DD) for slate context."""
+    by_date = defaultdict(list)
+    for game in games:
+        gd = game.get("game_date", "")
+        if gd:
+            date_key = gd[:10]  # "2024-01-15T..." -> "2024-01-15"
+        else:
+            date_key = "unknown"
+        by_date[date_key].append(game)
+    # Sort each date's games by game_date
+    for dk in by_date:
+        by_date[dk].sort(key=lambda g: g.get("game_date", ""))
+    return by_date
+
+
+def run_rules_backtest(sport):
+    """
+    Replay the rules-based scoring system against historical outcomes.
+    Runs synchronously. Call via start_rules_backtest_thread() for background.
+    """
+    games = tm_db.get_historical_games(sport)
+    if not games:
+        with _rules_lock:
+            _rules_progress[sport] = {
+                "status": "error",
+                "message": "No historical games found.",
+            }
+        return
+
+    # Filter to final games with spread and definitive outcome
+    eligible = [
+        g for g in games
+        if g.get("closing_spread") is not None
+        and g.get("home_covered") in (0, 1)
+        and g.get("game_status") == "STATUS_FINAL"
+    ]
+
+    if len(eligible) < MIN_WARMUP_GAMES + 5:
+        with _rules_lock:
+            _rules_progress[sport] = {
+                "status": "error",
+                "message": f"Need at least {MIN_WARMUP_GAMES + 5} eligible games, have {len(eligible)}. Collect more data first.",
+            }
+        return
+
+    total = len(eligible)
+    with _rules_lock:
+        _rules_progress[sport] = {
+            "status": "running",
+            "total_games": total,
+            "processed": 0,
+            "current_date": "",
+        }
+
+    # Build team_state chronologically
+    team_state = {}
+
+    def _get_state(team):
+        if team not in team_state:
+            team_state[team] = {
+                "dates": [],
+                "results": [],       # 1=win, 0=loss
+                "scores": [],
+                "opp_scores": [],
+                "opponents": [],     # opponent name per game
+                "margins": [],       # score margin per game
+                "ats_covers": 0,
+                "ats_total": 0,
+            }
+        return team_state[team]
+
+    # Group for slate context
+    games_by_date = _group_games_by_date(eligible)
+
+    # Predictions and factor tracking
+    predictions = []
+    factor_tracker = defaultdict(lambda: {"fired": 0, "correct_when_fired": 0,
+                                           "correct_when_not_fired": 0,
+                                           "not_fired": 0})
+    slot_tracker = defaultdict(lambda: {"total": 0, "correct": 0})
+    rec_tracker = defaultdict(lambda: {"total": 0, "correct": 0})
+    processed = 0
+
+    for game in eligible:
+        home = game["home_team"]
+        away = game["away_team"]
+        home_st = _get_state(home)
+        away_st = _get_state(away)
+        game_date_str = game.get("game_date", "")
+
+        # Skip warmup period
+        total_team_games = len(home_st["dates"]) + len(away_st["dates"])
+        if processed < MIN_WARMUP_GAMES:
+            # Still in warmup — update state but don't score
+            _update_team_state(game, home_st, away_st)
+            processed += 1
+            with _rules_lock:
+                _rules_progress[sport]["processed"] = processed
+            continue
+
+        with _rules_lock:
+            _rules_progress[sport]["current_date"] = game_date_str[:10]
+
+        # ── Classify slot ──
+        local_dt = _parse_game_dt(game_date_str, sport)
+        if local_dt is None:
+            _update_team_state(game, home_st, away_st)
+            processed += 1
+            with _rules_lock:
+                _rules_progress[sport]["processed"] = processed
+            continue
+
+        day_of_week = local_dt.strftime("%A")
+        hour, minute = local_dt.hour, local_dt.minute
+
+        # Get date key for slate context
+        date_key = game_date_str[:10]
+        date_games = games_by_date.get(date_key, [])
+        total_games_on_slate = len(date_games)
+        game_index = 0
+        for idx, dg in enumerate(date_games):
+            if dg.get("event_id") == game.get("event_id"):
+                game_index = idx
+                break
+        is_first_game = (game_index == 0)
+
+        # NFL: detect last non-SNF Sunday game
+        is_last_sunday_game = False
+        if sport == "nfl" and day_of_week.lower() == "sunday":
+            snf_mins = 17 * 60 + 20
+            for dg in reversed(date_games):
+                dg_dt = _parse_game_dt(dg.get("game_date", ""), sport)
+                if dg_dt:
+                    dg_mins = dg_dt.hour * 60 + dg_dt.minute
+                    if abs(dg_mins - snf_mins) > 30:
+                        if dg.get("event_id") == game.get("event_id"):
+                            is_last_sunday_game = True
+                        break
+
+        # Classify
+        if sport == "nfl":
+            slot_type = classify_slot(day_of_week, hour, minute,
+                                      sport="nfl",
+                                      is_last_sunday_game=is_last_sunday_game)
+        elif sport in ("cfb", "cbb"):
+            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
+        elif sport == "nhl":
+            slot_type = classify_slot(day_of_week, hour, minute,
+                                      sport="nhl",
+                                      total_games_on_slate=total_games_on_slate,
+                                      game_index=game_index)
+        else:
+            # NBA
+            from time_slots import first_game_slot_override
+            if is_first_game:
+                slot_type = first_game_slot_override(day_of_week)
+            else:
+                slot_type = classify_slot(day_of_week, hour, minute)
+
+        # Skip skip-slot games
+        if slot_type == "skip":
+            _update_team_state(game, home_st, away_st)
+            processed += 1
+            with _rules_lock:
+                _rules_progress[sport]["processed"] = processed
+            continue
+
+        closing_spread = game["closing_spread"]
+        opening_spread = game.get("opening_spread")
+        home_rank = game.get("home_rank")
+        away_rank = game.get("away_rank")
+        over_under = game.get("over_under")
+
+        # ── Line movement ──
+        line_confirms = False
+        line_magnitude = 0.0
+        if opening_spread is not None and closing_spread is not None:
+            movement, line_magnitude = detect_movement(opening_spread, closing_spread)
+            line_confirms = confirms_slot(movement, slot_type)
+
+        # ── Determine lean ──
+        lean_team = _determine_lean(slot_type, home, away, closing_spread, sport=sport)
+        if lean_team is None:
+            _update_team_state(game, home_st, away_st)
+            processed += 1
+            with _rules_lock:
+                _rules_progress[sport]["processed"] = processed
+            continue
+
+        # ── Rank analysis (CFB/CBB only) ──
+        rank_scam_applies = False
+        spread_disc_applies = False
+        if sport in ("cfb", "cbb"):
+            rank_scam = _detect_rank_scam(home_rank, away_rank, closing_spread, slot_type)
+            spread_disc = _detect_spread_discrepancy(home_rank, away_rank, closing_spread, slot_type, sport=sport)
+            rank_scam_applies = rank_scam.get("is_rank_scam", False)
+            spread_disc_applies = spread_disc.get("is_discrepancy", False)
+
+        # ── Home/away split ──
+        home_away_applies = _analyze_home_away_split(lean_team, home, slot_type, closing_spread)
+
+        # ── B2B detection (from team_state dates) ──
+        b2b_bonus = False
+        b2b_penalty = False
+        if sport in ("nba", "nhl"):
+            lean_is_home = (lean_team == home)
+            lean_st = home_st if lean_is_home else away_st
+            opp_st = away_st if lean_is_home else home_st
+
+            lean_b2b = _is_b2b_from_state(lean_st, game_date_str)
+            opp_b2b = _is_b2b_from_state(opp_st, game_date_str)
+
+            if opp_b2b and not lean_b2b:
+                b2b_bonus = True
+            elif lean_b2b and not opp_b2b:
+                b2b_penalty = True
+
+        # ── H2H revenge/dominance (from team_state opponents) ──
+        h2h_revenge = False
+        h2h_dominance = False
+        if lean_team:
+            lean_is_home = (lean_team == home)
+            lean_st = home_st if lean_is_home else away_st
+            opp_name = away if lean_is_home else home
+            threshold = H2H_REVENGE_THRESHOLDS.get(sport, 10)
+            h2h_margin = _find_last_h2h_margin(lean_st, opp_name)
+            if h2h_margin is not None:
+                if h2h_margin < 0 and abs(h2h_margin) >= threshold:
+                    h2h_revenge = True
+                elif h2h_margin > 0 and h2h_margin >= threshold:
+                    h2h_dominance = True
+
+        # ── Vegas trap (NBA only) ──
+        vegas_trap_bonus = 0
+        if sport == "nba" and slot_type in ("vegas", "trap") and abs(closing_spread) >= 7:
+            # Identify favorite
+            if closing_spread < 0:
+                fav_st = home_st
+            else:
+                fav_st = away_st
+            fav_wins_7 = sum(fav_st["results"][-7:]) if len(fav_st["results"]) >= 5 else None
+            if fav_wins_7 is not None and fav_wins_7 <= 2:
+                vegas_trap_bonus = 5
+                # Check if underdog also cold
+                if closing_spread < 0:
+                    dog_st = away_st
+                else:
+                    dog_st = home_st
+                dog_wins_7 = sum(dog_st["results"][-7:]) if len(dog_st["results"]) >= 5 else None
+                if dog_wins_7 is not None and dog_wins_7 <= 2:
+                    vegas_trap_bonus = 7
+
+        # ── NFL trend discrepancy (from team_state) ──
+        trend_disc_applies = False
+        if sport == "nfl" and slot_type == "vegas":
+            trend_disc_applies = _check_nfl_trend_from_state(home_st, away_st)
+
+        # ── NFL O/U discrepancy (from team_state + over_under) ──
+        ou_disc_applies = False
+        if sport == "nfl" and slot_type == "vegas" and over_under is not None:
+            ou_disc_applies = _check_nfl_ou_from_state(home_st, away_st, over_under)
+
+        # ── ATS record (from in-replay cover outcomes) ──
+        ats_bonus = False
+        ats_penalty = False
+        if lean_team:
+            lean_st_for_ats = home_st if lean_team == home else away_st
+            if lean_st_for_ats["ats_total"] >= 3:
+                ats_rate = lean_st_for_ats["ats_covers"] / lean_st_for_ats["ats_total"] * 100
+                if ats_rate > 60:
+                    ats_bonus = True
+                elif ats_rate < 40:
+                    ats_penalty = True
+
+        # ── Calculate score ──
+        score, breakdown = _calculate_score(
+            slot_type, line_confirms, False,  # trell_applies=False (not replayable)
+            line_magnitude=line_magnitude,
+            rank_scam_applies=rank_scam_applies,
+            spread_disc_applies=spread_disc_applies,
+            trend_disc_applies=trend_disc_applies,
+            ou_disc_applies=ou_disc_applies,
+            weather_applies=False,   # not replayable
+            spread_value=closing_spread,
+            sport=sport,
+            b2b_bonus=b2b_bonus,
+            b2b_penalty=b2b_penalty,
+            ats_bonus=ats_bonus,
+            ats_penalty=ats_penalty,
+            home_away_applies=home_away_applies,
+            public_betting_bonus=0,  # not replayable
+            feedback_adjustment=0,   # not replayable
+            h2h_revenge_bonus=h2h_revenge,
+            h2h_dominance_bonus=h2h_dominance,
+            vegas_trap_bonus=vegas_trap_bonus,
+        )
+
+        # ── Recommendation ──
+        # NBA backtested: lower thresholds, demote public slot picks
+        if sport == "nba":
+            if slot_type == "public":
+                if score >= 7:
+                    recommendation = "LEAN"
+                else:
+                    recommendation = "MONITOR"
+            else:
+                if score >= 10:
+                    recommendation = "STRONG PLAY"
+                elif score >= 5:
+                    recommendation = "LEAN"
+                else:
+                    recommendation = "MONITOR"
+        else:
+            if score >= 15:
+                recommendation = "STRONG PLAY"
+            elif score >= 10:
+                recommendation = "LEAN"
+            else:
+                recommendation = "MONITOR"
+
+        # ── Evaluate correctness ──
+        # lean_team covers = correct prediction
+        actual_covered = game["home_covered"]  # 1 = home covered
+        lean_is_home = (lean_team == home)
+        if lean_is_home:
+            correct = (actual_covered == 1)
+        else:
+            correct = (actual_covered == 0)
+
+        # Track factor performance
+        _track_factor(factor_tracker, "slot_public", slot_type == "public", correct)
+        _track_factor(factor_tracker, "line_movement", line_confirms, correct)
+        _track_factor(factor_tracker, "rank_scam", rank_scam_applies, correct)
+        _track_factor(factor_tracker, "spread_discrepancy", spread_disc_applies, correct)
+        _track_factor(factor_tracker, "home_away_split", home_away_applies, correct)
+        _track_factor(factor_tracker, "b2b_bonus", b2b_bonus, correct)
+        _track_factor(factor_tracker, "b2b_penalty", b2b_penalty, correct)
+        _track_factor(factor_tracker, "h2h_revenge", h2h_revenge, correct)
+        _track_factor(factor_tracker, "h2h_dominance", h2h_dominance, correct)
+        _track_factor(factor_tracker, "vegas_trap", vegas_trap_bonus > 0, correct)
+        _track_factor(factor_tracker, "trend_discrepancy", trend_disc_applies, correct)
+        _track_factor(factor_tracker, "ou_discrepancy", ou_disc_applies, correct)
+        _track_factor(factor_tracker, "ats_bonus", ats_bonus, correct)
+        _track_factor(factor_tracker, "ats_penalty", ats_penalty, correct)
+        _track_factor(factor_tracker, "spread_penalty", breakdown.get("spread_penalty", 0) < 0, correct)
+
+        # Track by slot type
+        slot_tracker[slot_type]["total"] += 1
+        if correct:
+            slot_tracker[slot_type]["correct"] += 1
+
+        # Track by recommendation
+        rec_tracker[recommendation]["total"] += 1
+        if correct:
+            rec_tracker[recommendation]["correct"] += 1
+
+        predictions.append({
+            "date": game_date_str[:10],
+            "home_team": home,
+            "away_team": away,
+            "lean_team": lean_team,
+            "slot_type": slot_type,
+            "score": score,
+            "recommendation": recommendation,
+            "correct": correct,
+            "spread": closing_spread,
+            "breakdown": breakdown,
+        })
+
+        # ── Update team state AFTER scoring ──
+        _update_team_state(game, home_st, away_st)
+
+        processed += 1
+        with _rules_lock:
+            _rules_progress[sport]["processed"] = processed
+
+    # ── Compute metrics ──
+    scored_predictions = [p for p in predictions]  # all post-warmup
+    metrics = _compute_rules_metrics(scored_predictions, factor_tracker,
+                                      slot_tracker, rec_tracker)
+
+    # Save to model_runs table
+    tm_db.save_model_run({
+        "sport": sport,
+        "run_type": "rules_backtest",
+        "accuracy": metrics.get("accuracy"),
+        "roi": metrics.get("roi"),
+        "clv_avg": metrics.get("clv_avg"),
+        "total_predictions": metrics.get("total_predictions"),
+        "qualified_bets": metrics.get("qualified_bets"),
+        "feature_importances": metrics.get("factor_breakdown", {}),
+        "model_params": {
+            "missing_factors": MISSING_FACTORS,
+            "min_warmup": MIN_WARMUP_GAMES,
+            "sport": sport,
+        },
+        "threshold_analysis": metrics.get("threshold_analysis", {}),
+        "predictions": scored_predictions[-200:],
+    })
+
+    with _rules_lock:
+        _rules_progress[sport] = {
+            "status": "complete",
+            "total_games": total,
+            "processed": processed,
+            "current_date": "",
+            "metrics": metrics,
+        }
+
+    return metrics
+
+
+def _is_b2b_from_state(team_st, game_date_str):
+    """Check if team played yesterday based on state dates."""
+    if not team_st["dates"]:
+        return False
+    last_date = team_st["dates"][-1]
+    try:
+        last_dt = datetime.fromisoformat(last_date.replace("Z", "+00:00"))
+        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+        return abs((game_dt - last_dt).days) <= 1
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _find_last_h2h_margin(lean_st, opp_name):
+    """Find the last matchup margin against opp_name from lean team's state."""
+    for i in range(len(lean_st["opponents"]) - 1, -1, -1):
+        if lean_st["opponents"][i] == opp_name:
+            return lean_st["margins"][i]
+    return None
+
+
+def _check_nfl_trend_from_state(home_st, away_st):
+    """Approximate NFL trend discrepancy from team state last 4 results."""
+    def classify_trend(results):
+        last4 = results[-4:] if len(results) >= 4 else []
+        if len(last4) < 4:
+            return None
+        wins = sum(last4)
+        if wins <= 1:
+            return "bounce-back"
+        elif wins >= 3:
+            return "regression"
+        return None
+
+    home_signal = classify_trend(home_st["results"])
+    away_signal = classify_trend(away_st["results"])
+    return home_signal is not None or away_signal is not None
+
+
+def _check_nfl_ou_from_state(home_st, away_st, over_under):
+    """Approximate NFL O/U discrepancy from team scoring averages."""
+    if over_under > 50.5:
+        return True
+
+    home_avg = sum(home_st["scores"][-4:]) / max(len(home_st["scores"][-4:]), 1) if home_st["scores"] else 0
+    away_avg = sum(away_st["scores"][-4:]) / max(len(away_st["scores"][-4:]), 1) if away_st["scores"] else 0
+    combined = home_avg + away_avg
+    return abs(over_under - combined) >= 6
+
+
+def _update_team_state(game, home_st, away_st):
+    """Record game result into both teams' state."""
+    home_score = game.get("home_score", 0) or 0
+    away_score = game.get("away_score", 0) or 0
+    home_won = 1 if home_score > away_score else 0
+    game_date = game.get("game_date", "")
+    home_covered = game.get("home_covered")
+
+    home_st["results"].append(home_won)
+    home_st["scores"].append(home_score)
+    home_st["opp_scores"].append(away_score)
+    home_st["dates"].append(game_date)
+    home_st["opponents"].append(game["away_team"])
+    home_st["margins"].append(home_score - away_score)
+
+    away_st["results"].append(1 - home_won)
+    away_st["scores"].append(away_score)
+    away_st["opp_scores"].append(home_score)
+    away_st["dates"].append(game_date)
+    away_st["opponents"].append(game["home_team"])
+    away_st["margins"].append(away_score - home_score)
+
+    # ATS tracking
+    if home_covered == 1:
+        home_st["ats_covers"] += 1
+        home_st["ats_total"] += 1
+        away_st["ats_total"] += 1
+    elif home_covered == 0:
+        away_st["ats_covers"] += 1
+        home_st["ats_total"] += 1
+        away_st["ats_total"] += 1
+
+
+def _track_factor(tracker, factor_name, fired, correct):
+    """Track factor fire rate and accuracy."""
+    if fired:
+        tracker[factor_name]["fired"] += 1
+        if correct:
+            tracker[factor_name]["correct_when_fired"] += 1
+    else:
+        tracker[factor_name]["not_fired"] += 1
+        if correct:
+            tracker[factor_name]["correct_when_not_fired"] += 1
+
+
+def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracker):
+    """Compute comprehensive metrics for the rules replay."""
+    if not predictions:
+        return {
+            "accuracy": 0, "roi": 0, "clv_avg": 0,
+            "total_predictions": 0, "qualified_bets": 0,
+            "factor_breakdown": {}, "slot_breakdown": {},
+            "rec_breakdown": {}, "threshold_analysis": {},
+        }
+
+    total = len(predictions)
+    correct = sum(1 for p in predictions if p["correct"])
+    accuracy = round(correct / total * 100, 2)
+
+    # ── ROI at -110 vig for different thresholds ──
+    threshold_analysis = {}
+    for threshold in [5, 10, 15, 20, 25]:
+        qualified = [p for p in predictions if p["score"] >= threshold]
+        q_count = len(qualified)
+        if q_count > 0:
+            q_correct = sum(1 for p in qualified if p["correct"])
+            q_accuracy = round(q_correct / q_count * 100, 2)
+            wagered = q_count
+            returned = sum((1 + 100 / 110) if p["correct"] else 0 for p in qualified)
+            q_roi = round((returned - wagered) / wagered * 100, 2)
+        else:
+            q_accuracy = 0
+            q_roi = 0
+        threshold_analysis[str(threshold)] = {
+            "threshold": threshold,
+            "bet_count": q_count,
+            "accuracy": q_accuracy,
+            "roi": q_roi,
+        }
+
+    # Overall ROI: score >= 10 (LEAN or better)
+    qualified = [p for p in predictions if p["score"] >= 10]
+    qualified_count = len(qualified)
+    if qualified_count > 0:
+        q_wagered = qualified_count
+        q_returned = sum((1 + 100 / 110) if p["correct"] else 0 for p in qualified)
+        roi = round((q_returned - q_wagered) / q_wagered * 100, 2)
+        clv_values = []
+        for p in qualified:
+            if p["spread"] and p["spread"] != 0:
+                implied = 0.5 + (abs(p["spread"]) / 100)
+                edge = (p["score"] / 53 * 0.15)  # approximate edge from score
+                clv_values.append(edge)
+        clv_avg = round(sum(clv_values) / len(clv_values) * 100, 2) if clv_values else 0
+    else:
+        roi = 0
+        clv_avg = 0
+
+    # ── Factor breakdown ──
+    factor_breakdown = {}
+    for factor_name, data in factor_tracker.items():
+        fired = data["fired"]
+        not_fired = data["not_fired"]
+        if fired > 0:
+            acc_when_fired = round(data["correct_when_fired"] / fired * 100, 2)
+        else:
+            acc_when_fired = 0
+        if not_fired > 0:
+            acc_when_not_fired = round(data["correct_when_not_fired"] / not_fired * 100, 2)
+        else:
+            acc_when_not_fired = 0
+        lift = round(acc_when_fired - acc_when_not_fired, 2) if fired > 0 and not_fired > 0 else 0
+        factor_breakdown[factor_name] = {
+            "fired": fired,
+            "accuracy_when_fired": acc_when_fired,
+            "accuracy_when_not_fired": acc_when_not_fired,
+            "lift": lift,
+        }
+
+    # ── Slot breakdown ──
+    slot_breakdown = {}
+    for slot_type, data in slot_tracker.items():
+        if data["total"] > 0:
+            slot_breakdown[slot_type] = {
+                "total": data["total"],
+                "correct": data["correct"],
+                "accuracy": round(data["correct"] / data["total"] * 100, 2),
+            }
+
+    # ── Recommendation breakdown ──
+    rec_breakdown = {}
+    for rec, data in rec_tracker.items():
+        if data["total"] > 0:
+            rec_breakdown[rec] = {
+                "total": data["total"],
+                "correct": data["correct"],
+                "accuracy": round(data["correct"] / data["total"] * 100, 2),
+            }
+
+    return {
+        "accuracy": accuracy,
+        "roi": roi,
+        "clv_avg": clv_avg,
+        "total_predictions": total,
+        "qualified_bets": qualified_count,
+        "factor_breakdown": factor_breakdown,
+        "slot_breakdown": slot_breakdown,
+        "rec_breakdown": rec_breakdown,
+        "threshold_analysis": threshold_analysis,
+    }
+
+
+def start_rules_backtest_thread(sport):
+    """Start rules backtest in a background thread. Returns immediately."""
+    with _rules_lock:
+        existing = _rules_progress.get(sport, {})
+        if existing.get("status") == "running":
+            return False
+
+    t = threading.Thread(target=run_rules_backtest, args=(sport,), daemon=True)
+    t.start()
+    return True
