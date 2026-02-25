@@ -474,16 +474,100 @@ The Trell Rule only fires when: the player is a star, status is "Out", the injur
 
 ### Out-of-Sample Results (Walk-Forward Validation)
 
-To be populated after walk-forward runs. Run walk-forward validation from the Test Model section to generate honest out-of-sample numbers.
+Walk-forward validation derives weights from training data only and evaluates on held-out test games the model has never seen. Rolling mode uses 200-game training / 50-game test sliding windows; split mode uses a single 70/30 chronological split.
 
-*Out-of-sample accuracy is typically 5-15% lower than in-sample for sports betting models.*
+**Run date:** 2026-02-25
+
+| Sport | Mode | Folds | Test Games | Overall Acc | 95% Wilson CI | ROI | Verdict |
+|-------|------|-------|------------|-------------|---------------|-----|---------|
+| NHL | Rolling | 6 | 300 | **67.33%** | [61.8%-72.4%] | **+28.5%** | **VALIDATED** |
+| CBB | Rolling | 11 | 550 | 49.09% | [44.9%-53.3%] | -6.3% | Coin flip |
+| NBA | Rolling | 8 | 400 | 49.0% | [44.1%-53.9%] | -6.5% | Coin flip |
+| NFL | Split | 1 | 29 | 34.48% | [19.9%-52.7%] | -34.2% | UNRELIABLE |
+| CFB | -- | -- | -- | -- | -- | -- | Too few games (51 < 65 minimum) |
+
+#### Qualified Bets (Score >= Derived Lean Threshold)
+
+| Sport | Qualified Bets | Qualified Acc | 95% Wilson CI | Qualified ROI |
+|-------|---------------|---------------|---------------|---------------|
+| NHL | 189 | **62.43%** | [55.4%-69.0%] | **+20.0%** |
+| CBB | 250 | 51.2% | [45.0%-57.3%] | -2.0% |
+| NBA | 170 | 50.59% | [43.1%-58.0%] | -8.6% |
+| NFL | 19 | 26.32% | [11.8%-48.8%] | -49.8% |
+
+#### Overfitting Gap (In-Sample vs Out-of-Sample)
+
+| Sport | In-Sample Acc | OOS Acc | Gap | Status |
+|-------|--------------|---------|-----|--------|
+| NHL | 65.9% | 67.33% | **-1.4%** (OOS higher) | Weight calibration confirmed |
+| CBB | 65.8% | 49.09% | **16.7%** | **SUSPECT — weights overfit to tuning data** |
+| NBA | 60.6% | 49.0% | **11.6%** | **SUSPECT — weights overfit to tuning data** |
+| NFL | 56.8% | 34.48% | **22.3%** | **SUSPECT** — but only 29 test games, noise dominates |
+
+#### Key Findings
+
+1. **NHL is the only validated model.** Out-of-sample accuracy (67.33%) matches in-sample (65.9%), confirming the "always underdog" lean and slot classification are real signals. Stable across all 6 folds (54-76% range, 5 of 6 folds above 62%).
+
+2. **NBA and CBB production weights are overfit.** Both sports drop to coin-flip accuracy (~49%) out-of-sample. The walk-forward engine couldn't derive consistent weights — most factors shrink to 0 because they don't pass statistical significance with 200-game training windows. The in-sample numbers (60.6% NBA, 65.8% CBB) were artifacts of tuning to the same data.
+
+3. **NFL results are noise.** With only 29 test games and weight tuning locked to production defaults, the 34.5% accuracy has a Wilson CI spanning [19.9%-52.7%]. The 22.3% gap is dramatic but statistically meaningless at this sample size.
+
+4. **CFB cannot be validated.** Only 51 eligible games — below the 65-game minimum required to build even a single fold.
+
+5. **Line movement remains the strongest signal**, but even it couldn't overcome the noise in NBA/CBB walk-forward folds. NHL's success appears driven primarily by the base "always lean underdog" strategy (+6 public slot bonus) rather than individual factor weights.
 
 ### Known Limitations
 
+- **NBA and CBB weight calibrations are suspect**: Walk-forward validation shows both sports at coin-flip accuracy out-of-sample. The in-sample numbers (60.6% NBA, 65.8% CBB) were derived from the same data used to tune weights and do not generalize. These sports need larger datasets or fundamentally different approaches.
 - **NFL and CFB weights are unvalidated**: With only 105 and 51 games respectively, sport-specific overrides (NFL lean flip, spread buckets) lack statistical significance. NFL overrides fall back to universal defaults via the overfitting protection framework.
 - **Non-replayable factors inflate in-sample numbers**: Trell Rule (+5), public betting (+3/+5), feedback loop, and NFL weather cannot be replayed in backtests. Their actual contribution is unknown.
-- **Line movement is the only consistently validated signal**: Across all sports, line movement shows +9-17% lift when it fires. Most other factors have marginal or unvalidated contributions.
-- **Small-sample strong play tiers**: NBA STRONG PLAY (n=58) and NHL STRONG PLAY (n=19) have wide confidence intervals. The true accuracy could be substantially lower.
+- **NHL is the only sport where production weights are confirmed by out-of-sample testing.** All other sports should be treated as experimental until more data is collected or weight derivation is improved.
+- **Small training windows limit factor discovery**: The 200-game rolling windows may be too small to detect weak but real signals. Factor weights that require 300+ games to validate (per MIN_GAMES_WEIGHT_TUNING) cannot be properly derived in walk-forward folds.
+
+---
+
+## Calibration
+
+The model outputs `cover_pct = 50 + (score / max_score) * 45`, a linear mapping from score to claimed cover probability. Calibration analysis measures whether these claimed probabilities match reality, and corrects them when they don't.
+
+### Calibration Metrics
+
+| Sport | Raw ECE | Calibrated ECE | Raw Brier | Calibrated Brier | Method | Status |
+|-------|---------|----------------|-----------|------------------|--------|--------|
+| NHL | **12.4%** | **0.37%** | 0.2406 | 0.2239 | Logistic | **Applied** — ECE > 5% |
+| CBB | 4.37% | 0.52% | 0.2533 | 0.2487 | Logistic | Applied — improvement |
+| NBA | 3.59% | 1.78% | 0.2466 | 0.2457 | Logistic | Applied — improvement |
+| NFL | 25.08% | -- | 0.306 | -- | None | Not applied — logistic failed (n=76) |
+| CFB | -- | -- | -- | -- | None | No data |
+
+### NHL Miscalibration (Critical Fix)
+
+The linear formula was massively underconfident for NHL. Dogs cover ~66% of the time regardless of score, but the formula claimed 50% at score 0.
+
+| Score | Raw cover_pct | Calibrated cover_pct | Actual cover rate |
+|-------|--------------|----------------------|-------------------|
+| 0 | 50.0% | 65.3% | 64.9% |
+| 6 | 56.4% | 65.3% | 80.0% |
+| 10 | 60.7% | 69.4% | -- |
+| 12 | 62.9% | 84.7% | -- |
+
+The logistic model: `cover% = 65.3 + 20.9 / (1 + exp(-2.0 * (score - 10.71)))`
+
+### Logistic vs Isotonic
+
+Isotonic regression was the original calibration approach but overfits badly at sparse high-end bins (e.g., mapping raw 66% → 100% based on 3-11 games). The logistic curve is constrained by its sigmoid shape and provides smooth, bounded calibration.
+
+### Parlay Threshold Impact
+
+Parlay tiers depend on `cover_pct` accuracy. With calibration:
+
+| Tier | Threshold | Before Calibration | After Calibration |
+|------|-----------|-------------------|-------------------|
+| Two-Face's Safe Bet | 80%+ | **Dead tier** — no games ever reached 80% raw | NHL score ≥ 12 (cal 84.7%) — now functional |
+| Gotham Gambit | 67.5%+ | Required raw ≥ 67.5% (score ~17+ per sport) | NHL score ≥ 10 (cal 69.4%), NBA score ≥ 14 (cal 71.3%) |
+| Gotham Breakout | 60%+ | Gated by 68.5% actionable filter | NHL score ≥ 10, NBA score ≥ 11, CBB score ≥ 11 |
+
+Parlay thresholds remain unchanged — they now represent honest probabilities.
 
 ---
 

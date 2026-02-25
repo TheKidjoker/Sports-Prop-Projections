@@ -9,30 +9,30 @@ import math
 # Each sport has: strong, lean, max_score, and optionally confident, lean_public, ml.
 THRESHOLDS = {
     "nba": {
-        "vegas": {"strong": 10, "confident": 7, "lean": 5},
-        "public": {"strong": 10, "lean": 7},
-        "max_score": 44,
+        "vegas": {"strong": 7, "confident": 5, "lean": 4},
+        "public": {"strong": 7, "lean": 5},
+        "max_score": 31,
     },
     "nhl": {
-        "vegas": {"strong": 8, "lean": 3},
+        "vegas": {"strong": 7, "lean": 3},
         "public": {"lean": 5},
-        "max_score": 42,
+        "max_score": 25,
     },
     "cbb": {
         "strong": 13,
         "lean": 10,
         "ml": 7,
-        "max_score": 37,
+        "max_score": 38,
     },
     "cfb": {
-        "strong": 15,
-        "lean": 12,
-        "ml": 10,
-        "max_score": 48,
+        "strong": 11,
+        "lean": 9,
+        "ml": 7,
+        "max_score": 35,
     },
     "nfl": {
-        "strong": 20,
-        "lean": 10,
+        "strong": 15,
+        "lean": 8,
         "max_score": 35,
     },
 }
@@ -196,14 +196,14 @@ UNIVERSAL_DEFAULTS = {
     "lean": "slot_dependent",
     "lean_public": "favorite",
     "lean_vegas": "underdog",
-    "public_slot_bonus": 10,
-    "b2b_bonus": 4,
-    "b2b_penalty": -3,
-    "ats_bonus": 4,
-    "ats_penalty": -3,
-    "home_away_split": 3,
-    "h2h_revenge": 3,
-    "h2h_dominance": 2,
+    "public_slot_bonus": 3,      # was 10; aligned with NHL/CBB validated values
+    "b2b_bonus": 2,              # was 4; NHL -3.9% lift, NBA tuned to 2
+    "b2b_penalty": -1,           # was -3; NHL/NBA both tuned to -1
+    "ats_bonus": 2,              # was 4; CBB validated at 0, reduced
+    "ats_penalty": 0,            # was -3; too harsh, NHL validated at 0
+    "home_away_split": 0,        # was 3; marginal ~0% everywhere, harmful
+    "h2h_revenge": 0,            # was 3; noise/harmful in all sports
+    "h2h_dominance": 0,          # was 2; negative standalone everywhere
     "line_toward_dog": 0,
     "line_toward_fav": 0,
     "day_penalties": {},
@@ -229,7 +229,7 @@ SPORT_OVERRIDES = {
     "nba": {
         "lean_direction":       {"value": "always_underdog", "n": 607, "p_value": 0.001, "confidence": "validated"},
         "tuesday_penalty":      {"value": -3, "n": 87,  "p_value": 0.04, "confidence": "validated"},
-        "public_slot_bonus":    {"value": 5,  "n": 607, "p_value": 0.03, "confidence": "validated"},
+        "public_slot_bonus":    {"value": 2,  "n": 607, "p_value": 0.03, "confidence": "validated"},  # was 5; marginal -5.7%
         "b2b_bonus":            {"value": 2,  "n": 143, "p_value": 0.11, "confidence": "weak"},
         "b2b_penalty":          {"value": -1, "n": 143, "p_value": 0.11, "confidence": "weak"},
         "h2h_revenge":          {"value": 1,  "n": 607, "p_value": 0.22, "confidence": "weak"},
@@ -237,8 +237,8 @@ SPORT_OVERRIDES = {
         "spread_3_5_bonus":     {"value": 2,  "n": 85,  "p_value": 0.09, "confidence": "weak"},
         "spread_5_7_penalty":   {"value": -3, "n": 72,  "p_value": 0.06, "confidence": "weak"},
         "spread_13_plus_penalty": {"value": -3, "n": 45, "p_value": 0.12, "confidence": "weak"},
-        "line_toward_dog":      {"value": 3,  "n": 607, "p_value": 0.02, "confidence": "validated"},
-        "line_toward_fav":      {"value": -2, "n": 607, "p_value": 0.04, "confidence": "validated"},
+        "line_toward_dog":      {"value": 2,  "n": 607, "p_value": 0.02, "confidence": "validated"},  # was 3; reduced for line_movement overlap (r=0.68)
+        "line_toward_fav":      {"value": -1, "n": 607, "p_value": 0.04, "confidence": "validated"},  # was -2; reduced for line_movement overlap
         "home_away_split":      {"value": 3,  "n": 607, "p_value": 0.15, "confidence": "weak"},
     },
     "nhl": {

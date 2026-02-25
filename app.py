@@ -28,7 +28,7 @@ try:
     from test_model.scanner import scan_today_with_model
     from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
     from test_model.walkforward import start_walkforward_thread, get_walkforward_status
-    from calibration import load_calibration
+    from calibration import load_calibration, is_loaded, get_calibration_type
     HAS_TEST_MODEL = True
 except Exception as _tm_err:
     import traceback
@@ -48,7 +48,8 @@ if HAS_TEST_MODEL:
                 _cal_data = _cal_run["model_params"].get("calibration")
                 if _cal_data:
                     load_calibration(_cal_sport, _cal_data)
-                    print(f"[calibration] Loaded model for {_cal_sport}", flush=True)
+                    if is_loaded(_cal_sport):
+                        print(f"[calibration] Loaded {get_calibration_type(_cal_sport)} model for {_cal_sport}", flush=True)
         except Exception:
             pass
 scan_cache.init()
