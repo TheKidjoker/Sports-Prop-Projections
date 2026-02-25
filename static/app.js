@@ -1641,6 +1641,10 @@ document.addEventListener("DOMContentLoaded", function () {
                     html += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
                 }
                 html += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
+                if (p.clv !== null && p.clv !== undefined) {
+                    var clvClass = p.clv > 0 ? 'clv-positive' : p.clv < 0 ? 'clv-negative' : 'clv-neutral';
+                    html += '<span class="dash-recent-clv ' + clvClass + '">' + (p.clv > 0 ? '+' : '') + p.clv + ' CLV</span>';
+                }
                 html += '</div>';
                 html += '</div>';
             });
@@ -1650,8 +1654,54 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    function renderDashboardCLV(clv) {
+        if (!clv || !clv.clv_total) return '';
+        var html = '<h3 class="dash-section-title">Closing Line Value (CLV)</h3>';
+
+        // Sport summary cards
+        if (clv.clv_by_sport && clv.clv_by_sport.length > 0) {
+            html += '<div class="dash-stat-cards">';
+            clv.clv_by_sport.forEach(function (s) {
+                var clvClass = s.avg_clv > 0 ? 'clv-positive' : s.avg_clv < 0 ? 'clv-negative' : 'clv-neutral';
+                var hrClass = s.clv_hit_rate >= 55 ? 'clv-positive' : s.clv_hit_rate < 45 ? 'clv-negative' : 'clv-neutral';
+                html += '<div class="dash-stat-card clv-sport-card">';
+                html += '<div class="dash-stat-label">' + s.sport.toUpperCase() + '</div>';
+                html += '<div class="dash-stat-value ' + clvClass + '">' + (s.avg_clv > 0 ? '+' : '') + s.avg_clv + ' pts</div>';
+                html += '<div class="clv-substat ' + hrClass + '">' + s.clv_hit_rate + '% beat close (' + s.count + ')</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        // By tier table
+        if (clv.clv_by_tier && clv.clv_by_tier.length > 0) {
+            html += '<div class="tm-feat-section"><table class="tm-feat-table"><thead><tr>';
+            html += '<th>Tier</th><th>Picks</th><th>Avg CLV</th><th>Beat Close</th>';
+            html += '</tr></thead><tbody>';
+            clv.clv_by_tier.forEach(function (t) {
+                var clvClass = t.avg_clv > 0 ? 'clv-positive' : t.avg_clv < 0 ? 'clv-negative' : 'clv-neutral';
+                var hrClass = t.clv_hit_rate >= 55 ? 'clv-positive' : t.clv_hit_rate < 45 ? 'clv-negative' : 'clv-neutral';
+                html += '<tr><td>' + t.tier + '</td><td>' + t.count + '</td>';
+                html += '<td class="' + clvClass + '">' + (t.avg_clv > 0 ? '+' : '') + t.avg_clv + '</td>';
+                html += '<td class="' + hrClass + '">' + t.clv_hit_rate + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Overall summary
+        var avgClass = clv.avg_clv > 0 ? 'clv-positive' : clv.avg_clv < 0 ? 'clv-negative' : 'clv-neutral';
+        html += '<div class="clv-summary">';
+        html += '<span class="' + avgClass + '">Overall: ' + (clv.avg_clv > 0 ? '+' : '') + clv.avg_clv + ' pts avg CLV</span>';
+        html += ' | <span>' + clv.clv_hit_rate + '% beat the close (' + clv.clv_total + ' picks)</span>';
+        html += '</div>';
+
+        html += '<div class="clv-guide">Positive avg CLV = genuine edge. CLV is more reliable than win rate for small samples.</div>';
+        return html;
+    }
+
     function renderDashboard(data) {
         document.getElementById("dashboard-stats").innerHTML = renderDashboardStats(data.overall);
+        document.getElementById("dashboard-clv").innerHTML = renderDashboardCLV(data.clv);
         document.getElementById("dashboard-breakdowns").innerHTML = renderDashboardBreakdowns(data);
         document.getElementById("dashboard-recent").innerHTML = renderDashboardHistory(data.recent);
     }
@@ -2028,6 +2078,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     html += tmRenderComparison(data.rules_metrics, data.ml_metrics);
                 }
                 if (data.rules_metrics) {
+                    var mp = data.rules_metrics.model_params || {};
                     html += tmRenderRulesMetrics(data.rules_metrics.feature_importances ? {
                         accuracy: data.rules_metrics.accuracy,
                         roi: data.rules_metrics.roi,
@@ -2038,6 +2089,7 @@ document.addEventListener("DOMContentLoaded", function () {
                         threshold_analysis: data.rules_metrics.threshold_analysis,
                         slot_breakdown: {},
                         rec_breakdown: {},
+                        factor_health: mp.factor_health || null,
                     } : {});
                 }
                 resEl.innerHTML = html;
@@ -2068,10 +2120,30 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="tm-stat-cards">';
         html += '<div class="tm-stat-card"><div class="tm-stat-label">Accuracy</div><div class="tm-stat-value ' + accClass + '">' + (m.accuracy || 0) + '%</div></div>';
         html += '<div class="tm-stat-card"><div class="tm-stat-label">ROI</div><div class="tm-stat-value ' + roiClass + '">' + (m.roi > 0 ? '+' : '') + (m.roi || 0) + '%</div></div>';
-        html += '<div class="tm-stat-card"><div class="tm-stat-label">CLV</div><div class="tm-stat-value">' + (m.clv_avg > 0 ? '+' : '') + (m.clv_avg || 0) + '%</div></div>';
+        var clvClass = m.clv_avg > 0 ? "stat-green" : m.clv_avg < 0 ? "stat-red" : "";
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">CLV (avg pts)</div><div class="tm-stat-value ' + clvClass + '">' + (m.clv_avg > 0 ? '+' : '') + (m.clv_avg || 0) + '</div></div>';
+        if (m.clv_hit_rate !== undefined) {
+            var clvHrClass = m.clv_hit_rate >= 55 ? "stat-green" : m.clv_hit_rate < 45 ? "stat-red" : "stat-yellow";
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">CLV Beat %</div><div class="tm-stat-value ' + clvHrClass + '">' + m.clv_hit_rate + '%</div></div>';
+        }
         html += '<div class="tm-stat-card"><div class="tm-stat-label">Predictions</div><div class="tm-stat-value">' + (m.total_predictions || 0) + '</div></div>';
         html += '<div class="tm-stat-card"><div class="tm-stat-label">Bets (10+)</div><div class="tm-stat-value">' + (m.qualified_bets || 0) + '</div></div>';
         html += '</div>';
+
+        // CLV by tier
+        if (m.clv_by_tier && m.clv_by_tier.length > 0) {
+            html += '<div class="tm-feat-section">';
+            html += '<h3 class="tm-feat-title">CLV by Tier</h3>';
+            html += '<table class="tm-feat-table"><thead><tr><th>Tier</th><th>Picks</th><th>Avg CLV</th><th>Beat Close</th></tr></thead><tbody>';
+            m.clv_by_tier.forEach(function (t) {
+                var tc = t.avg_clv > 0 ? 'stat-green' : t.avg_clv < 0 ? 'stat-red' : '';
+                var hc = t.clv_hit_rate >= 55 ? 'stat-green' : t.clv_hit_rate < 45 ? 'stat-red' : 'stat-yellow';
+                html += '<tr><td>' + t.tier + '</td><td>' + t.count + '</td>';
+                html += '<td class="' + tc + '">' + (t.avg_clv > 0 ? '+' : '') + t.avg_clv + '</td>';
+                html += '<td class="' + hc + '">' + t.clv_hit_rate + '%</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
 
         // Threshold analysis
         if (m.threshold_analysis && Object.keys(m.threshold_analysis).length > 0) {
@@ -2129,6 +2201,150 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</tbody></table></div>';
         }
 
+        // Factor Health Report
+        if (m.factor_health) {
+            html += tmRenderFactorHealth(m.factor_health);
+        }
+
+        return html;
+    }
+
+    function tmRenderFactorHealth(fh) {
+        if (!fh) return '';
+        var html = '<div class="tm-feat-section">';
+        html += '<h3 class="tm-feat-title" style="border-bottom:2px solid var(--accent-red);padding-bottom:6px">Factor Health Report</h3>';
+
+        var ABBREV = {
+            slot_public: "Slot (Pub)", line_movement: "Line Mvmt", line_toward_dog: "Line→Dog",
+            line_toward_fav: "Line→Fav", rank_scam: "Rank Scam", spread_discrepancy: "Sprd Disc",
+            home_away_split: "H/A Split", b2b_bonus: "B2B+", b2b_penalty: "B2B-",
+            h2h_revenge: "H2H Rev", h2h_dominance: "H2H Dom", vegas_trap: "Trap",
+            trend_discrepancy: "Trend Disc", ou_discrepancy: "O/U Disc",
+            ats_bonus: "ATS+", ats_penalty: "ATS-", spread_penalty: "Sprd Pen",
+            spread_sweet_spot: "Sprd Sweet", day_penalty: "Day Pen",
+        };
+        var BK_ABBREV = {
+            slot: "Slot", line_movement: "Line Mvmt", line_direction: "Line Dir",
+            rank_scam: "Rank Scam", spread_discrepancy: "Sprd Disc",
+            home_away_split: "H/A Split", b2b: "B2B", head_to_head: "H2H",
+            vegas_trap: "Trap", trend_discrepancy: "Trend Disc", overunder: "O/U Disc",
+            ats_record: "ATS", spread_penalty: "Spread Adj", day_penalty: "Day Pen",
+            trell: "Trell", public_betting: "Public $", feedback: "Feedback", weather: "Weather",
+        };
+
+        // Factor comparison table: standalone lift, marginal lift, VIF
+        var names = fh.factor_names || [];
+        if (names.length > 0 && fh.standalone_lift && fh.vif_scores) {
+            html += '<h4 style="color:var(--text-secondary);margin:12px 0 6px">Factor Comparison</h4>';
+            html += '<table class="tm-table"><thead><tr><th>Factor</th><th>Fired</th><th>Standalone Lift</th><th>VIF</th><th>Status</th></tr></thead><tbody>';
+            // Sort by standalone lift descending
+            var sorted = names.slice().sort(function(a,b) {
+                return (fh.standalone_lift[b]||{}).lift - (fh.standalone_lift[a]||{}).lift;
+            });
+            sorted.forEach(function(name) {
+                var sl = fh.standalone_lift[name] || {};
+                var vif = fh.vif_scores[name];
+                var liftVal = sl.lift || 0;
+                var liftClass = liftVal > 3 ? 'color:var(--accent-green)' : liftVal < -3 ? 'color:var(--accent-red)' : '';
+                var vifClass = '';
+                var vifStr = vif != null ? vif.toFixed(1) : '-';
+                if (vif > 10) vifClass = 'color:var(--accent-red)';
+                else if (vif > 5) vifClass = 'color:var(--accent-yellow)';
+                // Status
+                var status = '';
+                if (vif > 5) status = '<span style="color:var(--accent-red)">Multicoll.</span>';
+                else if (liftVal < -3) status = '<span style="color:var(--accent-red)">Harmful</span>';
+                else if (liftVal > 5) status = '<span style="color:var(--accent-green)">Strong</span>';
+                else status = '<span style="color:var(--text-secondary)">OK</span>';
+
+                html += '<tr><td>' + (ABBREV[name] || name) + '</td>';
+                html += '<td>' + (sl.fired || 0) + '</td>';
+                html += '<td style="' + liftClass + '">' + (liftVal > 0 ? '+' : '') + liftVal + '%</td>';
+                html += '<td style="' + vifClass + '">' + vifStr + '</td>';
+                html += '<td>' + status + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // Marginal lift table (by breakdown key)
+        if (fh.marginal_lift && Object.keys(fh.marginal_lift).length > 0) {
+            html += '<h4 style="color:var(--text-secondary);margin:12px 0 6px">Marginal Lift (Leave-One-Out)</h4>';
+            html += '<table class="tm-table"><thead><tr><th>Factor</th><th>Full Acc</th><th>Without</th><th>Marginal</th><th>Tipped In</th><th>Tipped Acc</th></tr></thead><tbody>';
+            var mlKeys = Object.keys(fh.marginal_lift).sort(function(a,b) {
+                return (fh.marginal_lift[b].marginal_lift||0) - (fh.marginal_lift[a].marginal_lift||0);
+            });
+            mlKeys.forEach(function(key) {
+                var m = fh.marginal_lift[key];
+                var ml = m.marginal_lift || 0;
+                var mlClass = ml > 2 ? 'color:var(--accent-green)' : ml < -2 ? 'color:var(--accent-red)' : '';
+                var tippedClass = m.tipped_accuracy < m.full_accuracy ? 'color:var(--accent-red)' : m.tipped_accuracy > m.full_accuracy ? 'color:var(--accent-green)' : '';
+                html += '<tr><td>' + (BK_ABBREV[key] || key) + '</td>';
+                html += '<td>' + m.full_accuracy + '%</td>';
+                html += '<td>' + m.without_accuracy + '%</td>';
+                html += '<td style="' + mlClass + '">' + (ml > 0 ? '+' : '') + ml + '%</td>';
+                html += '<td>' + (m.games_tipped_in || 0) + '</td>';
+                html += '<td style="' + tippedClass + '">' + m.tipped_accuracy + '%</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // Notable correlations
+        if (fh.correlation_matrix && fh.correlation_matrix.matrix) {
+            var cm = fh.correlation_matrix;
+            var pairs = [];
+            for (var i = 0; i < cm.factors.length; i++) {
+                for (var j = i + 1; j < cm.factors.length; j++) {
+                    var corr = cm.matrix[i][j];
+                    if (Math.abs(corr) > 0.2) {
+                        pairs.push({ a: cm.factors[i], b: cm.factors[j], corr: corr });
+                    }
+                }
+            }
+            if (pairs.length > 0) {
+                pairs.sort(function(a,b) { return Math.abs(b.corr) - Math.abs(a.corr); });
+                html += '<h4 style="color:var(--text-secondary);margin:12px 0 6px">Notable Correlations (|r| &gt; 0.2)</h4>';
+                html += '<table class="tm-table"><thead><tr><th>Factor A</th><th>Factor B</th><th>Correlation</th></tr></thead><tbody>';
+                pairs.slice(0, 15).forEach(function(p) {
+                    var corrClass = Math.abs(p.corr) > 0.5 ? 'color:var(--accent-red)' : Math.abs(p.corr) > 0.3 ? 'color:var(--accent-yellow)' : '';
+                    html += '<tr><td>' + (ABBREV[p.a] || p.a) + '</td>';
+                    html += '<td>' + (ABBREV[p.b] || p.b) + '</td>';
+                    html += '<td style="' + corrClass + '">' + (p.corr > 0 ? '+' : '') + p.corr.toFixed(3) + '</td></tr>';
+                });
+                html += '</tbody></table>';
+            }
+        }
+
+        // Cluster analysis
+        if (fh.clusters && fh.clusters.length > 0) {
+            html += '<h4 style="color:var(--text-secondary);margin:12px 0 6px">Factor Clusters</h4>';
+            fh.clusters.forEach(function(cl) {
+                var label = cl.template_match || 'Cluster';
+                var factorsStr = cl.factors.map(function(f) { return ABBREV[f] || f; }).join(', ');
+                var corrClass = cl.avg_correlation > 0.5 ? 'var(--accent-red)' : cl.avg_correlation > 0.3 ? 'var(--accent-yellow)' : 'var(--text-secondary)';
+                html += '<div class="fh-cluster-card">';
+                html += '<div class="fh-cluster-header"><strong>' + label + '</strong> <span style="color:' + corrClass + '">(avg r=' + cl.avg_correlation.toFixed(2) + ')</span></div>';
+                html += '<div class="fh-cluster-factors">' + factorsStr + '</div>';
+                html += '<div class="fh-cluster-stats">';
+                html += 'Cluster marginal lift: <span style="' + (cl.cluster_marginal_lift > 0 ? 'color:var(--accent-green)' : cl.cluster_marginal_lift < -2 ? 'color:var(--accent-red)' : '') + '">' + (cl.cluster_marginal_lift > 0 ? '+' : '') + cl.cluster_marginal_lift + '%</span>';
+                html += ' &middot; Max combined weight: ' + cl.combined_max_weight;
+                html += '</div></div>';
+            });
+        }
+
+        // Recommendations
+        if (fh.recommendations && fh.recommendations.length > 0) {
+            html += '<h4 style="color:var(--text-secondary);margin:12px 0 6px">Recommendations</h4>';
+            fh.recommendations.forEach(function(rec) {
+                var sevColor = rec.severity === 'high' ? 'var(--accent-red)' : rec.severity === 'medium' ? 'var(--accent-yellow)' : 'var(--text-secondary)';
+                var typeLabel = rec.type.replace(/_/g, ' ').toUpperCase();
+                html += '<div class="fh-rec-item">';
+                html += '<span class="fh-rec-badge" style="background:' + sevColor + '">' + typeLabel + '</span> ';
+                html += '<span class="fh-rec-msg">' + rec.message + '</span>';
+                html += '</div>';
+            });
+        }
+
+        html += '</div>';
         return html;
     }
 

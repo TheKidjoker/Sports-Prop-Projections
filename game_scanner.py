@@ -262,7 +262,7 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
                        nfl_weather, nfl_trend, nfl_overunder,
                        b2b_result, ats_result, public_betting_result,
                        h2h_result, vegas_trap_result,
-                       cover_pct_calibrated=None):
+                       cover_pct_calibrated=None, opening_spread=None):
     """Assemble the final result dict for a game analysis."""
     home_team = game["home_team"]
     away_team = game["away_team"]
@@ -281,6 +281,7 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         "action": action,
         "recommendation": recommendation,
         "current_spread": current_spread,
+        "opening_spread": opening_spread,
     }
 
     # Historical accuracy from backtesting (NBA V4 tuned data)
@@ -604,6 +605,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         b2b_result, ats_result, public_betting_result,
         h2h_result, vegas_trap_result,
         cover_pct_calibrated=cover_pct_cal,
+        opening_spread=opening,
     )
 
 

@@ -585,6 +585,21 @@ def api_grade():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/close-lines", methods=["POST"])
+@require_auth
+def api_close_lines():
+    """Fetch closing lines for pending predictions."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        result = tracker.fetch_closing_lines(sport)
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ─── Test Model API Endpoints ──────────────────────────────────────────────
 
 def _require_test_model():

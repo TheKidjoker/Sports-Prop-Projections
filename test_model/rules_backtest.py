@@ -27,6 +27,7 @@ from analysis_factors import (
     H2H_REVENGE_THRESHOLDS,
 )
 from calibration import compute_calibration
+from factor_analysis import run_factor_analysis
 from test_model import db as tm_db
 from test_model.date_utils import parse_iso_date, parse_game_dt
 
@@ -136,6 +137,8 @@ def run_rules_backtest(sport):
     _MAX_PREDICTIONS_IN_MEMORY = 200
     # Lightweight pairs for calibration (never truncated — ~8 bytes each)
     calibration_pairs = []
+    # Per-game factor records for factor analysis (never truncated)
+    factor_records = []
     factor_tracker = defaultdict(lambda: {"fired": 0, "correct_when_fired": 0,
                                            "correct_when_not_fired": 0,
                                            "not_fired": 0})
@@ -402,6 +405,35 @@ def run_rules_backtest(sport):
         _track_factor(factor_tracker, "line_toward_dog", line_toward_dog, correct)
         _track_factor(factor_tracker, "line_toward_fav", line_toward_fav, correct)
         _track_factor(factor_tracker, "day_penalty", breakdown.get("day_penalty", 0) < 0, correct)
+        _track_factor(factor_tracker, "spread_sweet_spot", breakdown.get("spread_penalty", 0) > 0, correct)
+
+        # Per-game factor record for factor analysis (never truncated)
+        factor_records.append({
+            "score": score,
+            "correct": correct,
+            "breakdown": breakdown,
+            "factors": {
+                "slot_public": slot_type == "public",
+                "line_movement": line_confirms,
+                "rank_scam": rank_scam_applies,
+                "spread_discrepancy": spread_disc_applies,
+                "home_away_split": home_away_applies,
+                "b2b_bonus": b2b_bonus,
+                "b2b_penalty": b2b_penalty,
+                "h2h_revenge": h2h_revenge,
+                "h2h_dominance": h2h_dominance,
+                "vegas_trap": vegas_trap_bonus > 0,
+                "trend_discrepancy": trend_disc_applies,
+                "ou_discrepancy": ou_disc_applies,
+                "ats_bonus": ats_bonus,
+                "ats_penalty": ats_penalty,
+                "spread_penalty": breakdown.get("spread_penalty", 0) < 0,
+                "spread_sweet_spot": breakdown.get("spread_penalty", 0) > 0,
+                "line_toward_dog": line_toward_dog,
+                "line_toward_fav": line_toward_fav,
+                "day_penalty": breakdown.get("day_penalty", 0) < 0,
+            },
+        })
 
         # Track by slot type
         slot_tracker[slot_type]["total"] += 1
@@ -431,6 +463,7 @@ def run_rules_backtest(sport):
             "recommendation": recommendation,
             "correct": correct,
             "spread": closing_spread,
+            "opening_spread": opening_spread,
             "breakdown": breakdown,
         })
         # Cap in-memory predictions to avoid unbounded growth
@@ -453,6 +486,10 @@ def run_rules_backtest(sport):
     calibration = compute_calibration(calibration_pairs, sport)
     metrics["calibration"] = calibration
 
+    # ── Factor analysis (uses ALL factor records, not truncated) ──
+    factor_health = run_factor_analysis(factor_records, sport)
+    metrics["factor_health"] = factor_health
+
     # Save to model_runs table
     tm_db.save_model_run({
         "sport": sport,
@@ -468,6 +505,7 @@ def run_rules_backtest(sport):
             "min_warmup": MIN_WARMUP_GAMES,
             "sport": sport,
             "calibration": calibration,
+            "factor_health": factor_health,
         },
         "threshold_analysis": metrics.get("threshold_analysis", {}),
         "predictions": scored_predictions[-200:],
@@ -637,11 +675,15 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
         roi = round((q_returned - q_wagered) / q_wagered * 100, 2)
         clv_values = []
         for p in qualified:
-            if p["spread"] and p["spread"] != 0:
-                implied = 0.5 + (abs(p["spread"]) / 100)
-                edge = (p["score"] / 53 * 0.15)  # approximate edge from score
-                clv_values.append(edge)
-        clv_avg = round(sum(clv_values) / len(clv_values) * 100, 2) if clv_values else 0
+            op = p.get("opening_spread")
+            cl = p.get("spread")
+            if op is not None and cl is not None:
+                if p["lean_team"] == p["home_team"]:
+                    clv_values.append(round(op - cl, 2))
+                else:
+                    clv_values.append(round(cl - op, 2))
+        clv_avg = round(sum(clv_values) / len(clv_values), 2) if clv_values else 0
+        clv_hit_rate = round(sum(1 for c in clv_values if c > 0) / len(clv_values) * 100, 1) if clv_values else 0
     else:
         roi = 0
         clv_avg = 0
@@ -701,11 +743,35 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
                 "accuracy_ci": metric_with_ci(data["correct"], data["total"], min_sample=MIN_SAMPLES["day"]),
             }
 
+    # ── CLV by tier ──
+    clv_by_tier = []
+    for tier in ["STRONG PLAY", "CONFIDENT", "LEAN"]:
+        tier_preds = [p for p in qualified if p.get("recommendation") == tier]
+        tier_clvs = []
+        for p in tier_preds:
+            op = p.get("opening_spread")
+            cl = p.get("spread")
+            if op is not None and cl is not None:
+                if p["lean_team"] == p["home_team"]:
+                    tier_clvs.append(round(op - cl, 2))
+                else:
+                    tier_clvs.append(round(cl - op, 2))
+        if tier_clvs:
+            clv_by_tier.append({
+                "tier": tier,
+                "avg_clv": round(sum(tier_clvs) / len(tier_clvs), 2),
+                "clv_hit_rate": round(sum(1 for c in tier_clvs if c > 0) / len(tier_clvs) * 100, 1),
+                "count": len(tier_clvs),
+            })
+
     return {
         "accuracy": accuracy,
         "accuracy_ci": accuracy_ci,
         "roi": roi,
         "clv_avg": clv_avg,
+        "clv_hit_rate": clv_hit_rate,
+        "clv_count": len(clv_values),
+        "clv_by_tier": clv_by_tier,
         "total_predictions": total,
         "qualified_bets": qualified_count,
         "factor_breakdown": factor_breakdown,

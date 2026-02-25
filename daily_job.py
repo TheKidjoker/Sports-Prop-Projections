@@ -108,6 +108,24 @@ def run_grade(logger):
     logger.info("=== GRADE COMPLETE ===")
 
 
+def run_close_lines(logger):
+    """Fetch closing lines for all pending predictions."""
+    logger.info("=== CLOSE LINES START ===")
+    tracker.init_db()
+
+    for sport in SPORTS:
+        try:
+            result = tracker.fetch_closing_lines(sport)
+            logger.info(
+                "%s: %d closing lines fetched",
+                sport.upper(), result.get("updated", 0),
+            )
+        except Exception:
+            logger.exception("Error fetching closing lines for %s", sport.upper())
+
+    logger.info("=== CLOSE LINES COMPLETE ===")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Joker's Edge - Automated daily scan & grade",
@@ -115,6 +133,7 @@ def main():
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("scan", help="Scan all sports and save predictions (11 AM)")
     sub.add_parser("grade", help="Grade all pending predictions (1 AM)")
+    sub.add_parser("close_lines", help="Fetch closing lines for pending predictions (run ~30min before games)")
 
     args = parser.parse_args()
 
@@ -129,6 +148,8 @@ def main():
             run_scan(logger)
         elif args.command == "grade":
             run_grade(logger)
+        elif args.command == "close_lines":
+            run_close_lines(logger)
     except Exception:
         logger.exception("Fatal error in %s", args.command)
         sys.exit(1)

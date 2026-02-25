@@ -1,11 +1,21 @@
 import sqlite3
 import os
+import requests
 from datetime import datetime, timezone
 from constants import wilson_interval, metric_with_ci, MIN_SAMPLES
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions.db")
+
+ODDS_API_SPORT_KEYS = {
+    "nba": "basketball_nba",
+    "nhl": "icehockey_nhl",
+    "nfl": "americanfootball_nfl",
+    "cfb": "americanfootball_ncaaf",
+    "cbb": "basketball_ncaab",
+}
 
 # ─── Supabase singleton ──────────────────────────────────────────────────────
 _supabase_client = None
@@ -62,15 +72,22 @@ def init_db():
         )
     """)
     _migrate_add_column(cur, "game_date")
+    _migrate_add_column(cur, "line_at_pick REAL")
+    _migrate_add_column(cur, "closing_line REAL")
+    _migrate_add_column(cur, "clv REAL")
+    _migrate_add_column(cur, "clv_direction INTEGER")
     conn.commit()
     cur.close()
     conn.close()
 
 
-def _migrate_add_column(cur, column_name):
-    """Adds a column to predictions table if it doesn't already exist (SQLite only)."""
+def _migrate_add_column(cur, column_def):
+    """Adds a column to predictions table if it doesn't already exist (SQLite only).
+    column_def can be just a name (defaults to TEXT) or 'name TYPE'."""
+    if " " not in column_def.strip():
+        column_def = column_def + " TEXT"
     try:
-        cur.execute(f"ALTER TABLE predictions ADD COLUMN {column_name} TEXT")
+        cur.execute(f"ALTER TABLE predictions ADD COLUMN {column_def}")
     except Exception:
         pass
 
@@ -118,6 +135,7 @@ def save_predictions(games, sport):
             "confirmation_score": g.get("confirmation_score", 0),
             "cover_pct": g.get("cover_pct", 0),
             "current_spread": g.get("current_spread"),
+            "line_at_pick": g.get("current_spread"),
             "created_at": now,
         })
 
@@ -129,6 +147,15 @@ def save_predictions(games, sport):
         sb.table("predictions").upsert(
             rows_to_save, on_conflict="event_id,sport"
         ).execute()
+        # Preserve immutable line_at_pick — only set on first insert
+        sb.table("predictions").update(
+            {"line_at_pick": None}
+        ).is_("line_at_pick", "null").execute()
+        # Actually: set line_at_pick = current_spread where it's still null
+        for row in rows_to_save:
+            sb.table("predictions").update(
+                {"line_at_pick": row["current_spread"]}
+            ).eq("event_id", row["event_id"]).eq("sport", row["sport"]).is_("line_at_pick", "null").execute()
     else:
         conn = _get_sqlite()
         cur = conn.cursor()
@@ -137,8 +164,8 @@ def save_predictions(games, sport):
                 INSERT INTO predictions
                     (event_id, sport, home_team, away_team, game_date, game_time_est,
                      lean_team, action, slot_type, recommendation,
-                     confirmation_score, cover_pct, current_spread, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     confirmation_score, cover_pct, current_spread, line_at_pick, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id, sport) DO UPDATE SET
                     lean_team = EXCLUDED.lean_team,
                     action = EXCLUDED.action,
@@ -153,7 +180,7 @@ def save_predictions(games, sport):
                 row["game_date"], row["game_time_est"], row["lean_team"],
                 row["action"], row["slot_type"], row["recommendation"],
                 row["confirmation_score"], row["cover_pct"],
-                row["current_spread"], row["created_at"],
+                row["current_spread"], row["line_at_pick"], row["created_at"],
             ))
         conn.commit()
         cur.close()
@@ -165,9 +192,16 @@ def save_predictions(games, sport):
 def grade_predictions(sport=None):
     """
     Grades PENDING predictions by fetching final scores from ESPN.
+    Fetches closing lines as a safety net before grading.
     Returns dict with graded count and summary.
     """
     from api_client import get_game_final_score
+
+    # Safety net: capture closing lines for any predictions still missing them
+    try:
+        fetch_closing_lines(sport)
+    except Exception:
+        pass
 
     graded = 0
     results_summary = {"hit": 0, "miss": 0, "push": 0, "not_final": 0}
@@ -361,12 +395,15 @@ def _dashboard_supabase(sport=None):
         recent_q = recent_q.eq("sport", sport)
     recent = recent_q.execute().data
 
+    clv = _compute_clv_metrics(recent)
+
     return {
         "overall": overall,
         "by_sport": by_sport,
         "by_slot": by_slot,
         "by_recommendation": by_recommendation,
         "recent": recent,
+        "clv": clv,
     }
 
 
@@ -462,12 +499,15 @@ def _dashboard_sqlite(sport=None):
     cur.close()
     conn.close()
 
+    clv = _compute_clv_metrics(recent)
+
     return {
         "overall": overall,
         "by_sport": by_sport,
         "by_slot": by_slot,
         "by_recommendation": by_recommendation,
         "recent": recent,
+        "clv": clv,
     }
 
 
@@ -616,3 +656,203 @@ def get_factor_performance(sport):
         }
     except Exception:
         return None
+
+
+# ─── CLV Computation ─────────────────────────────────────────────────────────
+
+def _compute_clv(line_at_pick, closing_line, lean_team, home_team):
+    """
+    Positive CLV = you got a better number than the close.
+    From lean team's perspective:
+      If lean == home: CLV = line_at_pick - closing_line
+      If lean == away: CLV = closing_line - line_at_pick
+    """
+    if line_at_pick is None or closing_line is None:
+        return None, None
+
+    if lean_team == home_team:
+        clv = round(line_at_pick - closing_line, 1)
+    else:
+        clv = round(closing_line - line_at_pick, 1)
+
+    clv_direction = 1 if clv > 0 else 0
+    return clv, clv_direction
+
+
+def _normalize_team_name(name):
+    """Normalize team name for fuzzy matching between ESPN and Odds API."""
+    return name.strip().lower().replace(".", "").replace("'", "")
+
+
+def _fetch_odds_api_lines(sport):
+    """Fetch current spreads from The Odds API for a sport. Returns dict keyed by normalized matchup."""
+    if not ODDS_API_KEY:
+        return {}
+    sport_key = ODDS_API_SPORT_KEYS.get(sport)
+    if not sport_key:
+        return {}
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
+        resp = requests.get(url, params={
+            "apiKey": ODDS_API_KEY,
+            "regions": "us",
+            "markets": "spreads",
+            "bookmakers": "fanduel,draftkings",
+        }, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return {}
+
+    lines = {}
+    for game in data:
+        home = _normalize_team_name(game.get("home_team", ""))
+        away = _normalize_team_name(game.get("away_team", ""))
+        if not home or not away:
+            continue
+
+        # Average home spread across bookmakers
+        spreads = []
+        for bk in game.get("bookmakers", []):
+            for market in bk.get("markets", []):
+                if market.get("key") != "spreads":
+                    continue
+                for outcome in market.get("outcomes", []):
+                    if _normalize_team_name(outcome.get("name", "")) == home:
+                        try:
+                            spreads.append(float(outcome["point"]))
+                        except (ValueError, KeyError):
+                            pass
+
+        if spreads:
+            avg_spread = round(sum(spreads) / len(spreads), 1)
+            lines[f"{home}|{away}"] = avg_spread
+
+    return lines
+
+
+def fetch_closing_lines(sport=None):
+    """
+    Fetch closing lines for PENDING predictions.
+    Primary: Odds API live spreads. Fallback: ESPN get_game_spread.
+    Computes CLV for each prediction that gets a closing line.
+    """
+    from api_client import get_game_spread
+
+    updated = 0
+    sports_to_fetch = [sport] if sport else list(ODDS_API_SPORT_KEYS.keys())
+
+    for sp in sports_to_fetch:
+        # Fetch odds API lines once per sport
+        odds_lines = _fetch_odds_api_lines(sp)
+
+        if _use_supabase():
+            sb = _get_supabase()
+            query = sb.table("predictions").select("*").eq("result", "PENDING").is_("closing_line", "null").eq("sport", sp)
+            rows = query.execute().data
+        else:
+            conn = _get_sqlite()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM predictions WHERE result = 'PENDING' AND closing_line IS NULL AND sport = ?",
+                (sp,)
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.close()
+            conn.close()
+
+        for row in rows:
+            home_norm = _normalize_team_name(row["home_team"])
+            away_norm = _normalize_team_name(row["away_team"])
+            matchup_key = f"{home_norm}|{away_norm}"
+
+            closing = odds_lines.get(matchup_key)
+
+            # Fallback: ESPN spread
+            if closing is None:
+                try:
+                    _, espn_current = get_game_spread(row["event_id"], sp)
+                    if espn_current is not None:
+                        closing = espn_current
+                except Exception:
+                    pass
+
+            if closing is None:
+                continue
+
+            line_at_pick = row.get("line_at_pick") or row.get("current_spread")
+            clv, clv_dir = _compute_clv(line_at_pick, closing, row.get("lean_team"), row["home_team"])
+
+            if _use_supabase():
+                sb = _get_supabase()
+                update_data = {"closing_line": closing}
+                if clv is not None:
+                    update_data["clv"] = clv
+                    update_data["clv_direction"] = clv_dir
+                sb.table("predictions").update(update_data).eq("id", row["id"]).execute()
+            else:
+                conn = _get_sqlite()
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE predictions SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
+                    (closing, clv, clv_dir, row["id"])
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+
+            updated += 1
+
+    return {"updated": updated}
+
+
+def _compute_clv_metrics(predictions):
+    """Compute CLV summary metrics from a list of prediction dicts."""
+    clv_values = [p["clv"] for p in predictions if p.get("clv") is not None]
+    clv_beats = sum(1 for p in predictions if p.get("clv_direction") == 1)
+    clv_total = len(clv_values)
+
+    avg_clv = round(sum(clv_values) / clv_total, 2) if clv_total > 0 else None
+    clv_hit_rate = round(clv_beats / clv_total * 100, 1) if clv_total > 0 else None
+
+    # By tier
+    clv_by_tier = []
+    for tier in ["STRONG PLAY", "CONFIDENT", "LEAN"]:
+        tier_preds = [p for p in predictions if p.get("recommendation") == tier]
+        tier_vals = [p["clv"] for p in tier_preds if p.get("clv") is not None]
+        tier_beats = sum(1 for p in tier_preds if p.get("clv_direction") == 1)
+        tier_total = len(tier_vals)
+        if tier_total > 0:
+            clv_by_tier.append({
+                "tier": tier,
+                "avg_clv": round(sum(tier_vals) / tier_total, 2),
+                "clv_hit_rate": round(tier_beats / tier_total * 100, 1),
+                "count": tier_total,
+            })
+
+    # By sport
+    clv_by_sport = []
+    sports_seen = set(p.get("sport", "") for p in predictions)
+    for sp in sorted(sports_seen):
+        if not sp:
+            continue
+        sp_preds = [p for p in predictions if p.get("sport") == sp]
+        sp_vals = [p["clv"] for p in sp_preds if p.get("clv") is not None]
+        sp_beats = sum(1 for p in sp_preds if p.get("clv_direction") == 1)
+        sp_total = len(sp_vals)
+        if sp_total > 0:
+            clv_by_sport.append({
+                "sport": sp,
+                "avg_clv": round(sum(sp_vals) / sp_total, 2),
+                "clv_hit_rate": round(sp_beats / sp_total * 100, 1),
+                "count": sp_total,
+            })
+
+    return {
+        "avg_clv": avg_clv,
+        "clv_hit_rate": clv_hit_rate,
+        "clv_total": clv_total,
+        "clv_by_tier": clv_by_tier,
+        "clv_by_sport": clv_by_sport,
+    }

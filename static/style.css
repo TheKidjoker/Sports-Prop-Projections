@@ -883,6 +883,50 @@ button[type="submit"]:disabled {
     margin-top: 1px;
 }
 
+/* Factor Health Report */
+.fh-cluster-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+}
+.fh-cluster-header {
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+.fh-cluster-factors {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+.fh-cluster-stats {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.fh-rec-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.fh-rec-item:last-child {
+    border-bottom: none;
+}
+.fh-rec-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #fff;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+.fh-rec-msg {
+    color: var(--text-primary);
+}
+
 .pct-high {
     background: rgba(76, 175, 80, 0.1);
     color: var(--accent-green);
@@ -3465,3 +3509,16 @@ button[type="submit"]:disabled {
         gap: 0.5rem;
     }
 }
+
+/* =========================================
+   CLV Dashboard Styles
+   ========================================= */
+.dashboard-clv { margin-bottom: 16px; }
+.clv-sport-card { min-width: 120px; }
+.clv-positive { color: var(--accent-green); }
+.clv-negative { color: var(--accent-red); }
+.clv-neutral { color: var(--text-muted); }
+.clv-substat { font-size: 0.7rem; margin-top: 0.25rem; }
+.clv-summary { font-size: 0.85rem; color: var(--text-secondary); margin: 0.5rem 0; }
+.clv-guide { font-size: 0.7rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.5rem; }
+.dash-recent-clv { font-size: 0.7rem; font-weight: 600; margin-left: 8px; }
