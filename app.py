@@ -12,7 +12,11 @@ from api_client import (
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
-from game_scanner import scan_all_games, get_game_props, get_top_props
+from constants import ML_THRESHOLDS
+from game_scanner import (
+    scan_all_games, get_game_props, get_top_props,
+    classify_game_slot, _build_action_string,
+)
 import tracker
 import scan_cache
 
@@ -23,6 +27,7 @@ try:
     from test_model.backtest import start_backtest_thread, get_backtest_status
     from test_model.scanner import scan_today_with_model
     from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
+    from test_model.walkforward import start_walkforward_thread, get_walkforward_status
     HAS_TEST_MODEL = True
 except Exception as _tm_err:
     import traceback
@@ -394,76 +399,31 @@ def predict():
                         break
                 is_first_game = (game_idx == 0)
 
-                if sport == "nfl":
-                    # NFL: classify using PST (UTC-8)
-                    if game_date_str:
-                        try:
-                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-                            pst_dt = game_dt - timedelta(hours=8)
-                            hour, minute = pst_dt.hour, pst_dt.minute
+                # Detect last non-SNF Sunday game for NFL
+                is_last_sunday = False
+                if sport == "nfl" and day_of_week.lower() == "sunday":
+                    snf_mins = 17 * 60 + 20
+                    for g in reversed(sorted_games):
+                        gd = g.get("game_date", "")
+                        if gd:
+                            try:
+                                gdt = datetime.fromisoformat(gd.replace("Z", "+00:00"))
+                                gpst = gdt - timedelta(hours=8)
+                                gmins = gpst.hour * 60 + gpst.minute
+                                if abs(gmins - snf_mins) > 30:
+                                    if g.get("event_id") == matched_game["event_id"]:
+                                        is_last_sunday = True
+                                    break
+                            except (ValueError, TypeError):
+                                continue
 
-                            # Detect last non-SNF Sunday game
-                            is_last_sunday = False
-                            if day_of_week.lower() == "sunday":
-                                snf_mins = 17 * 60 + 20
-                                for g in reversed(sorted_games):
-                                    gd = g.get("game_date", "")
-                                    if gd:
-                                        try:
-                                            gdt = datetime.fromisoformat(gd.replace("Z", "+00:00"))
-                                            gpst = gdt - timedelta(hours=8)
-                                            gmins = gpst.hour * 60 + gpst.minute
-                                            if abs(gmins - snf_mins) > 30:
-                                                if g.get("event_id") == matched_game["event_id"]:
-                                                    is_last_sunday = True
-                                                break
-                                        except (ValueError, TypeError):
-                                            continue
-
-                            slot_type = classify_slot(
-                                day_of_week, hour, minute,
-                                sport="nfl",
-                                is_last_sunday_game=is_last_sunday,
-                            )
-                        except (ValueError, TypeError):
-                            pass
-                elif sport in ("cfb", "cbb"):
-                    # CFB/CBB: classify using EST (UTC-5)
-                    if game_date_str:
-                        try:
-                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-                            est_dt = game_dt - timedelta(hours=5)
-                            hour, minute = est_dt.hour, est_dt.minute
-                            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
-                        except (ValueError, TypeError):
-                            pass
-                elif sport == "nhl":
-                    # NHL: classify using CST (UTC-6)
-                    if game_date_str:
-                        try:
-                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-                            cst_dt = game_dt - timedelta(hours=6)
-                            hour, minute = cst_dt.hour, cst_dt.minute
-                            slot_type = classify_slot(
-                                day_of_week, hour, minute,
-                                sport="nhl",
-                                total_games_on_slate=total_games,
-                                game_index=game_idx,
-                            )
-                        except (ValueError, TypeError):
-                            pass
-                else:
-                    # NBA: first-game override or PST classification
-                    if is_first_game:
-                        slot_type = first_game_slot_override(day_of_week)
-                    elif game_date_str:
-                        try:
-                            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-                            pst_dt = game_dt - timedelta(hours=8)
-                            hour, minute = pst_dt.hour, pst_dt.minute
-                            slot_type = classify_slot(day_of_week, hour, minute)
-                        except (ValueError, TypeError):
-                            pass
+                slot_type, _, _, _, _ = classify_game_slot(
+                    game_date_str, day_of_week, sport,
+                    is_first_game=is_first_game,
+                    total_games_on_slate=total_games,
+                    game_index=game_idx,
+                    is_last_sunday_game=is_last_sunday,
+                )
 
                 # NFL skip slot: early return
                 if sport == "nfl" and slot_type == "skip":
@@ -487,7 +447,7 @@ def predict():
                     line_confirmed = confirmed
 
                     # Sport-specific moneyline thresholds
-                    ml_threshold = {"nba": 6, "nfl": 3, "cfb": 7, "cbb": 7}.get(sport)
+                    ml_threshold = ML_THRESHOLDS.get(sport)
                     if ml_threshold and abs(current) >= ml_threshold:
                         moneyline_recommend = True
                         moneyline_spread = current
@@ -555,21 +515,11 @@ def predict():
             cover_rates_data = {"over": over_rate, "under": under_rate, "push": push_rate}
 
         # Build clear action string with spread numbers
-        action = None
-        if lean_team and current_spread is not None:
-            if lean_team == matched_game["home_team"]:
-                lean_spread = current_spread
-            else:
-                lean_spread = -current_spread
-            limit = lean_spread - 1.5
-            fs = lambda v: ("+" + str(v)) if v > 0 else str(v)
-            spread_action = ("Take " + lean_team + " " + fs(lean_spread) +
-                             " or better — don't take past " + fs(limit))
-            if moneyline_recommend:
-                action = (spread_action + " (Best Bet)"
-                          + " | " + lean_team + " ML (Aggressive)")
-            else:
-                action = spread_action
+        action = _build_action_string(
+            lean_team, current_spread,
+            matched_game["home_team"] if matched_game else None,
+            moneyline_recommend,
+        )
 
         response_data = {
             "success": True,
@@ -822,6 +772,66 @@ def api_tm_rules_backtest_metrics():
             "success": True,
             "rules_metrics": rules_metrics,
             "ml_metrics": ml_metrics,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/walkforward", methods=["POST"])
+@require_auth
+def api_tm_walkforward():
+    """Start background walk-forward validation for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        mode = data.get("mode", "split").lower()
+        if mode not in ("split", "rolling"):
+            mode = "split"
+        started = start_walkforward_thread(sport, mode)
+        return jsonify({"success": True, "started": started, "mode": mode})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/walkforward/status", methods=["GET"])
+@require_auth
+def api_tm_walkforward_status():
+    """Poll walk-forward validation progress for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        progress = get_walkforward_status(sport)
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/walkforward/metrics", methods=["GET"])
+@require_auth
+def api_tm_walkforward_metrics():
+    """Get walk-forward validation metrics with rules backtest comparison."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        wf_metrics = tm_db.get_latest_model_run(sport, "walkforward")
+        rules_metrics = tm_db.get_latest_model_run(sport, "rules_backtest")
+        return jsonify({
+            "success": True,
+            "walkforward_metrics": wf_metrics,
+            "rules_metrics": rules_metrics,
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
