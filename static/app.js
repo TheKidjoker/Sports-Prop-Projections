@@ -1510,8 +1510,14 @@ document.addEventListener("DOMContentLoaded", function () {
             });
     }
 
+    function formatCi(ci) {
+        if (!ci || ci.ci_lower == null) return '';
+        return '<span class="dash-ci">[' + ci.ci_lower + '-' + ci.ci_upper + '%]</span>';
+    }
+
     function renderDashboardStats(o) {
         var rateClass = o.win_rate >= 55 ? "stat-green" : o.win_rate >= 45 ? "stat-yellow" : "stat-red";
+        var ciHtml = o.win_rate_ci ? formatCi(o.win_rate_ci) : '';
         var html = '<div class="dash-stat-cards">';
         html += '<div class="dash-stat-card">';
         html += '<div class="dash-stat-label">Record</div>';
@@ -1519,7 +1525,7 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '</div>';
         html += '<div class="dash-stat-card">';
         html += '<div class="dash-stat-label">Win Rate</div>';
-        html += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%</div>';
+        html += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%' + ciHtml + '</div>';
         html += '</div>';
         html += '<div class="dash-stat-card">';
         html += '<div class="dash-stat-label">Total Picks</div>';
@@ -1704,17 +1710,199 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("dashboard-clv").innerHTML = renderDashboardCLV(data.clv);
         document.getElementById("dashboard-breakdowns").innerHTML = renderDashboardBreakdowns(data);
         document.getElementById("dashboard-recent").innerHTML = renderDashboardHistory(data.recent);
+        document.getElementById("dashboard-model-health").innerHTML = "";
+        fetchModelHealth();
+    }
+
+    function fetchModelHealth() {
+        authFetch("/api/model-health")
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success && data.sports) {
+                    document.getElementById("dashboard-model-health").innerHTML = renderModelHealth(data.sports);
+                    wireMethodologyModal();
+                }
+            })
+            .catch(function () {});
+    }
+
+    function renderModelHealth(sports) {
+        var sportKeys = ["nba", "nhl", "cbb", "nfl", "cfb"];
+        var sportLabels = { nba: "NBA", nhl: "NHL", cbb: "CBB", nfl: "NFL", cfb: "CFB" };
+        var hasAny = false;
+        for (var i = 0; i < sportKeys.length; i++) {
+            if (sports[sportKeys[i]] && sports[sportKeys[i]].in_sample) { hasAny = true; break; }
+        }
+        if (!hasAny) return '';
+
+        var html = '<div class="mh-header">';
+        html += '<h3>Model Health</h3>';
+        html += '<button type="button" class="mh-methodology-link" id="mh-methodology-btn">Methodology</button>';
+        html += '</div>';
+        html += '<div class="mh-grid">';
+
+        for (var i = 0; i < sportKeys.length; i++) {
+            var key = sportKeys[i];
+            var s = sports[key];
+            if (!s) continue;
+            var conf = s.data_confidence || {};
+            var badgeClass = "mh-badge-" + (conf.level || "medium");
+
+            html += '<div class="mh-card">';
+            html += '<div class="mh-card-header">';
+            html += '<span class="mh-sport-name">' + sportLabels[key] + '</span>';
+            html += '<span class="mh-confidence-badge ' + badgeClass + '">' + (conf.label || "?") + ' (' + (conf.games || "?") + ' games)</span>';
+            html += '</div>';
+
+            // In-sample accuracy
+            if (s.in_sample) {
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">In-Sample Acc</span>';
+                html += '<span class="mh-metric-value">' + (s.in_sample.accuracy != null ? s.in_sample.accuracy + '%' : '--') + '</span>';
+                html += '</div>';
+                if (s.in_sample.roi != null) {
+                    html += '<div class="mh-metric-row">';
+                    html += '<span class="mh-metric-label">In-Sample ROI</span>';
+                    html += '<span class="mh-metric-value">' + (s.in_sample.roi >= 0 ? '+' : '') + s.in_sample.roi + '%</span>';
+                    html += '</div>';
+                }
+                if (s.in_sample.strong_accuracy != null) {
+                    html += '<div class="mh-metric-row">';
+                    html += '<span class="mh-metric-label">STRONG PLAY</span>';
+                    html += '<span class="mh-metric-value">' + s.in_sample.strong_accuracy + '%';
+                    if (s.in_sample.strong_ci) {
+                        html += '<span class="mh-ci">[' + s.in_sample.strong_ci[0] + '-' + s.in_sample.strong_ci[1] + '%]</span>';
+                    }
+                    html += ' <span class="mh-ci">(n=' + s.in_sample.strong_n + ')</span></span>';
+                    html += '</div>';
+                }
+            } else {
+                html += '<div class="mh-no-data">No backtest data</div>';
+            }
+
+            // Out-of-sample accuracy
+            if (s.out_of_sample) {
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">Out-of-Sample Acc</span>';
+                html += '<span class="mh-metric-value">' + (s.out_of_sample.accuracy != null ? s.out_of_sample.accuracy + '%' : '--') + '</span>';
+                html += '</div>';
+                if (s.out_of_sample.strong_accuracy != null) {
+                    html += '<div class="mh-metric-row">';
+                    html += '<span class="mh-metric-label">OOS STRONG</span>';
+                    html += '<span class="mh-metric-value">' + s.out_of_sample.strong_accuracy + '%';
+                    if (s.out_of_sample.strong_ci) {
+                        html += '<span class="mh-ci">[' + s.out_of_sample.strong_ci[0] + '-' + s.out_of_sample.strong_ci[1] + '%]</span>';
+                    }
+                    if (s.out_of_sample.strong_n != null) {
+                        html += ' <span class="mh-ci">(n=' + s.out_of_sample.strong_n + ')</span>';
+                    }
+                    html += '</span></div>';
+                }
+            } else {
+                html += '<div class="mh-metric-row"><span class="mh-metric-label">Out-of-Sample</span><span class="mh-no-data">Not run yet</span></div>';
+            }
+
+            // Overfit gap
+            if (s.overfit_gap != null) {
+                var gapClass = s.overfit_gap <= 3 ? "mh-gap-green" : s.overfit_gap <= 8 ? "mh-gap-yellow" : "mh-gap-red";
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">Overfit Gap</span>';
+                html += '<span class="mh-metric-value ' + gapClass + '">' + s.overfit_gap + '%</span>';
+                html += '</div>';
+            }
+
+            // Calibration ECE
+            if (s.calibration_ece != null) {
+                var eceClass = s.calibration_ece < 5 ? "mh-gap-green" : s.calibration_ece < 10 ? "mh-gap-yellow" : "mh-gap-red";
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">Calibration ECE</span>';
+                html += '<span class="mh-metric-value ' + eceClass + '">' + s.calibration_ece.toFixed(1) + '%</span>';
+                html += '</div>';
+            }
+
+            // CLV
+            if (s.clv_avg != null) {
+                var clvClass = s.clv_avg > 0 ? "clv-positive" : s.clv_avg < 0 ? "clv-negative" : "clv-neutral";
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">CLV Avg</span>';
+                html += '<span class="mh-metric-value ' + clvClass + '">' + (s.clv_avg >= 0 ? '+' : '') + s.clv_avg.toFixed(1) + '</span>';
+                html += '</div>';
+            }
+
+            // Last updated
+            if (s.last_backtest_date) {
+                var dt = s.last_backtest_date.substring(0, 10);
+                html += '<div class="mh-updated">Last backtest: ' + dt + '</div>';
+            }
+
+            html += '</div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function wireMethodologyModal() {
+        var btn = document.getElementById("mh-methodology-btn");
+        var modal = document.getElementById("methodology-modal");
+        var closeBtn = document.getElementById("methodology-close");
+        if (!btn || !modal) return;
+
+        // Populate content on first click
+        var body = document.getElementById("methodology-body");
+        if (body && !body.innerHTML) {
+            body.innerHTML = renderMethodology();
+        }
+
+        btn.onclick = function () { modal.classList.remove("hidden"); };
+        closeBtn.onclick = function () { modal.classList.add("hidden"); };
+        modal.onclick = function (e) {
+            if (e.target === modal) modal.classList.add("hidden");
+        };
+    }
+
+    function renderMethodology() {
+        var html = '';
+        html += '<h2>How Scores Work</h2>';
+        html += '<p>Each game receives a composite score from confirmation factors (line movement, injuries, ATS records, sharp money, etc). The score maps linearly to a cover percentage: <strong>cover% = 50 + (score / max_score) * 45</strong>. Sport-specific weights were calibrated through historical backtesting.</p>';
+
+        html += '<h2>Walk-Forward Validation</h2>';
+        html += '<p>Walk-forward validation splits historical data chronologically &mdash; train on older games, test on newer ones. This prevents look-ahead bias that inflates in-sample numbers.</p>';
+        html += '<p><strong>Out-of-sample numbers are the honest measure.</strong> In-sample accuracy is always optimistic because the model was tuned on that data. A typical accuracy drop from in-sample to out-of-sample is 5-15% for sports betting models.</p>';
+
+        html += '<h2>Closing Line Value (CLV)</h2>';
+        html += '<p>CLV measures whether you got a better number than the market close. Positive CLV indicates a genuine edge &mdash; the market moved toward your position after you would have bet.</p>';
+        html += '<ul>';
+        html += '<li>Long-term profitability correlates more with CLV than raw win rate</li>';
+        html += '<li>A model with +0.5 CLV that wins 52% is better than one with -0.3 CLV that wins 55%</li>';
+        html += '<li>Negative CLV means the market is consistently smarter than the model</li>';
+        html += '</ul>';
+
+        html += '<h2>Confidence Intervals</h2>';
+        html += '<p>All accuracy metrics use <strong>Wilson score intervals</strong> (95% CI). Unlike simple percentages, CIs communicate how reliable a number is given the sample size.</p>';
+        html += '<p>Example: "74% accuracy on 19 bets" has a CI of [56%-92%]. The true accuracy could easily be near coin-flip levels. CIs widen dramatically below ~50 samples.</p>';
+
+        html += '<h2>Current Limitations</h2>';
+        html += '<ul>';
+        html += '<li><strong>Non-replayable factors:</strong> Trell Rule (+5), public betting signals (+3/+5), feedback loop, and NFL weather cannot be replayed in backtests. Their actual contribution is unknown.</li>';
+        html += '<li><strong>Small samples:</strong> NFL (105 games) and CFB (51 games) lack sufficient data for reliable weight tuning. Their overrides fall back to universal defaults.</li>';
+        html += '<li><strong>Estimated prop lines:</strong> When The-Odds-API lines are unavailable, PRISM uses estimated lines (season avg * discount), which are less accurate.</li>';
+        html += '<li><strong>Hand-tuned multipliers:</strong> PRISM matchup/pace/rest multipliers are set by domain knowledge, not data-derived.</li>';
+        html += '</ul>';
+
+        return html;
     }
 
     function buildBreakdownRow(label, stats) {
         var rateClass = stats.win_rate >= 55 ? "stat-green" : stats.win_rate >= 45 ? "stat-yellow" : "stat-red";
         var decided = stats.wins + stats.losses;
+        var ciHtml = stats.win_rate_ci ? formatCi(stats.win_rate_ci) : '';
         var html = '<div class="dash-breakdown-row">';
         html += '<span class="dash-breakdown-label">' + label + '</span>';
         html += '<span class="dash-breakdown-record">' + stats.wins + '-' + stats.losses;
         if (stats.pushes > 0) html += '-' + stats.pushes;
         html += '</span>';
-        html += '<span class="dash-breakdown-rate ' + rateClass + '">' + stats.win_rate + '%</span>';
+        html += '<span class="dash-breakdown-rate ' + rateClass + '">' + stats.win_rate + '%' + ciHtml + '</span>';
         html += '</div>';
         return html;
     }

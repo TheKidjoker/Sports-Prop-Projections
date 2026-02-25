@@ -107,6 +107,14 @@ MIN_SAMPLES = {
     "overall": 30,     # overall accuracy
 }
 
+DATA_CONFIDENCE_LEVELS = {
+    "cbb": {"level": "high",     "games": 1977, "label": "High",     "reason": "Sufficient for most factor validation"},
+    "nba": {"level": "medium",   "games": 607,  "label": "Medium",   "reason": "Adequate for core factors, marginal for sub-splits"},
+    "nhl": {"level": "medium",   "games": 529,  "label": "Medium",   "reason": "Adequate for core factors"},
+    "nfl": {"level": "low",      "games": 105,  "label": "Low",      "reason": "Insufficient for reliable weight tuning"},
+    "cfb": {"level": "very_low", "games": 51,   "label": "Very Low", "reason": "All weights essentially unvalidated"},
+}
+
 
 def wilson_interval(wins, total, z=1.96):
     """

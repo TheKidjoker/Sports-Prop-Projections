@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260224c">
+    <link rel="stylesheet" href="/static/style.css?v=20260225a">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -197,6 +197,7 @@
 
             <div id="dashboard-stats" class="dashboard-stats"></div>
             <div id="dashboard-clv" class="dashboard-clv"></div>
+            <div id="dashboard-model-health" class="dashboard-model-health"></div>
             <div id="dashboard-breakdowns" class="dashboard-breakdowns"></div>
             <div id="dashboard-recent" class="dashboard-recent"></div>
         </section>
@@ -359,8 +360,15 @@
         <div class="ticker-track" id="ticker-track"></div>
     </div>
 
+    <div id="methodology-modal" class="methodology-modal hidden">
+        <div class="methodology-content">
+            <button class="methodology-close" id="methodology-close">&times;</button>
+            <div id="methodology-body"></div>
+        </div>
+    </div>
+
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260224c"></script>
+    <script src="/static/app.js?v=20260225a"></script>
 </body>
 </html>

@@ -12,7 +12,7 @@ from api_client import (
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
-from constants import ML_THRESHOLDS
+from constants import ML_THRESHOLDS, DATA_CONFIDENCE_LEVELS, wilson_interval
 from game_scanner import (
     scan_all_games, get_game_props, get_top_props,
     classify_game_slot, _build_action_string,
@@ -596,6 +596,95 @@ def api_close_lines():
             sport = None
         result = tracker.fetch_closing_lines(sport)
         return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/model-health", methods=["GET"])
+@require_auth
+def api_model_health():
+    """Aggregated model health across all sports."""
+    if not HAS_TEST_MODEL:
+        return jsonify({"success": True, "sports": {}, "message": "Test model module not available"})
+    try:
+        sports_data = {}
+        for sport in ("nba", "nhl", "nfl", "cfb", "cbb"):
+            rules_run = tm_db.get_latest_model_run(sport, "rules_backtest")
+            wf_run = tm_db.get_latest_model_run(sport, "walkforward")
+            conf = DATA_CONFIDENCE_LEVELS.get(sport, {})
+
+            entry = {
+                "data_confidence": conf,
+                "last_backtest_date": None,
+                "last_walkforward_date": None,
+                "in_sample": None,
+                "out_of_sample": None,
+                "overfit_gap": None,
+                "calibration_ece": None,
+                "clv_avg": None,
+            }
+
+            if rules_run:
+                entry["last_backtest_date"] = rules_run.get("run_date")
+                acc = rules_run.get("accuracy")
+                roi = rules_run.get("roi")
+                clv = rules_run.get("clv_avg")
+                entry["clv_avg"] = clv
+
+                in_sample = {"accuracy": acc, "roi": roi}
+
+                # Extract strong play stats from threshold_analysis
+                ta = rules_run.get("threshold_analysis") or {}
+                strong_data = ta.get("STRONG PLAY") or ta.get("strong") or {}
+                strong_n = strong_data.get("total", 0) or strong_data.get("n", 0)
+                strong_wins = strong_data.get("wins", 0)
+                strong_acc = strong_data.get("win_rate") or strong_data.get("accuracy")
+                if strong_n > 0:
+                    if strong_wins == 0 and strong_acc:
+                        strong_wins = round(strong_acc / 100 * strong_n)
+                    ci = wilson_interval(strong_wins, strong_n)
+                    in_sample["strong_accuracy"] = strong_acc
+                    in_sample["strong_n"] = strong_n
+                    in_sample["strong_ci"] = list(ci)
+
+                # Calibration ECE from model_params
+                mp = rules_run.get("model_params") or {}
+                cal = mp.get("calibration") or {}
+                if cal.get("ece") is not None:
+                    entry["calibration_ece"] = cal["ece"]
+
+                entry["in_sample"] = in_sample
+
+            if wf_run:
+                entry["last_walkforward_date"] = wf_run.get("run_date")
+                oos_acc = wf_run.get("accuracy")
+                oos_roi = wf_run.get("roi")
+
+                out_of_sample = {"accuracy": oos_acc, "roi": oos_roi}
+
+                # Extract CIs from walkforward model_params
+                wf_params = wf_run.get("model_params") or {}
+                cis = wf_params.get("confidence_intervals") or {}
+                if cis.get("strong_accuracy_ci"):
+                    out_of_sample["strong_ci"] = cis["strong_accuracy_ci"]
+                strong_oos = cis.get("strong_accuracy")
+                if strong_oos is not None:
+                    out_of_sample["strong_accuracy"] = strong_oos
+                strong_oos_n = cis.get("strong_n")
+                if strong_oos_n is not None:
+                    out_of_sample["strong_n"] = strong_oos_n
+
+                entry["out_of_sample"] = out_of_sample
+
+                # Compute overfit gap
+                if entry["in_sample"] and oos_acc is not None:
+                    is_acc = entry["in_sample"].get("accuracy")
+                    if is_acc is not None:
+                        entry["overfit_gap"] = round(is_acc - oos_acc, 1)
+
+            sports_data[sport] = entry
+
+        return jsonify({"success": True, "sports": sports_data})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

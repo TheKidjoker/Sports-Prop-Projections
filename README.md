@@ -449,16 +449,41 @@ The Trell Rule only fires when: the player is a star, status is "Out", the injur
 
 ## Backtested Performance
 
-Results from replaying the scoring system against historical outcomes:
+**Important:** In-sample numbers are optimistic — they were derived from the same data used to tune the model. Out-of-sample (walk-forward) results are the honest measure. All accuracy figures include 95% Wilson confidence intervals.
 
-| Sport | Games | STRONG PLAY | LEAN | Overall |
-|-------|-------|-------------|------|---------|
-| NBA | 607 | 58 bets @ 74.1%, +41.5% ROI | 128 bets @ 53.9% | 60.6% acc, +15.6% ROI |
-| NHL | 529 | 19 bets @ 79.0%, +45.5% ROI | 186 bets @ 66.1% | 65.9% acc |
-| CBB | 1,977 | score>=13 | score>=10 | 65.8% acc, +25.6% ROI |
-| NFL | 105 | score>=20 | score>=10 | 56.8% acc, +19.3% ROI |
+### Data Confidence Levels
 
-Line movement is consistently the strongest individual signal across all sports (+9-17% lift when it fires).
+| Sport | Games | Confidence | Notes |
+|-------|-------|------------|-------|
+| CBB | 1,977 | **High** | Sufficient for most factor validation |
+| NBA | 607 | **Medium** | Adequate for core factors, marginal for sub-splits |
+| NHL | 529 | **Medium** | Adequate for core factors |
+| NFL | 105 | **Low** | Insufficient for reliable weight tuning |
+| CFB | 51 | **Very Low** | All weights essentially unvalidated |
+
+### In-Sample Results (Rules Replay)
+
+| Sport | STRONG PLAY | LEAN | Overall |
+|-------|-------------|------|---------|
+| NBA | 74.1% [62.0%-83.6%] (n=58) | 53.9% [45.2%-62.4%] (n=128) | 60.6%, +15.6% ROI |
+| NHL | 79.0% [56.7%-91.5%] (n=19) | 66.1% [59.1%-72.4%] (n=186) | 65.9% |
+| CBB | -- | -- | 65.8%, +25.6% ROI |
+| NFL | -- | -- | 56.8%, +19.3% ROI |
+
+*These numbers were derived from the same data used to tune the model — they overstate real-world performance.*
+
+### Out-of-Sample Results (Walk-Forward Validation)
+
+To be populated after walk-forward runs. Run walk-forward validation from the Test Model section to generate honest out-of-sample numbers.
+
+*Out-of-sample accuracy is typically 5-15% lower than in-sample for sports betting models.*
+
+### Known Limitations
+
+- **NFL and CFB weights are unvalidated**: With only 105 and 51 games respectively, sport-specific overrides (NFL lean flip, spread buckets) lack statistical significance. NFL overrides fall back to universal defaults via the overfitting protection framework.
+- **Non-replayable factors inflate in-sample numbers**: Trell Rule (+5), public betting (+3/+5), feedback loop, and NFL weather cannot be replayed in backtests. Their actual contribution is unknown.
+- **Line movement is the only consistently validated signal**: Across all sports, line movement shows +9-17% lift when it fires. Most other factors have marginal or unvalidated contributions.
+- **Small-sample strong play tiers**: NBA STRONG PLAY (n=58) and NHL STRONG PLAY (n=19) have wide confidence intervals. The true accuracy could be substantially lower.
 
 ---
 
