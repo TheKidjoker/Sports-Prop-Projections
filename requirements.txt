@@ -3,6 +3,7 @@ requests
 gunicorn
 supabase
 scikit-learn
+scipy
 vaderSentiment
 numpy
 PyJWT[crypto]
