@@ -25,6 +25,7 @@ from rank_analysis import (
     _get_rank_tier, _detect_rank_scam, _detect_spread_discrepancy,
 )
 from constants import get_max_score, get_recommendation, ML_THRESHOLDS
+from calibration import get_calibrated_cover_pct
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
@@ -260,7 +261,8 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
                        rank_scam, spread_discrepancy,
                        nfl_weather, nfl_trend, nfl_overunder,
                        b2b_result, ats_result, public_betting_result,
-                       h2h_result, vegas_trap_result):
+                       h2h_result, vegas_trap_result,
+                       cover_pct_calibrated=None):
     """Assemble the final result dict for a game analysis."""
     home_team = game["home_team"]
     away_team = game["away_team"]
@@ -274,6 +276,7 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         "date_label": game.get("date_label", ""),
         "confirmation_score": score,
         "cover_pct": cover_pct,
+        "cover_pct_calibrated": cover_pct_calibrated,
         "lean_team": lean_team,
         "action": action,
         "recommendation": recommendation,
@@ -587,6 +590,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     )
     max_score = get_max_score(sport)
     cover_pct = round(50 + (score / max_score) * 45, 1)
+    cover_pct_cal = get_calibrated_cover_pct(score, sport)
 
     recommendation = get_recommendation(score, slot_type, sport)
 
@@ -599,6 +603,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         nfl_weather, nfl_trend, nfl_overunder,
         b2b_result, ats_result, public_betting_result,
         h2h_result, vegas_trap_result,
+        cover_pct_calibrated=cover_pct_cal,
     )
 
 

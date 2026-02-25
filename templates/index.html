@@ -241,6 +241,7 @@
                 <button type="button" class="tm-tab active" data-tm-tab="scan">Today's Model</button>
                 <button type="button" class="tm-tab" data-tm-tab="backtest">Backtest</button>
                 <button type="button" class="tm-tab" data-tm-tab="rules">Rules Replay</button>
+                <button type="button" class="tm-tab" data-tm-tab="calibration">Calibration</button>
                 <button type="button" class="tm-tab" data-tm-tab="collect">Data Collection</button>
                 <button type="button" class="tm-tab" data-tm-tab="metrics">Metrics</button>
             </div>
@@ -265,6 +266,12 @@
                 <button type="button" class="tm-action-btn" id="tm-rules-btn">Run Rules Replay</button>
                 <div id="tm-rules-progress"></div>
                 <div id="tm-rules-results"></div>
+            </div>
+
+            <div id="tm-panel-calibration" class="tm-panel hidden">
+                <p class="tm-panel-desc">Measures how well the model's claimed cover percentages match actual outcomes. Lower ECE = better calibrated.</p>
+                <button type="button" class="tm-action-btn" id="tm-calibration-btn">Load Calibration</button>
+                <div id="tm-calibration-results"></div>
             </div>
 
             <div id="tm-panel-collect" class="tm-panel hidden">

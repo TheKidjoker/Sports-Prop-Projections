@@ -876,6 +876,12 @@ button[type="submit"]:disabled {
     font-weight: 600;
     font-size: 0.75rem;
 }
+.scan-pct-raw {
+    font-size: 0.6rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 1px;
+}
 
 .pct-high {
     background: rgba(76, 175, 80, 0.1);

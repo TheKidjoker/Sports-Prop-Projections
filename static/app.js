@@ -607,7 +607,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var filtered = games.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
+        var filtered = games.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
         var nonSkip = games.filter(function (g) { return !g.skip; });
 
         var sportLabel = currentSport.toUpperCase();
@@ -620,7 +620,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 var aDay = a.date_label === "Today" ? 0 : 1;
                 var bDay = b.date_label === "Today" ? 0 : 1;
                 if (aDay !== bDay) return aDay - bDay;
-                return b.cover_pct - a.cover_pct;
+                return getEffectivePct(b) - getEffectivePct(a);
             }).slice(0, 5);
 
             if (alternatives.length === 0) {
@@ -670,12 +670,13 @@ document.addEventListener("DOMContentLoaded", function () {
         // "Other Games to Watch" — below threshold but above 58%, not already shown
         var filteredIds = filtered.map(function (g) { return g.home_team + g.away_team; });
         var nearMisses = nonSkip.filter(function (g) {
-            return g.cover_pct >= COVER_PCT.nearMiss && g.cover_pct < COVER_PCT.actionable && filteredIds.indexOf(g.home_team + g.away_team) === -1;
+            var ep = getEffectivePct(g);
+            return ep >= COVER_PCT.nearMiss && ep < COVER_PCT.actionable && filteredIds.indexOf(g.home_team + g.away_team) === -1;
         }).sort(function (a, b) {
             var aDay = a.date_label === "Today" ? 0 : 1;
             var bDay = b.date_label === "Today" ? 0 : 1;
             if (aDay !== bDay) return aDay - bDay;
-            return b.cover_pct - a.cover_pct;
+            return getEffectivePct(b) - getEffectivePct(a);
         }).slice(0, 5);
 
         if (nearMisses.length > 0) {
@@ -707,7 +708,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (aDay !== bDay) return aDay - bDay;
                 return b.confirmation_score - a.confirmation_score;
             });
-            var filtered = games.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
+            var filtered = games.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
 
             html += '<div class="all-sport-section">';
             html += '<h3 class="all-sport-header">' + sportNames[sport] + '</h3>';
@@ -841,8 +842,12 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    function getEffectivePct(g) {
+        return g.cover_pct_calibrated != null ? g.cover_pct_calibrated : g.cover_pct;
+    }
+
     function buildScanCard(g, sport, isAlt) {
-        var pct = g.cover_pct;
+        var pct = getEffectivePct(g);
         var pctClass = "pct-mid";
         if (pct >= COVER_PCT.parlaySafety) pctClass = "pct-high";
         if (isAlt) pctClass = "pct-low";
@@ -856,7 +861,11 @@ document.addEventListener("DOMContentLoaded", function () {
         var homeLabel = g.home_rank ? '<span class="scan-rank">#' + g.home_rank + '</span> ' + g.home_team : g.home_team;
         html += '<div class="scan-card-header">';
         html += '<div class="scan-matchup">' + awayLabel + ' vs ' + homeLabel + '</div>';
-        html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
+        html += '<div class="scan-pct ' + pctClass + '">' + pct + '%';
+        if (g.cover_pct_calibrated != null) {
+            html += '<div class="scan-pct-raw">raw: ' + g.cover_pct + '%</div>';
+        }
+        html += '</div>';
         html += '</div>';
 
         html += buildCardMetadata(g, sport);
@@ -1059,7 +1068,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Rebuild parlays section
         var parlaysEl = document.querySelector(".parlays-section");
         if (parlaysEl) {
-            var filtered = gamesWithProps.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
+            var filtered = gamesWithProps.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
             if (filtered.length < 2) filtered = gamesWithProps;
             var newParlayHtml = buildParlaySection(filtered);
             if (newParlayHtml) {
@@ -1122,8 +1131,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function buildParlaySection(games) {
         if (games.length < 2) return "";
 
-        // Spread legs only for parlays
-        var spreadLegs = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
+        // Spread legs only for parlays (use calibrated pct when available)
+        var spreadLegs = games.slice().sort(function (a, b) { return getEffectivePct(b) - getEffectivePct(a); });
 
         // Collect all props across games (today only) to find Best Prop of the Day
         var allProps = [];
@@ -1177,7 +1186,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         // Safety Parlay: 2 legs, 80%+ each (spreads only)
-        var safetyLegs = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlaySafety; }).slice(0, 2);
+        var safetyLegs = spreadLegs.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.parlaySafety; }).slice(0, 2);
         if (safetyLegs.length >= 2) {
             var safetyOdds = calcParlayOdds(safetyLegs);
             var safetyProb = calcCombinedProb(safetyLegs);
@@ -1185,7 +1194,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         // Normal Parlay: 4-6 legs, 67.5%+ each (spreads only)
-        var normalPool = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlayNormal; });
+        var normalPool = spreadLegs.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.parlayNormal; });
         var normalLegs = normalPool.slice(0, Math.min(6, Math.max(4, normalPool.length)));
         if (normalLegs.length >= 4) {
             var normalOdds = calcParlayOdds(normalLegs);
@@ -1198,7 +1207,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         // YOLO Parlay: spread legs 60%+ (spreads only)
-        var yoloSpreads = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlayYolo; });
+        var yoloSpreads = spreadLegs.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.parlayYolo; });
         if (yoloSpreads.length >= 3) {
             var yoloLegs = yoloSpreads.slice(0, Math.min(10, yoloSpreads.length));
             var yoloOdds = calcParlayOdds(yoloLegs);
@@ -1220,7 +1229,8 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="parlay-legs">';
 
         legs.forEach(function (g) {
-            var legOdds = pctToAmericanOdds(g.cover_pct);
+            var effPct = getEffectivePct(g);
+            var legOdds = pctToAmericanOdds(effPct);
             var pickLabel = g.action || (g.lean_team ? g.lean_team : g.home_team);
             var legClass = g.is_prop ? "parlay-leg parlay-leg-prop" : "parlay-leg";
             html += '<div class="' + legClass + '">';
@@ -1229,7 +1239,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             html += '<span class="parlay-leg-pick">' + pickLabel + '</span>';
             html += '<span class="parlay-leg-odds">' + legOdds + '</span>';
-            html += '<span class="parlay-leg-pct">' + g.cover_pct + '%</span>';
+            html += '<span class="parlay-leg-pct">' + effPct + '%</span>';
             html += '</div>';
         });
 
@@ -1253,7 +1263,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Multiply decimal odds, then convert to American
         var decimalProduct = 1;
         legs.forEach(function (g) {
-            var prob = g.cover_pct / 100;
+            var prob = getEffectivePct(g) / 100;
             var decOdds = 1 / prob;
             decimalProduct *= decOdds;
         });
@@ -1269,7 +1279,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function calcCombinedProb(legs) {
         var prob = 1;
         legs.forEach(function (g) {
-            prob *= (g.cover_pct / 100);
+            prob *= (getEffectivePct(g) / 100);
         });
         return (prob * 100).toFixed(1);
     }
@@ -1358,13 +1368,14 @@ document.addEventListener("DOMContentLoaded", function () {
             var games = allSports[sport] || [];
             // Filter: >= 72% cover, not skip
             var eligible = games.filter(function (g) {
-                return g.cover_pct >= COVER_PCT.lotto && !g.skip;
+                return getEffectivePct(g) >= COVER_PCT.lotto && !g.skip;
             });
             if (eligible.length === 0) return;
 
-            // Sort by cover_pct desc, tiebreak by confirmation_score desc
+            // Sort by effective pct desc, tiebreak by confirmation_score desc
             eligible.sort(function (a, b) {
-                if (b.cover_pct !== a.cover_pct) return b.cover_pct - a.cover_pct;
+                var pa = getEffectivePct(a), pb = getEffectivePct(b);
+                if (pb !== pa) return pb - pa;
                 return (b.confirmation_score || 0) - (a.confirmation_score || 0);
             });
 
@@ -1399,13 +1410,14 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="parlay-legs">';
 
         picks.forEach(function (g) {
-            var legOdds = pctToAmericanOdds(g.cover_pct);
+            var effPct = getEffectivePct(g);
+            var legOdds = pctToAmericanOdds(effPct);
             var pickLabel = g.action || (g.lean_team ? g.lean_team : g.home_team);
             html += '<div class="parlay-leg">';
             html += '<span class="lotto-sport-badge lotto-badge-' + g._sport + '">' + sportNames[g._sport] + '</span>';
             html += '<span class="parlay-leg-pick">' + pickLabel + '</span>';
             html += '<span class="parlay-leg-odds">' + legOdds + '</span>';
-            html += '<span class="parlay-leg-pct">' + g.cover_pct + '%</span>';
+            html += '<span class="parlay-leg-pct">' + effPct + '%</span>';
             html += '</div>';
         });
 
@@ -1705,6 +1717,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("tm-collect-progress").innerHTML = "";
             document.getElementById("tm-collect-status").innerHTML = "";
             document.getElementById("tm-metrics-content").innerHTML = "";
+            document.getElementById("tm-calibration-results").innerHTML = "";
             // Stop any active poll timers
             clearAllPolls();
             // Re-enable buttons
@@ -1720,6 +1733,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (target === "metrics") tmLoadMetrics();
             if (target === "rules") tmLoadRulesMetrics();
             if (target === "collect") tmPollCollect();
+            if (target === "calibration") tmLoadCalibration();
         });
     });
 
@@ -1767,6 +1781,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
             if (target === "metrics") tmLoadMetrics();
             if (target === "rules") tmLoadRulesMetrics();
+            if (target === "calibration") tmLoadCalibration();
         });
     });
 
@@ -2111,6 +2126,88 @@ document.addEventListener("DOMContentLoaded", function () {
                 var accClass = r.accuracy >= 55 ? 'style="color:var(--accent-green)"' : r.accuracy < 50 ? 'style="color:var(--accent-red)"' : '';
                 html += '<tr ' + accClass + '><td>' + key + '</td><td>' + r.total + '</td><td>' + r.correct + '</td><td>' + r.accuracy + '%</td></tr>';
             });
+            html += '</tbody></table></div>';
+        }
+
+        return html;
+    }
+
+    // ── Calibration ──
+    document.getElementById("tm-calibration-btn").addEventListener("click", function () {
+        tmLoadCalibration();
+    });
+
+    function tmLoadCalibration() {
+        var resEl = document.getElementById("tm-calibration-results");
+        resEl.innerHTML = '<div class="tm-progress-text">Loading calibration data...</div>';
+        authFetch("/api/tm/calibration?sport=" + tmSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) {
+                    resEl.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Failed') + '</div>';
+                    return;
+                }
+                if (!data.calibration) {
+                    resEl.innerHTML = '<div class="tm-progress-text">No calibration data yet. Run a Rules Replay first to generate calibration analysis.</div>';
+                    return;
+                }
+                resEl.innerHTML = tmRenderCalibration(data.calibration);
+            })
+            .catch(function () {
+                resEl.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Failed to load calibration data.</div>';
+            });
+    }
+
+    function tmRenderCalibration(cal) {
+        if (!cal) return '';
+        var html = '';
+
+        // Stat cards
+        var eceClass = "stat-green";
+        if (cal.ece > 10) eceClass = "stat-red";
+        else if (cal.ece > 5) eceClass = "stat-yellow";
+
+        var brierClass = cal.brier_score <= 0.2 ? "stat-green" : cal.brier_score <= 0.25 ? "stat-yellow" : "stat-red";
+
+        html += '<div class="tm-stat-cards">';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Brier Score</div><div class="tm-stat-value ' + brierClass + '">' + (cal.brier_score != null ? cal.brier_score : 'N/A') + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">ECE</div><div class="tm-stat-value ' + eceClass + '">' + (cal.ece != null ? cal.ece + '%' : 'N/A') + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Sample Size</div><div class="tm-stat-value">' + (cal.sample_size || 0) + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Adjustment Needed</div><div class="tm-stat-value ' + (cal.adjustment_needed ? 'stat-red' : 'stat-green') + '">' + (cal.adjustment_needed ? 'YES' : 'NO') + '</div></div>';
+        html += '</div>';
+
+        // Calibration bins table
+        if (cal.bins && cal.bins.length > 0) {
+            html += '<div class="tm-feat-section"><h3 class="tm-feat-title">Calibration Bins</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Range</th><th>Count</th><th>Avg Predicted</th><th>Actual Rate</th><th>Gap</th></tr></thead><tbody>';
+            cal.bins.forEach(function (b) {
+                var gapClass = '';
+                var absGap = Math.abs(b.gap);
+                if (absGap > 10) gapClass = 'style="color:var(--accent-red)"';
+                else if (absGap > 5) gapClass = 'style="color:var(--accent-yellow)"';
+                else if (b.count > 0) gapClass = 'style="color:var(--accent-green)"';
+                var gapStr = b.gap > 0 ? '+' + b.gap : b.gap;
+                html += '<tr><td>' + b.range + '</td><td>' + b.count + '</td>';
+                html += '<td>' + b.avg_predicted + '%</td>';
+                html += '<td>' + b.actual_rate + '%</td>';
+                html += '<td ' + gapClass + '>' + (b.count > 0 ? gapStr + '%' : '-') + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Isotonic breakpoints table
+        if (cal.isotonic_breakpoints && cal.isotonic_breakpoints.x) {
+            var bp = cal.isotonic_breakpoints;
+            html += '<div class="tm-feat-section"><h3 class="tm-feat-title">Isotonic Correction Curve</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Raw %</th><th>Calibrated %</th><th>Adjustment</th></tr></thead><tbody>';
+            for (var i = 0; i < bp.x.length; i++) {
+                var adj = (bp.y[i] - bp.x[i]).toFixed(2);
+                var adjStr = adj > 0 ? '+' + adj : adj;
+                var adjClass = '';
+                if (Math.abs(adj) > 5) adjClass = 'style="color:var(--accent-yellow)"';
+                if (Math.abs(adj) > 10) adjClass = 'style="color:var(--accent-red)"';
+                html += '<tr><td>' + bp.x[i] + '%</td><td>' + bp.y[i] + '%</td><td ' + adjClass + '>' + adjStr + '%</td></tr>';
+            }
             html += '</tbody></table></div>';
         }
 

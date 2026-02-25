@@ -28,6 +28,7 @@ try:
     from test_model.scanner import scan_today_with_model
     from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
     from test_model.walkforward import start_walkforward_thread, get_walkforward_status
+    from calibration import load_calibration
     HAS_TEST_MODEL = True
 except Exception as _tm_err:
     import traceback
@@ -39,6 +40,17 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 tracker.init_db()
 if HAS_TEST_MODEL:
     tm_db.init_tm_db()
+    # Load calibration models from latest backtest runs
+    for _cal_sport in ("nba", "nhl", "nfl", "cfb", "cbb"):
+        try:
+            _cal_run = tm_db.get_latest_model_run(_cal_sport, "rules_backtest")
+            if _cal_run and _cal_run.get("model_params"):
+                _cal_data = _cal_run["model_params"].get("calibration")
+                if _cal_data:
+                    load_calibration(_cal_sport, _cal_data)
+                    print(f"[calibration] Loaded model for {_cal_sport}", flush=True)
+        except Exception:
+            pass
 scan_cache.init()
 
 # ─── Supabase Auth ──────────────────────────────────────────────────────
@@ -750,6 +762,12 @@ def api_tm_rules_backtest_status():
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
         progress = get_rules_backtest_status(sport)
+        # Hot-reload calibration when backtest completes
+        if progress.get("status") == "complete":
+            cal_metrics = progress.get("metrics", {})
+            cal_data = cal_metrics.get("calibration")
+            if cal_data:
+                load_calibration(sport, cal_data)
         return jsonify({"success": True, "progress": progress})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -773,6 +791,26 @@ def api_tm_rules_backtest_metrics():
             "rules_metrics": rules_metrics,
             "ml_metrics": ml_metrics,
         })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/calibration", methods=["GET"])
+@require_auth
+def api_tm_calibration():
+    """Get calibration analysis for a sport from latest rules backtest."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        run = tm_db.get_latest_model_run(sport, "rules_backtest")
+        if not run or not run.get("model_params"):
+            return jsonify({"success": True, "calibration": None})
+        cal = run["model_params"].get("calibration")
+        return jsonify({"success": True, "calibration": cal})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

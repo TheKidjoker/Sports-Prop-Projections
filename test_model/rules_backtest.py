@@ -26,6 +26,7 @@ from analysis_factors import (
     _determine_lean, _calculate_score, _analyze_home_away_split,
     H2H_REVENGE_THRESHOLDS,
 )
+from calibration import compute_calibration
 from test_model import db as tm_db
 from test_model.date_utils import parse_iso_date, parse_game_dt
 
@@ -133,6 +134,8 @@ def run_rules_backtest(sport):
     # Only keep last 200 predictions in memory (rest are counted in trackers)
     predictions = []
     _MAX_PREDICTIONS_IN_MEMORY = 200
+    # Lightweight pairs for calibration (never truncated — ~8 bytes each)
+    calibration_pairs = []
     factor_tracker = defaultdict(lambda: {"fired": 0, "correct_when_fired": 0,
                                            "correct_when_not_fired": 0,
                                            "not_fired": 0})
@@ -415,6 +418,9 @@ def run_rules_backtest(sport):
         if correct:
             day_tracker[day_of_week]["correct"] += 1
 
+        # Lightweight calibration pair (never truncated)
+        calibration_pairs.append({"score": score, "correct": correct})
+
         predictions.append({
             "date": game_date_str[:10],
             "home_team": home,
@@ -443,6 +449,10 @@ def run_rules_backtest(sport):
     metrics = _compute_rules_metrics(scored_predictions, factor_tracker,
                                       slot_tracker, rec_tracker, day_tracker)
 
+    # ── Calibration analysis (uses ALL pairs, not truncated) ──
+    calibration = compute_calibration(calibration_pairs, sport)
+    metrics["calibration"] = calibration
+
     # Save to model_runs table
     tm_db.save_model_run({
         "sport": sport,
@@ -457,6 +467,7 @@ def run_rules_backtest(sport):
             "missing_factors": MISSING_FACTORS,
             "min_warmup": MIN_WARMUP_GAMES,
             "sport": sport,
+            "calibration": calibration,
         },
         "threshold_analysis": metrics.get("threshold_analysis", {}),
         "predictions": scored_predictions[-200:],
