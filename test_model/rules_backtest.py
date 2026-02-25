@@ -21,11 +21,13 @@ from collections import defaultdict
 from time_slots import classify_slot
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from rank_analysis import _detect_rank_scam, _detect_spread_discrepancy
+from constants import get_recommendation, wilson_interval, metric_with_ci, MIN_SAMPLES
 from analysis_factors import (
     _determine_lean, _calculate_score, _analyze_home_away_split,
     H2H_REVENGE_THRESHOLDS,
 )
 from test_model import db as tm_db
+from test_model.date_utils import parse_iso_date, parse_game_dt
 
 MIN_WARMUP_GAMES = 10  # Need some team_state history before scoring
 
@@ -46,25 +48,9 @@ def get_rules_backtest_status(sport):
         return dict(_rules_progress.get(sport, {}))
 
 
-def _tz_offset_hours(sport):
-    """Classification timezone offset from UTC."""
-    if sport in ("cfb", "cbb"):
-        return 5   # EST
-    elif sport == "nhl":
-        return 6   # CST
-    else:
-        return 8   # PST (NBA, NFL)
-
-
 def _parse_game_dt(game_date_str, sport):
     """Parse game_date ISO string to timezone-adjusted datetime for classification."""
-    try:
-        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-        offset = _tz_offset_hours(sport)
-        local_dt = game_dt - timedelta(hours=offset)
-        return local_dt
-    except (ValueError, TypeError, AttributeError):
-        return None
+    return parse_game_dt(game_date_str, sport)
 
 
 def _group_games_by_date(games):
@@ -152,6 +138,7 @@ def run_rules_backtest(sport):
                                            "not_fired": 0})
     slot_tracker = defaultdict(lambda: {"total": 0, "correct": 0})
     rec_tracker = defaultdict(lambda: {"total": 0, "correct": 0})
+    day_tracker = defaultdict(lambda: {"total": 0, "correct": 0})
     processed = 0
 
     for game in eligible:
@@ -348,7 +335,7 @@ def run_rules_backtest(sport):
         ats_penalty = False
         if lean_team:
             lean_st_for_ats = home_st if lean_team == home else away_st
-            if lean_st_for_ats["ats_total"] >= 3:
+            if lean_st_for_ats["ats_total"] >= MIN_SAMPLES["ats"]:
                 ats_rate = lean_st_for_ats["ats_covers"] / lean_st_for_ats["ats_total"] * 100
                 if ats_rate > 60:
                     ats_bonus = True
@@ -382,55 +369,7 @@ def run_rules_backtest(sport):
         )
 
         # ── Recommendation ──
-        # NBA backtested: lower thresholds, demote public slot picks
-        if sport == "nba":
-            if slot_type == "public":
-                # Public V5: >= 10 = 73.3% (45 bets), score 8-9 is dead zone
-                if score >= 10:
-                    recommendation = "STRONG PLAY"
-                elif score >= 7:
-                    recommendation = "LEAN"
-                else:
-                    recommendation = "MONITOR"
-            else:
-                # Vegas V5: >= 10 = 81.8%, 7-9 = 64.3% (28 bets), 5-6 = 53.8%
-                if score >= 10:
-                    recommendation = "STRONG PLAY"
-                elif score >= 7:
-                    recommendation = "CONFIDENT"
-                elif score >= 5:
-                    recommendation = "LEAN"
-                else:
-                    recommendation = "MONITOR"
-        elif sport == "cbb":
-            # CBB V2: lower thresholds based on score bucket accuracy
-            if score >= 13:
-                recommendation = "STRONG PLAY"
-            elif score >= 10:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
-        elif sport == "nhl":
-            # NHL V1: low scores hit best, public slot capped at LEAN
-            if slot_type == "public":
-                if score >= 5:
-                    recommendation = "LEAN"
-                else:
-                    recommendation = "MONITOR"
-            else:
-                if score >= 8:
-                    recommendation = "STRONG PLAY"
-                elif score >= 3:
-                    recommendation = "LEAN"
-                else:
-                    recommendation = "MONITOR"
-        else:
-            if score >= 15:
-                recommendation = "STRONG PLAY"
-            elif score >= 10:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
+        recommendation = get_recommendation(score, slot_type, sport)
 
         # ── Evaluate correctness ──
         # lean_team covers = correct prediction
@@ -471,6 +410,11 @@ def run_rules_backtest(sport):
         if correct:
             rec_tracker[recommendation]["correct"] += 1
 
+        # Track by day of week
+        day_tracker[day_of_week]["total"] += 1
+        if correct:
+            day_tracker[day_of_week]["correct"] += 1
+
         predictions.append({
             "date": game_date_str[:10],
             "home_team": home,
@@ -497,7 +441,7 @@ def run_rules_backtest(sport):
     # ── Compute metrics ──
     scored_predictions = [p for p in predictions]  # all post-warmup
     metrics = _compute_rules_metrics(scored_predictions, factor_tracker,
-                                      slot_tracker, rec_tracker)
+                                      slot_tracker, rec_tracker, day_tracker)
 
     # Save to model_runs table
     tm_db.save_model_run({
@@ -534,13 +478,11 @@ def _is_b2b_from_state(team_st, game_date_str):
     """Check if team played yesterday based on state dates."""
     if not team_st["dates"]:
         return False
-    last_date = team_st["dates"][-1]
-    try:
-        last_dt = datetime.fromisoformat(last_date.replace("Z", "+00:00"))
-        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-        return abs((game_dt - last_dt).days) <= 1
-    except (ValueError, TypeError, AttributeError):
+    last_dt = parse_iso_date(team_st["dates"][-1])
+    game_dt = parse_iso_date(game_date_str)
+    if last_dt is None or game_dt is None:
         return False
+    return abs((game_dt - last_dt).days) <= 1
 
 
 def _find_last_h2h_margin(lean_st, opp_name):
@@ -634,19 +576,24 @@ def _track_factor(tracker, factor_name, fired, correct):
             tracker[factor_name]["correct_when_not_fired"] += 1
 
 
-def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracker):
+def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracker,
+                           day_tracker=None):
     """Compute comprehensive metrics for the rules replay."""
+    if day_tracker is None:
+        day_tracker = {}
     if not predictions:
         return {
             "accuracy": 0, "roi": 0, "clv_avg": 0,
             "total_predictions": 0, "qualified_bets": 0,
             "factor_breakdown": {}, "slot_breakdown": {},
-            "rec_breakdown": {}, "threshold_analysis": {},
+            "rec_breakdown": {}, "day_breakdown": {},
+            "threshold_analysis": {},
         }
 
     total = len(predictions)
     correct = sum(1 for p in predictions if p["correct"])
     accuracy = round(correct / total * 100, 2)
+    accuracy_ci = metric_with_ci(correct, total, min_sample=MIN_SAMPLES["overall"])
 
     # ── ROI at -110 vig for different thresholds ──
     threshold_analysis = {}
@@ -666,6 +613,7 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
             "threshold": threshold,
             "bet_count": q_count,
             "accuracy": q_accuracy,
+            "accuracy_ci": metric_with_ci(q_correct if q_count > 0 else 0, q_count, min_sample=MIN_SAMPLES["tier"]),
             "roi": q_roi,
         }
 
@@ -704,6 +652,7 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
         factor_breakdown[factor_name] = {
             "fired": fired,
             "accuracy_when_fired": acc_when_fired,
+            "accuracy_when_fired_ci": metric_with_ci(data["correct_when_fired"], fired, min_sample=MIN_SAMPLES["factor"]),
             "accuracy_when_not_fired": acc_when_not_fired,
             "lift": lift,
         }
@@ -716,6 +665,7 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
                 "total": data["total"],
                 "correct": data["correct"],
                 "accuracy": round(data["correct"] / data["total"] * 100, 2),
+                "accuracy_ci": metric_with_ci(data["correct"], data["total"], min_sample=MIN_SAMPLES["slot"]),
             }
 
     # ── Recommendation breakdown ──
@@ -726,10 +676,23 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
                 "total": data["total"],
                 "correct": data["correct"],
                 "accuracy": round(data["correct"] / data["total"] * 100, 2),
+                "accuracy_ci": metric_with_ci(data["correct"], data["total"], min_sample=MIN_SAMPLES["tier"]),
+            }
+
+    # ── Day-of-week breakdown ──
+    day_breakdown = {}
+    for day_name, data in day_tracker.items():
+        if data["total"] > 0:
+            day_breakdown[day_name] = {
+                "total": data["total"],
+                "correct": data["correct"],
+                "accuracy": round(data["correct"] / data["total"] * 100, 2),
+                "accuracy_ci": metric_with_ci(data["correct"], data["total"], min_sample=MIN_SAMPLES["day"]),
             }
 
     return {
         "accuracy": accuracy,
+        "accuracy_ci": accuracy_ci,
         "roi": roi,
         "clv_avg": clv_avg,
         "total_predictions": total,
@@ -737,6 +700,7 @@ def _compute_rules_metrics(predictions, factor_tracker, slot_tracker, rec_tracke
         "factor_breakdown": factor_breakdown,
         "slot_breakdown": slot_breakdown,
         "rec_breakdown": rec_breakdown,
+        "day_breakdown": day_breakdown,
         "threshold_analysis": threshold_analysis,
     }
 

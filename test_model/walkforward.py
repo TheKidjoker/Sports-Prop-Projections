@@ -9,7 +9,6 @@ Supports two modes:
 No changes to production scoring code — all weight derivation is self-contained.
 """
 
-import math
 import threading
 from collections import defaultdict
 from copy import deepcopy
@@ -18,6 +17,7 @@ from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from rank_analysis import _detect_rank_scam, _detect_spread_discrepancy
 from analysis_factors import _analyze_home_away_split, H2H_REVENGE_THRESHOLDS
+from constants import wilson_interval, metric_with_ci, MIN_SAMPLES
 from test_model import db as tm_db
 from test_model.date_utils import parse_iso_date, parse_game_dt
 
@@ -481,13 +481,13 @@ def _build_game_context(game, home_st, away_st, games_by_date, sport):
     ats_penalty_home = False
     ats_bonus_away = False
     ats_penalty_away = False
-    if home_st["ats_total"] >= 3:
+    if home_st["ats_total"] >= MIN_SAMPLES["ats"]:
         ats_rate = home_st["ats_covers"] / home_st["ats_total"] * 100
         if ats_rate > 60:
             ats_bonus_home = True
         elif ats_rate < 40:
             ats_penalty_home = True
-    if away_st["ats_total"] >= 3:
+    if away_st["ats_total"] >= MIN_SAMPLES["ats"]:
         ats_rate = away_st["ats_covers"] / away_st["ats_total"] * 100
         if ats_rate > 60:
             ats_bonus_away = True
@@ -1135,7 +1135,7 @@ def _evaluate_fold(test_games, weights, sport, team_state, games_by_date,
                    insufficient_data=False):
     """
     Score each test game with derived weights and evaluate correctness.
-    Returns fold metrics dict. When insufficient_data=True, includes Wilson CIs.
+    Returns fold metrics dict with Wilson CIs on all accuracy metrics.
     """
     predictions = []
     total_correct = 0
@@ -1265,16 +1265,17 @@ def _evaluate_fold(test_games, weights, sport, team_state, games_by_date,
         "derived_thresholds": weights["thresholds"],
     }
 
-    if insufficient_data:
-        result["confidence_intervals"] = {
-            "accuracy_95ci": _wilson_interval(total_correct, total_scored),
-            "qualified_accuracy_95ci": (
-                _wilson_interval(q_correct, q_count) if q_count > 0 else (0, 0)
-            ),
-            "strong_accuracy_95ci": (
-                _wilson_interval(s_correct, s_count) if s_count > 0 else (0, 0)
-            ),
-        }
+    result["confidence_intervals"] = {
+        "accuracy_ci": metric_with_ci(total_correct, total_scored, min_sample=MIN_SAMPLES["overall"]),
+        "qualified_accuracy_ci": (
+            metric_with_ci(q_correct, q_count, min_sample=MIN_SAMPLES["tier"])
+            if q_count > 0 else metric_with_ci(0, 0)
+        ),
+        "strong_accuracy_ci": (
+            metric_with_ci(s_correct, s_count, min_sample=MIN_SAMPLES["tier"])
+            if s_count > 0 else metric_with_ci(0, 0)
+        ),
+    }
 
     return result
 
@@ -1347,24 +1348,22 @@ def _aggregate_folds(fold_results, insufficient_data=False):
     # Collect last predictions from final fold
     last_predictions = metrics_list[-1].get("predictions", [])[-_MAX_PREDICTIONS_IN_MEMORY:]
 
-    # Pooled Wilson CIs for small-sample sports
-    confidence_intervals = None
-    if insufficient_data:
-        pooled_scored = sum(m["total_scored"] for m in metrics_list)
-        pooled_correct = sum(m["total_correct"] for m in metrics_list)
-        pooled_q_correct = sum(m.get("qualified_correct", 0) for m in metrics_list)
-        pooled_s_correct = sum(m.get("strong_correct", 0) for m in metrics_list)
-        confidence_intervals = {
-            "accuracy_95ci": _wilson_interval(pooled_correct, pooled_scored),
-            "qualified_accuracy_95ci": (
-                _wilson_interval(pooled_q_correct, total_qualified)
-                if total_qualified > 0 else (0, 0)
-            ),
-            "strong_accuracy_95ci": (
-                _wilson_interval(pooled_s_correct, total_strong)
-                if total_strong > 0 else (0, 0)
-            ),
-        }
+    # Pooled Wilson CIs across all folds
+    pooled_scored = sum(m["total_scored"] for m in metrics_list)
+    pooled_correct = sum(m["total_correct"] for m in metrics_list)
+    pooled_q_correct = sum(m.get("qualified_correct", 0) for m in metrics_list)
+    pooled_s_correct = sum(m.get("strong_correct", 0) for m in metrics_list)
+    confidence_intervals = {
+        "accuracy_ci": metric_with_ci(pooled_correct, pooled_scored, min_sample=MIN_SAMPLES["overall"]),
+        "qualified_accuracy_ci": (
+            metric_with_ci(pooled_q_correct, total_qualified, min_sample=MIN_SAMPLES["tier"])
+            if total_qualified > 0 else metric_with_ci(0, 0)
+        ),
+        "strong_accuracy_ci": (
+            metric_with_ci(pooled_s_correct, total_strong, min_sample=MIN_SAMPLES["tier"])
+            if total_strong > 0 else metric_with_ci(0, 0)
+        ),
+    }
 
     return {
         "mean_accuracy": _mean(accuracies),
@@ -1439,26 +1438,6 @@ def _build_comparison(sport, wf_metrics):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Utility Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _wilson_interval(successes, total, z=1.96):
-    """
-    Wilson score interval for binomial proportion (95% CI by default).
-    More accurate than normal approximation for small samples.
-
-    Returns (lower, upper) as percentages (0-100 scale).
-    """
-    if total == 0:
-        return (0.0, 0.0)
-    p_hat = successes / total
-    denominator = 1 + z * z / total
-    center = (p_hat + z * z / (2 * total)) / denominator
-    margin = (z / denominator) * math.sqrt(
-        p_hat * (1 - p_hat) / total + z * z / (4 * total * total)
-    )
-    lower = max(0, center - margin)
-    upper = min(1, center + margin)
-    return (round(lower * 100, 2), round(upper * 100, 2))
-
 
 def _build_data_warning(total, insufficient_data, weight_tuning_locked):
     """Build human-readable warning message for small-sample sports."""

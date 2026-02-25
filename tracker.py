@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime, timezone
+from constants import wilson_interval, metric_with_ci, MIN_SAMPLES
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -387,6 +388,7 @@ def _aggregate_stats_supabase(where_column, where_value, sport=None):
 
     denominator = wins + losses
     win_rate = round((wins / denominator) * 100, 1) if denominator > 0 else 0
+    ci = metric_with_ci(wins, denominator, min_sample=MIN_SAMPLES["overall"])
 
     return {
         "wins": wins,
@@ -395,6 +397,7 @@ def _aggregate_stats_supabase(where_column, where_value, sport=None):
         "pending": pending,
         "total": total,
         "win_rate": win_rate,
+        "win_rate_ci": ci,
     }
 
 
@@ -494,6 +497,7 @@ def _aggregate_stats_sqlite(cur, where_extra="", params=None):
 
     denominator = wins + losses
     win_rate = round((wins / denominator) * 100, 1) if denominator > 0 else 0
+    ci = metric_with_ci(wins, denominator, min_sample=MIN_SAMPLES["overall"])
 
     return {
         "wins": wins,
@@ -502,6 +506,7 @@ def _aggregate_stats_sqlite(cur, where_extra="", params=None):
         "pending": pending,
         "total": total,
         "win_rate": win_rate,
+        "win_rate_ci": ci,
     }
 
 
@@ -536,14 +541,16 @@ def get_team_ats_record(team_name, sport):
             cur.close()
             conn.close()
 
-        if len(rows) < 3:
+        if len(rows) < MIN_SAMPLES["ats"]:
             return None
 
         wins = sum(1 for r in rows if r["result"] == "HIT")
         losses = len(rows) - wins
-        rate = round((wins / len(rows)) * 100, 1) if rows else 0
+        total_decided = len(rows)
+        rate = round((wins / total_decided) * 100, 1) if total_decided > 0 else 0
+        ci = metric_with_ci(wins, total_decided, min_sample=MIN_SAMPLES["ats"])
 
-        return {"wins": wins, "losses": losses, "total": len(rows), "rate": rate}
+        return {"wins": wins, "losses": losses, "total": total_decided, "rate": rate, "rate_ci": ci}
     except Exception:
         return None
 
@@ -598,12 +605,14 @@ def get_factor_performance(sport):
         for slot in by_slot:
             s = by_slot[slot]
             s["rate"] = round((s["wins"] / s["total"]) * 100, 1) if s["total"] > 0 else 0
+            s["rate_ci"] = metric_with_ci(s["wins"], s["total"], min_sample=MIN_SAMPLES["slot"])
 
         overall_rate = round((total_wins / total_decided) * 100, 1) if total_decided > 0 else 0
+        overall_ci = metric_with_ci(total_wins, total_decided, min_sample=MIN_SAMPLES["feedback"])
 
         return {
             "by_slot": by_slot,
-            "overall": {"wins": total_wins, "total": total_decided, "rate": overall_rate},
+            "overall": {"wins": total_wins, "total": total_decided, "rate": overall_rate, "rate_ci": overall_ci},
         }
     except Exception:
         return None

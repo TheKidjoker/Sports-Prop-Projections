@@ -2,6 +2,7 @@
 # All prediction factors, score calculation, lean determination, and NFL helpers.
 
 import time
+import threading
 import tracker
 from api_client import (
     get_game_overunder, get_team_recent_results,
@@ -180,6 +181,7 @@ def _analyze_nfl_weather(game, event_id):
 
 # ─── FEEDBACK LOOP CACHE ────────────────────────────────────────────────────
 _feedback_cache = {}
+_feedback_lock = threading.Lock()
 _FEEDBACK_TTL = 300  # 5 minutes
 
 
@@ -191,9 +193,10 @@ def _get_feedback_adjustment(slot_type, sport):
     cache_key = f"{sport}:{slot_type}"
     now = time.time()
 
-    entry = _feedback_cache.get(cache_key)
-    if entry and (now - entry["ts"]) < _FEEDBACK_TTL:
-        return entry["adj"]
+    with _feedback_lock:
+        entry = _feedback_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _FEEDBACK_TTL:
+            return entry["adj"]
 
     try:
         perf = tracker.get_factor_performance(sport)
@@ -204,7 +207,7 @@ def _get_feedback_adjustment(slot_type, sport):
     if perf:
         # Slot-level adjustment
         slot_data = perf.get("by_slot", {}).get(slot_type)
-        if slot_data and slot_data["total"] >= 20:
+        if slot_data and slot_data["total"] >= 40:
             if slot_data["rate"] > 60:
                 adj += 2
             elif slot_data["rate"] < 45:
@@ -221,7 +224,8 @@ def _get_feedback_adjustment(slot_type, sport):
     # Clamp to [-2, +3]
     adj = max(-2, min(3, adj))
 
-    _feedback_cache[cache_key] = {"adj": adj, "ts": now}
+    with _feedback_lock:
+        _feedback_cache[cache_key] = {"adj": adj, "ts": now}
     return adj
 
 
@@ -542,6 +546,15 @@ def _determine_lean(slot_type, home_team, away_team, current_spread, sport="nba"
         # NBA + NHL: lean underdog in all slots (backtested)
         return away_team if current_spread < 0 else home_team
 
+    if sport == "nfl":
+        # NFL V1: public=underdog (58% cover), vegas=favorite (56.2% cover)
+        # Opposite of other sports — NFL public money inflates favorites
+        if slot_type in ("public", "skip", "caution"):
+            return away_team if current_spread < 0 else home_team  # underdog
+        elif slot_type in ("vegas", "trap"):
+            return home_team if current_spread < 0 else away_team  # favorite
+        return away_team if current_spread < 0 else home_team  # default underdog
+
     if slot_type in ("public", "caution"):
         # Lean with the favorite (expect sensible/public outcome)
         return home_team if current_spread < 0 else away_team
@@ -568,26 +581,28 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      line_toward_dog=False, line_toward_fav=False,
                      day_of_week=""):
     """
-    Scoring (backtested adjustments: * = NBA V5, ** = CBB V2):
-      +10/+5*/+3**  public slot (NBA: +5, CBB: +3, others: +10)
+    Scoring (backtested: * = NBA V5, ** = CBB V2/V3, *** = NHL V2):
+      +10/+5*/+3**/+3***  public slot
       +0-8/+0-5*  line movement confirms slot (NBA: reduced weights)
-      +3/-2*  line direction toward dog/fav (NBA V5: 62.4% vs 47.2%)
+      +3/-2*  line direction toward dog/fav (NBA V5, NFL V1)
       +5   trell rule confirms
       +5   rank scam detected (CFB/CBB)
       +5   spread discrepancy detected (CFB/CBB)
       +5   trend discrepancy (NFL)
       +5   O/U discrepancy (NFL)
       +5   weather factor (NFL)
-      special*/special**  spread (NBA V5: +2 sweet, -3 death zone, -3 blowout)
-      +4/-3 or +2/-1*  back-to-back rest (NBA: reduced, others: original)
-      +4/-3 or 0/0**  ATS record (CBB V2: removed — penalty was backwards)
-      +3/0**  home/away split (CBB V2: removed — -7.9% lift)
+      special  spread adjustments (NBA/CBB/NFL sport-specific)
+      +4/-3 or +2/-1* or 0/-1***  B2B rest (NHL V2: bonus removed, penalty -1)
+      +4/-3 or 0/+2** or +4/0***  ATS record (CBB: bounce-back; NHL: penalty removed)
+      +3/0**/0***  home/away split
       +3/+5 public betting / sharp money (all)
       -2/+3 feedback loop (all)
-      +3/+2 or +1*/0**  head-to-head (CBB V2: removed — noise)
+      +1*/0**/0***  head-to-head (CBB/NHL/NFL: removed)
       +5/+7 vegas trap (NBA only)
       -3*  Tuesday penalty (NBA V5: 40.8% dog cover)
-      = 44 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 53 max (NFL)
+      -4** Sunday penalty (CBB V3: 36.1% dog cover)
+      -3*** Friday penalty (NHL V2: 57.5% dog cover)
+      = 44 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 35 max (NFL)
 
     Returns:
         (total_score, breakdown_dict)
@@ -619,9 +634,9 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if spread_disc_applies:
         breakdown["spread_discrepancy"] = 5
     if trend_disc_applies:
-        breakdown["trend_discrepancy"] = 5
+        breakdown["trend_discrepancy"] = 5  # NFL V1: +20% lift after lean flip
     if ou_disc_applies:
-        breakdown["overunder"] = 5
+        breakdown["overunder"] = 5  # NFL V1: +6.9% lift after lean flip
     if weather_applies:
         breakdown["weather"] = 5
 
@@ -630,32 +645,43 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["b2b"] = 2 if sport == "nba" else (0 if sport == "nhl" else 4)
     elif b2b_penalty:
         breakdown["b2b"] = -1 if sport == "nba" else (-1 if sport == "nhl" else -3)
-    # ATS: CBB V2 removed (backtested — penalty was backwards, bonus flat)
+    # ATS: CBB V3 bounce-back (+9.8% lift); NHL V2 removed penalty (64.1% vs 65.9%)
     if ats_bonus:
         breakdown["ats_record"] = 0 if sport == "cbb" else 4
     elif ats_penalty:
-        breakdown["ats_record"] = 0 if sport == "cbb" else -3
-    # Home/away split: CBB V2 removed (backtested — -7.9% lift)
+        if sport == "cbb":
+            breakdown["ats_record"] = 2   # CBB: bounce-back bonus
+        elif sport == "nhl":
+            breakdown["ats_record"] = 0   # NHL V2: penalty too harsh (-0.9% lift)
+        else:
+            breakdown["ats_record"] = -3
+    # Home/away split: CBB V2 removed (-7.9% lift); NFL V1 removed (-19.6% lift)
     if home_away_applies:
-        breakdown["home_away_split"] = 0 if sport == "cbb" else 3
+        breakdown["home_away_split"] = 0 if sport in ("cbb", "nfl") else 3
     breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
-    # H2H: NBA revenge reduced; CBB V2 removed; NHL V1 revenge removed (-13.8% lift)
+    # H2H: NBA revenge reduced; CBB/NHL/NFL removed (backtested — noise or harmful)
     if h2h_revenge_bonus:
-        breakdown["head_to_head"] = 0 if sport in ("cbb", "nhl") else (1 if sport == "nba" else 3)
+        breakdown["head_to_head"] = 0 if sport in ("cbb", "nhl", "nfl") else (1 if sport == "nba" else 3)
     elif h2h_dominance_bonus:
-        breakdown["head_to_head"] = 0 if sport == "cbb" else 2
+        breakdown["head_to_head"] = 0 if sport in ("cbb", "nfl") else 2
     breakdown["vegas_trap"] = vegas_trap_bonus
 
-    # NBA V5: line direction toward dog is strongest signal (62.4% vs 47.2%)
-    if sport == "nba":
+    # NBA V5 + NFL V1: line direction toward dog is strong signal
+    if sport in ("nba", "nfl"):
         if line_toward_dog:
             breakdown["line_direction"] = 3
         elif line_toward_fav:
             breakdown["line_direction"] = -2
 
-    # NBA V5: Tuesday penalty (40.8% dog cover — worst day by far)
+    # NBA V5: Tuesday penalty (40.8% dog cover — worst day)
+    # CBB V3: Sunday penalty (36.1% dog cover — worst day)
+    # NHL V2: Friday penalty (57.5% dog cover, Fri_public 46.2%)
     if sport == "nba" and day_of_week.lower() == "tuesday":
+        breakdown["day_penalty"] = -3
+    elif sport == "cbb" and day_of_week.lower() == "sunday":
+        breakdown["day_penalty"] = -4
+    elif sport == "nhl" and day_of_week.lower() == "friday":
         breakdown["day_penalty"] = -3
 
     # Spread size: NBA V5 has sweet spot + penalties; CBB V2 same; others penalize big spreads
@@ -678,8 +704,14 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                 breakdown["spread_penalty"] = -3  # coin-flip territory
             elif spread_abs >= 15:
                 breakdown["spread_penalty"] = -2  # blowout territory
-        elif sport == "nfl" and spread_abs > 10:
-            breakdown["spread_penalty"] = -3
+        elif sport == "nfl":
+            # NFL V1: 3-7 sweet spot (65.2% dog cover), <3 coin flip (47.6%), 10+ blowout (38.9%)
+            if 3 <= spread_abs < 7:
+                breakdown["spread_penalty"] = 3   # sweet spot
+            elif spread_abs < 3:
+                breakdown["spread_penalty"] = -3  # coin flip
+            elif spread_abs >= 10:
+                breakdown["spread_penalty"] = -3  # blowout
         elif sport == "nhl" and spread_abs > 8:
             breakdown["spread_penalty"] = -3
         elif sport == "cfb" and spread_abs > 14:
