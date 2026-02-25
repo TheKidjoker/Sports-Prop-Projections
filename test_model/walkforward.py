@@ -17,7 +17,11 @@ from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from rank_analysis import _detect_rank_scam, _detect_spread_discrepancy
 from analysis_factors import _analyze_home_away_split, H2H_REVENGE_THRESHOLDS
-from constants import wilson_interval, metric_with_ci, MIN_SAMPLES
+from constants import (
+    wilson_interval, metric_with_ci, MIN_SAMPLES,
+    proportion_z_test, UNIVERSAL_DEFAULTS, OVERRIDE_EVIDENCE_THRESHOLDS,
+    get_override,
+)
 from test_model import db as tm_db
 from test_model.date_utils import parse_iso_date, parse_game_dt
 
@@ -25,13 +29,46 @@ from test_model.date_utils import parse_iso_date, parse_game_dt
 ROLLING_TRAIN = 200
 ROLLING_TEST = 50
 SPLIT_RATIO = 0.70
-MIN_FACTOR_FIRES = 10
+MIN_FACTOR_FIRES = 30   # Raised from 10 — require more evidence before trusting a factor
 MIN_FOLD_TRAIN = 50
 MIN_FOLD_TEST = 15
 _TEAM_STATE_MAX = 20
 _MAX_PREDICTIONS_IN_MEMORY = 200
 MIN_GAMES_RELIABLE = 150     # Below this: flag as insufficient, use Wilson CIs
 MIN_GAMES_WEIGHT_TUNING = 300  # Below this: lock weight derivation, use production fallbacks
+
+# ─── L2 Regularization ─────────────────────────────────────────────────────────
+L2_LAMBDA = 0.001  # Penalizes weight deviation from universal defaults
+
+def _l2_penalty(weights, sport):
+    """Compute L2 regularization penalty for deviation from universal defaults."""
+    penalty = 0.0
+    defaults = UNIVERSAL_DEFAULTS
+    fw = weights.get("factor_weights", {})
+
+    for key in ("b2b_bonus", "b2b_penalty", "ats_bonus", "ats_penalty",
+                "home_away_split", "h2h_revenge", "h2h_dominance"):
+        derived = fw.get(key, 0)
+        default = defaults.get(key, 0)
+        penalty += (derived - default) ** 2
+
+    penalty += (weights.get("public_slot_bonus", 10) - defaults["public_slot_bonus"]) ** 2
+    penalty += (weights.get("line_toward_dog", 0) - defaults["line_toward_dog"]) ** 2
+    penalty += (weights.get("line_toward_fav", 0) - defaults["line_toward_fav"]) ** 2
+
+    for val in weights.get("day_penalties", {}).values():
+        penalty += val ** 2
+
+    for val in weights.get("spread_buckets", {}).values():
+        penalty += val ** 2
+
+    return L2_LAMBDA * penalty
+
+
+def _l2_constrain_weight(derived_weight, default_weight):
+    """Shrink derived weight toward default proportional to lambda."""
+    return derived_weight - L2_LAMBDA * 2 * (derived_weight - default_weight)
+
 
 # ─── Progress tracking ───────────────────────────────────────────────────────
 _wf_progress = {}
@@ -611,51 +648,84 @@ def _pass1_raw_stats(train_games, sport, games_by_date):
                     spread_buckets[key]["dog_cover"] += 1
                 break
 
-    # Derive lean direction
+    # Derive lean direction with significance testing
+    overall_dog_cover = sum(d["dog_cover"] for d in slot_outcomes.values())
+    overall_total = sum(d["total"] for d in slot_outcomes.values())
+    overall_rate = _safe_rate({"dog_cover": overall_dog_cover, "total": overall_total})
+
     public_rate = _safe_rate(slot_outcomes["public"])
     vegas_rate = _safe_rate(slot_outcomes["vegas"])
 
-    # Both slots: determine lean per slot
-    if public_rate > 55 and vegas_rate > 55:
-        lean = "always_underdog"
-        lean_public = "underdog"
-        lean_vegas = "underdog"
-    elif public_rate < 45 and vegas_rate < 45:
-        lean = "always_favorite"
-        lean_public = "favorite"
-        lean_vegas = "favorite"
+    lean_thresh = OVERRIDE_EVIDENCE_THRESHOLDS["lean_direction"]
+    total_lean_games = slot_outcomes["public"]["total"] + slot_outcomes["vegas"]["total"]
+
+    # Require sufficient data + statistical significance to flip lean from default
+    if total_lean_games >= lean_thresh["min_games"]:
+        _, p_pub = proportion_z_test(
+            slot_outcomes["public"]["dog_cover"],
+            slot_outcomes["public"]["total"], 0.50)
+        _, p_veg = proportion_z_test(
+            slot_outcomes["vegas"]["dog_cover"],
+            slot_outcomes["vegas"]["total"], 0.50)
+
+        if (public_rate > 55 and vegas_rate > 55
+                and p_pub < lean_thresh["p_threshold"]
+                and p_veg < lean_thresh["p_threshold"]):
+            lean = "always_underdog"
+            lean_public = "underdog"
+            lean_vegas = "underdog"
+        elif (public_rate < 45 and vegas_rate < 45
+              and p_pub < lean_thresh["p_threshold"]
+              and p_veg < lean_thresh["p_threshold"]):
+            lean = "always_favorite"
+            lean_public = "favorite"
+            lean_vegas = "favorite"
+        else:
+            lean = "slot_dependent"
+            lean_public = "underdog" if public_rate >= 50 else "favorite"
+            lean_vegas = "underdog" if vegas_rate >= 50 else "favorite"
     else:
+        # Insufficient data — use default slot_dependent
         lean = "slot_dependent"
         lean_public = "underdog" if public_rate >= 50 else "favorite"
         lean_vegas = "underdog" if vegas_rate >= 50 else "favorite"
 
     weak_lean = 48 <= public_rate <= 52 or 48 <= vegas_rate <= 52
 
-    # Day penalties: days < 50% dog cover get -3
+    # Day penalties: require min_games + z-test significance
+    day_thresh = OVERRIDE_EVIDENCE_THRESHOLDS["day_penalty"]
     day_penalties = {}
     for day, data in day_outcomes.items():
         rate = _safe_rate(data)
-        if data["total"] >= 10 and rate < 50:
-            day_penalties[day] = -3
+        if data["total"] >= day_thresh["min_games"] and rate < 50:
+            _, p_val = proportion_z_test(
+                data["dog_cover"], data["total"], overall_rate / 100)
+            if p_val < day_thresh["p_threshold"]:
+                day_penalties[day] = -3
 
-    # Spread bucket adjustments
+    # Spread bucket adjustments: require min_games + z-test significance
+    spread_thresh = OVERRIDE_EVIDENCE_THRESHOLDS["spread_bucket"]
     spread_adj = {}
     for bucket_key, data in spread_buckets.items():
-        if data["total"] < 5:
+        if data["total"] < spread_thresh["min_games"]:
             spread_adj[bucket_key] = 0
             continue
         rate = _safe_rate(data)
-        if rate > 60:
-            spread_adj[bucket_key] = 3
-        elif rate < 45:
-            spread_adj[bucket_key] = -3
+        _, p_val = proportion_z_test(
+            data["dog_cover"], data["total"], overall_rate / 100)
+        if p_val < spread_thresh["p_threshold"]:
+            if rate > 60:
+                spread_adj[bucket_key] = 3
+            elif rate < 45:
+                spread_adj[bucket_key] = -3
+            else:
+                spread_adj[bucket_key] = 0
         else:
             spread_adj[bucket_key] = 0
 
     # Public slot bonus: based on accuracy gap
     public_total = slot_outcomes["public"]["total"]
     if public_total >= 10:
-        # Bonus proportional to how much public slot dog cover exceeds 50%
         bonus = max(0, min(10, round((public_rate - 50) * 0.5)))
     else:
         bonus = 0
@@ -770,7 +840,17 @@ def _pass2_factor_lifts(train_games, sport, games_by_date, pass1):
 
         _update_team_state(game, home_st, away_st)
 
-    # Derive factor weights from lifts
+    # Derive factor weights from lifts with significance testing
+    factor_thresh = OVERRIDE_EVIDENCE_THRESHOLDS["factor_weight"]
+    # Compute baseline rate from all tracked games
+    all_fired = sum(d["fired"] for d in factor_tracker.values())
+    all_correct_fired = sum(d["correct_when_fired"] for d in factor_tracker.values())
+    all_not_fired = sum(d["not_fired"] for d in factor_tracker.values())
+    all_correct_not = sum(d["correct_when_not_fired"] for d in factor_tracker.values())
+    total_games_tracked = all_fired + all_not_fired
+    baseline_rate = ((all_correct_fired + all_correct_not) / total_games_tracked
+                     if total_games_tracked > 0 else 0.50)
+
     factor_weights = {}
     for factor_name, data in factor_tracker.items():
         fired = data["fired"]
@@ -787,19 +867,47 @@ def _pass2_factor_lifts(train_games, sport, games_by_date, pass1):
         lift = acc_fired - acc_not_fired if fired > 0 and not_fired > 0 else 0
 
         if fired < MIN_FACTOR_FIRES:
+            # Insufficient fires — zero out
             factor_weights[factor_name] = 0
-        elif lift >= 8:
-            factor_weights[factor_name] = 5
-        elif lift >= 5:
-            factor_weights[factor_name] = 3
-        elif lift >= 2:
-            factor_weights[factor_name] = 2
-        elif lift >= 0:
-            factor_weights[factor_name] = 1
-        elif lift >= -2:
-            factor_weights[factor_name] = 0
+        elif fired >= factor_thresh["min_games"]:
+            # Full evidence: require z-test significance at p < 0.10
+            _, p_val = proportion_z_test(
+                data["correct_when_fired"], fired, baseline_rate)
+            if p_val < factor_thresh["p_threshold"]:
+                # Significant — apply full lift-based mapping
+                if lift >= 8:
+                    factor_weights[factor_name] = 5
+                elif lift >= 5:
+                    factor_weights[factor_name] = 3
+                elif lift >= 2:
+                    factor_weights[factor_name] = 2
+                elif lift >= 0:
+                    factor_weights[factor_name] = 1
+                elif lift >= -2:
+                    factor_weights[factor_name] = 0
+                else:
+                    factor_weights[factor_name] = max(-5, round(lift / 2))
+            else:
+                # Not significant — zero out
+                factor_weights[factor_name] = 0
         else:
-            factor_weights[factor_name] = max(-5, round(lift / 2))
+            # Between MIN_FACTOR_FIRES and factor_thresh — cap weight at ±2
+            if lift >= 5:
+                factor_weights[factor_name] = 2
+            elif lift >= 2:
+                factor_weights[factor_name] = 2
+            elif lift >= 0:
+                factor_weights[factor_name] = 1
+            elif lift >= -2:
+                factor_weights[factor_name] = 0
+            else:
+                factor_weights[factor_name] = max(-2, round(lift / 2))
+
+    # L2-constrain factor weights toward universal defaults
+    for key in factor_weights:
+        default_val = UNIVERSAL_DEFAULTS.get(key, 0)
+        factor_weights[key] = round(
+            _l2_constrain_weight(factor_weights[key], default_val), 1)
 
     # Line direction weights
     dog_data = line_dir_tracker["toward_dog"]
@@ -889,6 +997,9 @@ def _sweep_thresholds(train_games, sport, games_by_date, weights):
     if not scored:
         return {"lean": 5, "strong": 15}
 
+    # L2 penalty for this weight set
+    l2_pen = _l2_penalty(weights, sport)
+
     # Sweep cutoffs 3-20
     lean_threshold = None
     strong_threshold = None
@@ -899,10 +1010,11 @@ def _sweep_thresholds(train_games, sport, games_by_date, weights):
         if count < 5:
             continue
         acc = sum(1 for s in qualified if s["correct"]) / count * 100
+        penalized_acc = acc - l2_pen
 
-        if lean_threshold is None and acc >= 52.4 and count >= 20:
+        if lean_threshold is None and penalized_acc >= 52.4 and count >= 20:
             lean_threshold = cutoff
-        if strong_threshold is None and acc >= 60 and count >= 10:
+        if strong_threshold is None and penalized_acc >= 60 and count >= 10:
             strong_threshold = cutoff
 
     # Fallbacks: percentile-based
@@ -1461,137 +1573,125 @@ def _build_data_warning(total, insufficient_data, weight_tuning_locked):
 def _get_fallback_weights(sport):
     """
     Returns production-equivalent weights when weight tuning is locked
-    (< 300 games). Uses the same hardcoded values from analysis_factors.py
-    and constants.py so the walk-forward evaluates production weights
-    out-of-sample rather than trying to derive from insufficient data.
+    (< 300 games). Built from UNIVERSAL_DEFAULTS + only validated overrides
+    from the registry, ensuring unproven sport-specific tweaks don't
+    contaminate the fallback.
     """
-    # Common factor weights shared across sports
+    defaults = UNIVERSAL_DEFAULTS
+
+    # Base factor weights from universal defaults
     base_factors = {
         "slot_public": 0,
-        "line_movement": 0,  # scored via line_movement_tiers
+        "line_movement": 0,
         "rank_scam": 5,
         "spread_discrepancy": 5,
         "trend_discrepancy": 5,
         "ou_discrepancy": 5,
         "vegas_trap": 5,
-        "b2b_bonus": 4,
-        "b2b_penalty": -3,
-        "ats_bonus": 4,
-        "ats_penalty": -3,
-        "home_away_split": 3,
-        "h2h_revenge": 3,
-        "h2h_dominance": 2,
+        "b2b_bonus": defaults["b2b_bonus"],
+        "b2b_penalty": defaults["b2b_penalty"],
+        "ats_bonus": defaults["ats_bonus"],
+        "ats_penalty": defaults["ats_penalty"],
+        "home_away_split": defaults["home_away_split"],
+        "h2h_revenge": defaults["h2h_revenge"],
+        "h2h_dominance": defaults["h2h_dominance"],
     }
 
-    if sport == "nba":
-        return {
-            "lean": "always_underdog",
-            "lean_public": "underdog",
-            "lean_vegas": "underdog",
-            "weak_lean": False,
-            "public_slot_bonus": 5,
-            "day_penalties": {"tuesday": -3},
-            "spread_buckets": {
-                "0-3": 0, "3-5": 2, "5-7": -3,
-                "7-10": 0, "10-13": 0, "13-100": -3,
-            },
-            "factor_weights": {
-                **base_factors,
-                "b2b_bonus": 2, "b2b_penalty": -1,
-                "h2h_revenge": 1, "h2h_dominance": 2,
-            },
-            "line_toward_dog": 3,
-            "line_toward_fav": -2,
-            "line_movement_tiers": {"1-2": 2, "2-3": 3, "3+": 5},
-            "thresholds": {"lean": 5, "strong": 10},
-        }
-
-    if sport == "nhl":
-        return {
-            "lean": "always_underdog",
-            "lean_public": "underdog",
-            "lean_vegas": "underdog",
-            "weak_lean": False,
-            "public_slot_bonus": 3,
-            "day_penalties": {"friday": -3},
-            "spread_buckets": {},  # NHL spreads are always 1.5
-            "factor_weights": {
-                **base_factors,
-                "b2b_bonus": 0, "b2b_penalty": -1,
-                "ats_penalty": 0,
-                "h2h_revenge": 0, "h2h_dominance": 2,
-            },
-            "line_toward_dog": 0,
-            "line_toward_fav": 0,
-            "line_movement_tiers": {"1-2": 3, "2-3": 5, "3+": 8},
-            "thresholds": {"lean": 3, "strong": 8},
-        }
-
-    if sport == "cbb":
-        return {
-            "lean": "slot_dependent",
-            "lean_public": "favorite",
-            "lean_vegas": "underdog",
-            "weak_lean": False,
-            "public_slot_bonus": 3,
-            "day_penalties": {"sunday": -4},
-            "spread_buckets": {
-                "0-3": -3, "3-5": 0, "5-7": 3,
-                "7-10": 3, "10-13": 0, "13-100": -2,
-            },
-            "factor_weights": {
-                **base_factors,
-                "ats_bonus": 0, "ats_penalty": 2,  # CBB bounce-back
-                "home_away_split": 0,
-                "h2h_revenge": 0, "h2h_dominance": 0,
-            },
-            "line_toward_dog": 0,
-            "line_toward_fav": 0,
-            "line_movement_tiers": {"1-2": 3, "2-3": 5, "3+": 8},
-            "thresholds": {"lean": 10, "strong": 13},
-        }
-
-    if sport == "nfl":
-        return {
-            "lean": "slot_dependent",
-            "lean_public": "underdog",
-            "lean_vegas": "favorite",
-            "weak_lean": False,
-            "public_slot_bonus": 10,
-            "day_penalties": {},
-            "spread_buckets": {
-                "0-3": -3, "3-5": 3, "5-7": 3,
-                "7-10": 0, "10-13": -3, "13-100": -3,
-            },
-            "factor_weights": {
-                **base_factors,
-                "home_away_split": 0,
-                "h2h_revenge": 0, "h2h_dominance": 0,
-            },
-            "line_toward_dog": 3,
-            "line_toward_fav": -2,
-            "line_movement_tiers": {"1-2": 3, "2-3": 5, "3+": 8},
-            "thresholds": {"lean": 10, "strong": 20},
-        }
-
-    # CFB fallback
-    return {
-        "lean": "slot_dependent",
-        "lean_public": "favorite",
-        "lean_vegas": "underdog",
+    # Start from universal defaults
+    weights = {
+        "lean": defaults["lean"],
+        "lean_public": defaults["lean_public"],
+        "lean_vegas": defaults["lean_vegas"],
         "weak_lean": False,
-        "public_slot_bonus": 10,
-        "day_penalties": {},
-        "spread_buckets": {
-            "0-3": 0, "3-5": 0, "5-7": 0,
-            "7-10": 0, "10-13": 0, "13-100": -3,
-        },
-        "factor_weights": base_factors,
-        "line_toward_dog": 0,
-        "line_toward_fav": 0,
+        "public_slot_bonus": defaults["public_slot_bonus"],
+        "day_penalties": dict(defaults["day_penalties"]),
+        "spread_buckets": dict(defaults["spread_buckets"]),
+        "factor_weights": dict(base_factors),
+        "line_toward_dog": defaults["line_toward_dog"],
+        "line_toward_fav": defaults["line_toward_fav"],
         "line_movement_tiers": {"1-2": 3, "2-3": 5, "3+": 8},
-        "thresholds": {"lean": 12, "strong": 15},
+        "thresholds": {"lean": 5, "strong": 15},  # conservative defaults
     }
+
+    # Apply only validated overrides from the registry
+    lean_override = get_override(sport, "lean_direction", None)
+    if lean_override == "always_underdog":
+        weights["lean"] = "always_underdog"
+        weights["lean_public"] = "underdog"
+        weights["lean_vegas"] = "underdog"
+    elif lean_override == "flipped":
+        weights["lean"] = "slot_dependent"
+        weights["lean_public"] = "underdog"
+        weights["lean_vegas"] = "favorite"
+
+    # Public slot bonus
+    weights["public_slot_bonus"] = get_override(
+        sport, "public_slot_bonus", defaults["public_slot_bonus"])
+
+    # Line direction
+    weights["line_toward_dog"] = get_override(
+        sport, "line_toward_dog", defaults["line_toward_dog"])
+    weights["line_toward_fav"] = get_override(
+        sport, "line_toward_fav", defaults["line_toward_fav"])
+
+    # Factor weight overrides (only validated)
+    for key in ("b2b_bonus", "b2b_penalty", "ats_bonus", "ats_penalty",
+                "home_away_split", "h2h_revenge", "h2h_dominance"):
+        weights["factor_weights"][key] = get_override(
+            sport, key, defaults.get(key, base_factors.get(key, 0)))
+
+    # Day penalties (only validated)
+    _day_penalty_map = {
+        "nba": {"tuesday": "tuesday_penalty"},
+        "cbb": {"sunday": "sunday_penalty"},
+        "nhl": {"friday": "friday_penalty"},
+    }
+    for day, override_name in _day_penalty_map.get(sport, {}).items():
+        val = get_override(sport, override_name, 0)
+        if val != 0:
+            weights["day_penalties"][day] = val
+
+    # Spread bucket overrides (only validated)
+    _spread_override_map = {
+        "nba": [
+            ("3-5", "spread_3_5_bonus"),
+            ("5-7", "spread_5_7_penalty"),
+            ("13-100", "spread_13_plus_penalty"),
+        ],
+        "cbb": [
+            ("5-7", "spread_6_10_bonus"),     # maps to 6-10 in scoring
+            ("7-10", "spread_6_10_bonus"),
+            ("0-3", "spread_0_3_penalty"),
+            ("13-100", "spread_15_plus_penalty"),
+        ],
+        "nfl": [
+            ("3-5", "spread_3_7_bonus"),
+            ("5-7", "spread_3_7_bonus"),
+            ("0-3", "spread_0_3_penalty"),
+            ("10-13", "spread_10_plus_penalty"),
+            ("13-100", "spread_10_plus_penalty"),
+        ],
+    }
+    for bucket_key, override_name in _spread_override_map.get(sport, []):
+        val = get_override(sport, override_name, 0)
+        if val != 0:
+            weights["spread_buckets"][bucket_key] = val
+
+    # Sport-specific threshold defaults
+    _threshold_defaults = {
+        "nba": {"lean": 5, "strong": 10},
+        "nhl": {"lean": 3, "strong": 8},
+        "cbb": {"lean": 10, "strong": 13},
+        "nfl": {"lean": 10, "strong": 20},
+        "cfb": {"lean": 12, "strong": 15},
+    }
+    weights["thresholds"] = _threshold_defaults.get(sport, {"lean": 5, "strong": 15})
+
+    # Sport-specific line movement tiers
+    if sport == "nba":
+        weights["line_movement_tiers"] = {"1-2": 2, "2-3": 3, "3+": 5}
+
+    return weights
 
 
 def _safe_rate(data):

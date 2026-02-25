@@ -2,6 +2,8 @@
 
 A rules-based sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, **CBB**, and **NFL**. Combines time-slot theory, line movement tracking, injury impact analysis, player prop projections, sharp money detection, and sport-specific intelligence signals to produce a confidence score for every game on the board.
 
+All scoring weights have been calibrated through historical backtesting against real outcomes (NBA: 607 games, NHL: 529, CBB: 1,977, NFL: 105, CFB: 51).
+
 Built with a dark red/black Gotham-themed UI ("Joker's Edge"), featuring a welcome hero landing page with sport cards, auto-scan on click, and an instant-load background cache system.
 
 ---
@@ -10,8 +12,10 @@ Built with a dark red/black Gotham-themed UI ("Joker's Edge"), featuring a welco
 
 Not all time slots are created equal. Vegas adjusts its edge depending on when games are played, who's watching, and where the money flows. This tool classifies every game into a **slot type** (public or vegas), then layers confirmation factors on top to build a composite score and cover percentage.
 
-- **Public slots** produce sensible, chalk outcomes — lean with the favorite.
-- **Vegas slots** are where the books hold the edge and sharp money dominates — lean with the underdog.
+- **Public slots** produce sensible, chalk outcomes.
+- **Vegas slots** are where the books hold the edge and sharp money dominates.
+
+The lean direction is **sport-specific** (see Lean Logic below).
 
 ---
 
@@ -23,67 +27,111 @@ Each game starts at a base of 50% cover probability. Confirmation factors add po
 cover_pct = 50 + (score / max_score) * 45
 ```
 
-### Scoring Factors
+### Scoring Factors (Backtested)
 
-| Factor | Points | Applies To |
-|--------|--------|------------|
-| Public slot classification | +10 | All sports |
-| Line movement confirms slot | +0 to +8 | All sports (graduated by magnitude) |
-| Trell Rule (star injury in vegas slot) | +5 | All sports |
-| Rank Scam detected | +5 | CFB, CBB |
-| Spread Discrepancy detected | +5 | CFB, CBB |
-| Trend Discrepancy | +5 | NFL |
-| O/U Discrepancy | +5 | NFL |
-| Weather factor | +5 | NFL |
-| Back-to-back rest advantage | +4 | NBA, NHL |
-| Back-to-back fatigue penalty | -3 | NBA, NHL |
-| ATS record bonus | +4 | All sports |
-| ATS record penalty | -3 | All sports |
-| Home/away split alignment | +3 | All sports |
-| Sharp money divergence (vegas slot) | +5 | All sports |
-| Sharp + public alignment (public slot) | +3 | All sports |
-| Head-to-head revenge bonus | +3 | All sports |
-| Head-to-head dominance bonus | +2 | All sports |
-| Vegas Trap (cold favorite) | +5 to +7 | NBA |
-| Feedback loop (ledger performance) | -2 to +3 | All sports |
-| Large spread penalty | -3 | All sports (thresholds vary) |
+Weights are sport-specific. The table shows the default value and sport overrides where applicable.
+
+| Factor | Default | NBA V5 | NHL V2 | CBB V3 | NFL V1 | Applies To |
+|--------|---------|--------|--------|--------|--------|------------|
+| Public slot bonus | +10 | +5 | +3 | +3 | +10 | All |
+| Line movement confirms slot | +3/+5/+8 | +2/+3/+5 | default | default | default | All (graduated) |
+| Line direction toward dog | -- | +3 | -- | -- | +3 | NBA, NFL |
+| Line direction toward fav | -- | -2 | -- | -- | -2 | NBA, NFL |
+| Trell Rule (star injury) | +5 | +5 | +5 | +5 | +5 | All |
+| Rank Scam detected | +5 | -- | -- | +5 | -- | CFB, CBB |
+| Spread Discrepancy | +5 | -- | -- | +5 | -- | CFB, CBB |
+| Trend Discrepancy | -- | -- | -- | -- | +5 | NFL |
+| O/U Discrepancy | -- | -- | -- | -- | +5 | NFL |
+| Weather factor | -- | -- | -- | -- | +5 | NFL |
+| B2B rest advantage | +4 | +2 | **0** | -- | -- | NBA, NHL |
+| B2B fatigue penalty | -3 | -1 | -1 | -- | -- | NBA, NHL |
+| ATS record bonus (>60%) | +4 | +4 | +4 | **0** | +4 | All |
+| ATS record penalty (<40%) | -3 | -3 | **0** | **+2** | -3 | All |
+| Home/away split | +3 | +3 | +3 | **0** | **0** | All |
+| Sharp money divergence | +5 | +5 | +5 | +5 | +5 | Vegas slots |
+| Sharp + public alignment | +3 | +3 | +3 | +3 | +3 | Public slots |
+| H2H revenge bonus | +3 | **+1** | **0** | **0** | **0** | All |
+| H2H dominance bonus | +2 | +2 | +2 | **0** | **0** | All |
+| Vegas Trap (cold favorite) | -- | +5/+7 | -- | -- | -- | NBA |
+| Feedback loop | -2 to +3 | same | same | same | same | All |
+| Tuesday penalty | -- | **-3** | -- | -- | -- | NBA |
+| Sunday penalty | -- | -- | -- | **-4** | -- | CBB |
+| Friday penalty | -- | -- | **-3** | -- | -- | NHL |
+| Spread sweet spot | -- | +2 (3-5) | -- | +3 (6-10) | +3 (3-7) | NBA, CBB, NFL |
+| Spread death zone | -- | -3 (5-7) | -- | -3 (<3) | -3 (<3) | NBA, CBB, NFL |
+| Spread blowout penalty | -3 | -3 (13+) | -- | -2 (15+) | -3 (10+) | All |
+
+**Bold** = backtested change from default. **0** = factor removed (backtested as harmful).
 
 ### Max Scores by Sport
 
 | Sport | Max Score |
 |-------|-----------|
-| NBA | 49 |
+| NBA | 44 |
 | NHL | 42 |
+| CBB | 37 |
 | CFB | 48 |
-| CBB | 48 |
-| NFL | 53 |
+| NFL | 35 |
 
 Games scoring 68.5%+ cover are surfaced as picks. Below that, the top 5 closest games are shown as alternatives. Games between 58-68.5% appear as "Other Games to Watch."
 
-### Recommendation Labels
+### Recommendation Thresholds (Backtested)
 
-| Label | Score | Meaning |
-|-------|-------|---------|
-| **STRONG PLAY** | 15+ | Multiple confirmation factors align |
-| **LEAN** | 10-14 | Some factors confirm, worth a look |
-| **MONITOR** | 0-9 | Limited confirmation, watch but don't commit |
+Thresholds are sport-specific and, for NBA/NHL, slot-specific:
+
+**NBA** (3-tier with CONFIDENT):
+| Slot | STRONG PLAY | CONFIDENT | LEAN | MONITOR |
+|------|-------------|-----------|------|---------|
+| Vegas | >= 10 | >= 7 | >= 5 | < 5 |
+| Public | >= 10 | -- | >= 7 | < 7 |
+
+**NHL** (public capped at LEAN):
+| Slot | STRONG PLAY | LEAN | MONITOR |
+|------|-------------|------|---------|
+| Vegas | >= 8 | >= 3 | < 3 |
+| Public | -- | >= 5 | < 5 |
+
+**CBB / CFB / NFL** (flat thresholds):
+| Sport | STRONG PLAY | LEAN | MONITOR |
+|-------|-------------|------|---------|
+| CBB | >= 13 | >= 10 | < 10 |
+| CFB | >= 15 | >= 12 | < 12 |
+| NFL | >= 20 | >= 10 | < 10 |
 
 ### Line Movement Scoring (Graduated)
 
-| Movement | Points |
-|----------|--------|
-| 0-1 pts | 0 (noise) |
-| 1-2 pts | 3 (mild signal) |
-| 2-3 pts | 5 (solid signal) |
-| 3+ pts | 8 (strong signal) |
+| Movement | Default | NBA |
+|----------|---------|-----|
+| 0-1 pts | 0 | 0 |
+| 1-2 pts | 3 | 2 |
+| 2-3 pts | 5 | 3 |
+| 3+ pts | 8 | 5 |
 
-### Spread Size Penalties
+---
 
-| Sport | Threshold | Penalty |
-|-------|-----------|---------|
-| NBA/NHL | > 8 pts | -3 |
-| CFB/CBB | > 14 pts | -3 |
-| NFL | > 10 pts | -3 |
+## Lean Logic (Backtested)
+
+The lean direction is **not** one-size-fits-all. Backtesting revealed different patterns per sport:
+
+| Sport | Public Slots | Vegas Slots | Notes |
+|-------|-------------|-------------|-------|
+| **NBA** | Underdog | Underdog | Always lean underdog — public inflates favorite lines |
+| **NHL** | Underdog | Underdog | Always lean underdog — favorite lean was 37.5%, underdog 71.2% |
+| **CBB** | Favorite | Underdog | Standard public/vegas theory |
+| **CFB** | Favorite | Underdog | Standard public/vegas theory |
+| **NFL** | **Underdog** | **Favorite** | Opposite of other sports — NFL public money inflates favorites differently |
+
+The action string includes the spread value and a "don't take past" limit (spread minus 1.5 points). When the spread exceeds the sport-specific moneyline threshold, the tool recommends taking the moneyline instead.
+
+| Sport | ML Threshold |
+|-------|-------------|
+| NBA | 6+ points |
+| NFL | 3+ points |
+| CFB | 7+ points |
+| CBB | 7+ points |
+
+### Trell Rule Lean Override
+When the Trell Rule fires (star player recently injured + out + vegas slot), the lean overrides to the star's team — the market overreacts to star injuries and creates value.
 
 ---
 
@@ -91,20 +139,30 @@ Games scoring 68.5%+ cover are surfaced as picks. Below that, the top 5 closest 
 
 ### NBA
 - **Timezone:** PST (UTC-8) for slot classification, EST for display
-- **Slot rules:** Day-of-week determines the slot schedule. Mon/Wed/Fri = public days, Tue/Thu/Sat/Sun = vegas days. Alternating public/vegas slots at specific tip-off times.
-- **First-game override:** The first game of the day gets the opposite slot of the day type (public day first game = vegas, vegas day first game = public).
+- **Slot rules:** Day-of-week determines the slot schedule. Mon/Wed/Fri = public days, Tue/Thu/Sat/Sun = vegas days. Alternating public/vegas slots at specific tip-off times. 30-min tolerance for classification.
+- **First-game override:** The first game of the day gets the opposite slot of the day type.
 - **Player props (PRISM):** Multi-stat projection engine for PTS, REB, AST on top 3 scorers per team (see PRISM section below).
 - **Vegas Trap:** Detects heavy favorites (7+ pt spread) on cold streaks in vegas slots. +5 if favorite is cold (0-2 wins in last 7), +7 if both teams are cold.
-- **Back-to-back detection:** +4 bonus when opponent is on a B2B, -3 penalty when lean team is on a B2B.
+- **Line direction:** +3 when line moves toward underdog, -2 toward favorite (strongest signal in backtest, +12.5% lift).
+- **Tuesday penalty:** -3 (40.8% dog cover — worst day).
+- **Spread sweet spot:** +2 for 3-4.5pt spreads (57.1%), -3 for 5-6.5 (death zone, 47.6%), -3 for 13+ (blowout, 46.0%).
+- **B2B:** +2 bonus (reduced from +4), -1 penalty (reduced from -3).
+- **H2H revenge:** +1 (reduced from +3).
 - **Moneyline threshold:** 6+ point spreads recommend ML instead of spread.
 
 ### NHL
 - **Timezone:** CST (UTC-6) for slot classification, EST for display
-- **Slot rules:** Based on slate size, not day of week:
-  - 1 game = vegas
-  - 2 games = first is public, second is vegas
-  - 3+ games = time-based classification using CST start times
-- **Back-to-back detection:** Same as NBA (+4/-3).
+- **Slot rules:** NBA-style framework based on day type + slate size + time:
+  - Public days: Mon/Thu/Fri | Vegas days: Tue/Wed/Sat/Sun
+  - 1 game = vegas, 2 games = first public / second vegas
+  - 3+ games = first game opposite of day type, rest time-based
+  - Time slots (CST): 12pm=public, 2pm=vegas, 4pm=public, 6pm=public, 7pm=vegas, 8pm=public, 9pm=vegas
+  - 60-min tolerance for classification (0% unknown, was 65% unknown)
+- **All spreads are ±1.5** (puck line) — no spread adjustment possible.
+- **Friday penalty:** -3 (57.5% dog cover, Fri_public only 46.2%).
+- **ATS penalty:** Removed (was -3, only -0.9% lift — too harsh for 64.1% accuracy).
+- **B2B bonus:** Removed (was +4, -3.9% lift).
+- **H2H:** Removed (was +3/+2, -7.6% lift).
 - **Moneyline:** Not used (puck line sport).
 
 ### CFB (College Football)
@@ -128,7 +186,7 @@ Games scoring 68.5%+ cover are surfaced as picks. Below that, the top 5 closest 
 
 ### CBB (College Basketball)
 - **Timezone:** EST (UTC-5) for both classification and display
-- **Slot rules:** Day overrides (Mon/Tue = vegas/sharp, Wed-Fri = public, Sun = public) + Saturday time-based slots
+- **Slot rules:** Day overrides (Mon/Tue = vegas/sharp, Wed-Fri = public, Sun = public) + Saturday time-based slots with 60-min tolerance
 - **Rank Scam + Spread Discrepancy:** Same logic as CFB with basketball-calibrated expected spreads (~half of CFB ranges).
 - **Expected spread ranges (ranked vs unranked):**
   | Rank | Expected Spread |
@@ -139,8 +197,12 @@ Games scoring 68.5%+ cover are surfaced as picks. Below that, the top 5 closest 
   | #16-20 | 5-7 pts |
   | #21-25 | 3-5 pts |
 - **Star thresholds:** 16+ PPG and 30+ MPG, or 12 PPG with 5+ APG, or 12 PPG with 8+ RPG.
-- **Moneyline threshold:** 7+ points. Spread penalty triggers at 14+.
-- **No player props** (excluded from PRISM).
+- **Sunday penalty:** -4 (36.1% dog cover — worst day).
+- **ATS bounce-back:** +2 when lean team has <40% ATS (teams with bad ATS records revert to mean, +9.8% lift).
+- **Spread sweet spot:** +3 for 6-10pt spreads (67.9%), -3 for <3 (34.7%), -2 for 15+ (47.4%).
+- **Home/away split:** Removed (was +3, -7.9% lift).
+- **H2H:** Removed (was +3/+2, -2.2% lift — noise).
+- **Moneyline threshold:** 7+ points. No player props (excluded from PRISM).
 
 ### NFL
 - **Timezone:** PST (UTC-8) for slot classification, EST for display
@@ -151,31 +213,15 @@ Games scoring 68.5%+ cover are surfaced as picks. Below that, the top 5 closest 
   - Sunday Night Football = **SKIP** (do not bet)
   - Last non-SNF Sunday game = public override
   - Monday Night = vegas (trap)
-- **Trend Discrepancy** (vegas slots only): Analyzes last 4 games for both teams. Teams at 0-1 wins = bounce-back value, 3-4 wins = regression risk. Both signals in the same game = strong contrarian.
-- **O/U Analysis** (vegas slots only): Flags totals above 50.5 and divergence of 6+ points between the total and teams' combined scoring averages.
+- **Lean direction flipped:** Public = underdog (58% cover), Vegas = favorite (56.2% cover). This was the single biggest backtesting improvement (+28.9% ROI swing).
+- **Line direction:** +3 toward dog, -2 toward fav (like NBA).
+- **Spread sweet spot:** +3 for 3-7pt spreads (65.2%), -3 for <3 (47.6%), -3 for 10+ (38.9%).
+- **Trend Discrepancy** (vegas slots only): Analyzes last 4 games for both teams. Teams at 0-1 wins = bounce-back value, 3-4 wins = regression risk. +20% lift after lean flip.
+- **O/U Analysis** (vegas slots only): Flags totals above 50.5 and divergence of 6+ points between the total and teams' combined scoring averages. +6.9% lift.
 - **Weather:** 3-tier fetch (scoreboard inline, ESPN summary, OpenWeather fallback). Flags wind 15+ mph, temp 32F or below, and precipitation. Dome stadiums are auto-detected and skipped.
+- **Home/away split:** Removed (was +3, -19.6% lift).
+- **H2H:** Removed (was +3/+2, -33% lift — terrible).
 - **Moneyline threshold:** 3+ points (field goal margin).
-
----
-
-## Lean Logic
-
-The tool determines which team to lean towards based on slot type and spread:
-
-- **Public/caution slot** = lean favorite (public money tends to be right in these spots)
-- **Vegas/trap slot** = lean underdog (sharp money fades the public)
-
-Spread convention: negative = home team favored. The action string includes the spread value and a "don't take past" limit (spread minus 1.5 points).
-
-When the spread exceeds the sport-specific moneyline threshold, the tool recommends taking the moneyline instead of the spread.
-
-### Trell Rule Lean Override
-When the Trell Rule fires (star player recently injured + out + vegas slot), the lean overrides to the star's team — the market overreacts to star injuries and creates value.
-
-### Home/Away Split Bonus
-+3 when the lean aligns with the natural home/away edge:
-- Public slot + lean is home favorite
-- Vegas slot + lean is road underdog
 
 ---
 
@@ -256,7 +302,7 @@ The system learns from its own history. The Ledger's tracked results feed back i
 ### ATS Record Factor
 Checks the Ledger for the lean team's historical against-the-spread record:
 - +4 if >60% ATS (minimum 3 decided games)
-- -3 if <40% ATS
+- -3 if <40% ATS (removed for NHL; flipped to +2 bounce-back for CBB)
 
 ### Sharp Money Detection
 When `THE_ODDS_API_KEY` is set, compares Pinnacle (sharpest book) spreads against consensus:
@@ -265,9 +311,17 @@ When `THE_ODDS_API_KEY` is set, compares Pinnacle (sharpest book) spreads agains
 
 ### Head-to-Head / Revenge Games
 Looks up the most recent matchup between the two teams:
-- +3 if lean team lost the prior meeting by the sport's threshold (revenge motivation)
+- +1 to +3 if lean team lost the prior meeting by the sport's threshold (revenge motivation)
 - +2 if lean team dominated the prior meeting (continued dominance)
 - Thresholds: NBA 10 pts, NHL 3 goals, CFB/CBB 10 pts, NFL 7 pts
+- Removed for CBB, NHL, and NFL (backtested as noise or harmful)
+
+### Rules Backtest Engine
+Replays the production scoring system against historical outcomes to validate and tune scoring weights:
+- Imports the same `_determine_lean`, `_calculate_score`, `classify_slot` functions used in production
+- Tracks factor-level accuracy (fire rate, lift) to identify helpful vs harmful signals
+- Generates threshold sweeps, slot breakdowns, recommendation breakdowns
+- Factors NOT replayable: Trell Rule (no historical injury data), Public betting (no Pinnacle history), Feedback loop (no ledger at game time), NFL weather (no historical weather)
 
 ### Today + Tomorrow Slate
 The scanner automatically fetches both today's active games and tomorrow's full slate. Tomorrow's games get a lightweight analysis (skip expensive API calls like PRISM, B2B, H2H, NFL weather/trends) since deep analysis isn't needed yet.
@@ -278,6 +332,17 @@ Results are pre-computed and cached for instant page loads:
 - `/api/scan` returns cached results instantly, then triggers a background re-scan
 - Periodic full refresh every hour for all cached sports
 - No startup warm-up (avoids slow deploy loads)
+
+---
+
+## Authentication
+
+Optional Supabase authentication gate:
+- Supabase JS CDN in `index.html`, auth-gate div as first body child
+- `require_auth` decorator on all `/api/*` routes (except `/api/auth/config`)
+- `authFetch()` wrapper in app.js injects Bearer token, auto-signs out on 401
+- PyJWT for server-side JWT verification (ES256 via JWKS, HS256 fallback)
+- When `SUPABASE_JWT_SECRET` is empty, auth is bypassed (local dev mode)
 
 ---
 
@@ -295,13 +360,14 @@ line_movement.py      Spread movement detection + confirmation logic
 trell_rule.py         Star player injury analysis (per-sport thresholds)
 rank_analysis.py      CFB/CBB rank tiers, spread discrepancy, rank scam detection
 analysis_factors.py   All scoring factors, NFL helpers, lean determination
+constants.py          Recommendation thresholds, max scores, ML thresholds
 prism.py              PRISM player prop projection engine (pure math, no API calls)
 projections.py        Manual prediction math (over/under probability)
 tracker.py            SQLite/PostgreSQL prediction storage + grading + dashboard stats
 scan_cache.py         Background scan cache daemon (thread-safe, hourly refresh)
 templates/            index.html (single-page app)
 static/               app.js (frontend logic), style.css (dark Gotham theme)
-test_model/           Experimental ML overlay (collector, features, backtest, scanner)
+test_model/           Backtesting engine (collector, features, rules backtest, ML scanner)
 ```
 
 ### API Endpoints
@@ -310,11 +376,13 @@ test_model/           Experimental ML overlay (collector, features, backtest, sc
 |----------|--------|-------------|
 | `/api/games` | GET | Today + tomorrow games for ticker, autocomplete, and hero cards |
 | `/api/scan` | POST | Scan all games for a sport (or `"all"` for all 5). Returns cached results instantly |
+| `/api/props` | GET | Load PRISM player props for a specific game (on-demand) |
 | `/api/predict` | POST | Manual player prop prediction (NBA) |
 | `/api/dashboard` | GET | Ledger stats, breakdowns, and all predictions (auto-grades pending) |
 | `/api/grade` | POST | Manually trigger grading of pending predictions |
+| `/api/auth/config` | GET | Supabase configuration (public, no auth required) |
 
-### Test Model Endpoints (Experimental)
+### Test Model Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -323,6 +391,8 @@ test_model/           Experimental ML overlay (collector, features, backtest, sc
 | `/api/tm/features` | POST | Compute features for collected data |
 | `/api/tm/backtest` | POST | Start walk-forward backtest |
 | `/api/tm/backtest/status` | GET | Poll backtest progress |
+| `/api/tm/rules-backtest` | POST/GET | Start/get rules replay backtest |
+| `/api/tm/rules-backtest/status` | GET | Poll rules backtest progress |
 | `/api/tm/scan` | POST | Scan today's games with ML model overlay |
 | `/api/tm/metrics` | GET | Get backtest performance metrics |
 
@@ -348,6 +418,7 @@ test_model/           Experimental ML overlay (collector, features, backtest, sc
 | HTTP response cache | 10 minutes | Avoid hammering ESPN/Odds APIs during concurrent analysis |
 | Scan results cache | 1 hour | Instant page loads, background refresh on demand |
 | Feedback loop cache | 5 minutes | Avoid repeated Ledger DB queries during scan |
+| Player ID cache | Session | Avoid redundant balldontlie lookups |
 | Thread-safe | All layers | Locks prevent race conditions during parallel game analysis |
 
 ### Concurrency
@@ -376,6 +447,73 @@ The Trell Rule only fires when: the player is a star, status is "Out", the injur
 
 ---
 
+## Backtested Performance
+
+Results from replaying the scoring system against historical outcomes:
+
+| Sport | Games | STRONG PLAY | LEAN | Overall |
+|-------|-------|-------------|------|---------|
+| NBA | 607 | 58 bets @ 74.1%, +41.5% ROI | 128 bets @ 53.9% | 60.6% acc, +15.6% ROI |
+| NHL | 529 | 19 bets @ 79.0%, +45.5% ROI | 186 bets @ 66.1% | 65.9% acc |
+| CBB | 1,977 | score>=13 | score>=10 | 65.8% acc, +25.6% ROI |
+| NFL | 105 | score>=20 | score>=10 | 56.8% acc, +19.3% ROI |
+
+Line movement is consistently the strongest individual signal across all sports (+9-17% lift when it fires).
+
+---
+
+## Overfitting Protection
+
+Every sport-specific weight override (day penalties, spread buckets, lean direction, factor weights) was derived from the same historical data it's evaluated on, creating overfitting risk. A regularization framework constrains weight derivation and requires statistical evidence before applying overrides.
+
+### Confidence Registry
+
+All sport-specific overrides are tracked in `SPORT_OVERRIDES` (`constants.py`) with metadata:
+
+| Field | Description |
+|-------|-------------|
+| `value` | The override value |
+| `n` | Sample size used to derive it |
+| `p_value` | Statistical significance (proportion z-test) |
+| `confidence` | Tier: `validated`, `weak`, or `insufficient_data` |
+
+Only **validated** overrides are applied in production scoring. Weak and insufficient_data overrides fall back to `UNIVERSAL_DEFAULTS` (pre-tuning baselines).
+
+**Impact:** NFL's lean flip (n=105, insufficient_data) falls back to slot_dependent defaults. Many NBA spread bucket adjustments are "weak" and fall back to 0.
+
+### Evidence Thresholds
+
+Each override category has minimum sample size and p-value requirements:
+
+| Category | Min Games | p-value Threshold |
+|----------|-----------|-------------------|
+| Day penalty | 40 | 0.05 |
+| Spread bucket | 50 | 0.05 |
+| Factor weight | 100 | 0.10 |
+| Lean direction | 200 | 0.05 |
+
+### L2 Regularization
+
+Walk-forward weight derivation applies an L2 penalty that penalizes deviation from universal defaults:
+
+```
+penalty = lambda * sum((derived_weight - default_weight)^2)
+```
+
+This soft constraint shrinks extreme derived values back toward baselines, reducing overfitting to training folds. Applied in:
+- Threshold sweep (penalized accuracy for cutoff selection)
+- Factor weight derivation (weights shrunk toward defaults after computation)
+
+### Statistical Testing
+
+The walk-forward engine (`walkforward.py`) applies proportion z-tests at every derivation step:
+- **Lean direction:** Requires n >= 200 and p < 0.05 in both public and vegas slots to flip from default
+- **Day penalties:** Requires n >= 40 and p < 0.05 vs overall dog cover rate
+- **Spread buckets:** Requires n >= 50 and p < 0.05 vs overall dog cover rate
+- **Factor weights:** Factors with 100+ fires require p < 0.10 for full weight; 30-100 fires cap at +/-2; below 30 zeroed out
+
+---
+
 ## Usage
 
 ```bash
@@ -388,8 +526,12 @@ Open `http://localhost:5000`. Click a sport card on the hero page to auto-scan, 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `SUPABASE_URL` | No | Supabase project URL for authentication |
+| `SUPABASE_ANON_KEY` | No | Supabase anonymous key for client-side auth |
+| `SUPABASE_JWT_SECRET` | No | JWT secret for server-side verification (empty = bypass auth) |
 | `OPENWEATHER_API_KEY` | No | Enables fallback weather data for NFL outdoor games |
-| `THE_ODDS_API_KEY` | No | Enables sharp money detection (Pinnacle vs consensus) and posted player prop lines for PRISM |
+| `THE_ODDS_API_KEY` | No | Enables sharp money detection and posted player prop lines |
+| `ODDS_API_KEY` | No | Odds API key for historical spread backfill in backtesting |
 | `DATABASE_URL` | No | PostgreSQL connection string for production (defaults to local SQLite) |
 | `PORT` | No | Server port (default 5000) |
 | `SCAN_GAME_WORKERS` | No | Thread pool size for parallel game analysis (default 10) |
@@ -405,4 +547,6 @@ psycopg2-binary
 scikit-learn
 vaderSentiment
 numpy
+PyJWT
+cryptography
 ```

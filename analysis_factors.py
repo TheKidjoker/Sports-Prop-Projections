@@ -11,6 +11,7 @@ from api_client import (
 )
 from api_odds import _match_odds_to_game
 from line_movement import score_line_movement
+from constants import get_override, UNIVERSAL_DEFAULTS
 
 
 # ─── NFL INDOOR STADIUMS ────────────────────────────────────────────────────
@@ -530,36 +531,33 @@ def _determine_lean(slot_type, home_team, away_team, current_spread, sport="nba"
     """
     Determine which team to lean towards based on slot type and spread.
 
-    NBA (backtested): always lean underdog — public inflates favorite lines.
-    NHL (backtested): always lean underdog — favorite lean was 37.5%, underdog 71.2%.
-
-    Other sports:
-      Public/caution slot -> lean favorite (public money tends to be right).
-      Vegas/trap slot -> lean underdog (sharp money fades the public).
+    Uses the override registry to check for validated lean direction overrides.
+    Falls back to universal defaults (public=favorite, vegas=underdog) when
+    no validated override exists.
 
     Negative spread = home team favored.
     """
     if current_spread is None:
         return None
 
-    if sport in ("nba", "nhl"):
-        # NBA + NHL: lean underdog in all slots (backtested)
+    lean_override = get_override(sport, "lean_direction", None)
+
+    if lean_override == "always_underdog":
+        # NBA + NHL: validated — always lean underdog in all slots
         return away_team if current_spread < 0 else home_team
 
-    if sport == "nfl":
-        # NFL V1: public=underdog (58% cover), vegas=favorite (56.2% cover)
-        # Opposite of other sports — NFL public money inflates favorites
+    if lean_override == "flipped":
+        # NFL-style: public=underdog, vegas=favorite
         if slot_type in ("public", "skip", "caution"):
-            return away_team if current_spread < 0 else home_team  # underdog
+            return away_team if current_spread < 0 else home_team
         elif slot_type in ("vegas", "trap"):
-            return home_team if current_spread < 0 else away_team  # favorite
-        return away_team if current_spread < 0 else home_team  # default underdog
+            return home_team if current_spread < 0 else away_team
+        return away_team if current_spread < 0 else home_team
 
+    # Default slot_dependent: public=favorite, vegas=underdog
     if slot_type in ("public", "caution"):
-        # Lean with the favorite (expect sensible/public outcome)
         return home_team if current_spread < 0 else away_team
     elif slot_type in ("vegas", "trap"):
-        # Lean with the underdog (against public / trap game)
         return away_team if current_spread < 0 else home_team
 
     return None
@@ -581,32 +579,14 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                      line_toward_dog=False, line_toward_fav=False,
                      day_of_week=""):
     """
-    Scoring (backtested: * = NBA V5, ** = CBB V2/V3, *** = NHL V2):
-      +10/+5*/+3**/+3***  public slot
-      +0-8/+0-5*  line movement confirms slot (NBA: reduced weights)
-      +3/-2*  line direction toward dog/fav (NBA V5, NFL V1)
-      +5   trell rule confirms
-      +5   rank scam detected (CFB/CBB)
-      +5   spread discrepancy detected (CFB/CBB)
-      +5   trend discrepancy (NFL)
-      +5   O/U discrepancy (NFL)
-      +5   weather factor (NFL)
-      special  spread adjustments (NBA/CBB/NFL sport-specific)
-      +4/-3 or +2/-1* or 0/-1***  B2B rest (NHL V2: bonus removed, penalty -1)
-      +4/-3 or 0/+2** or +4/0***  ATS record (CBB: bounce-back; NHL: penalty removed)
-      +3/0**/0***  home/away split
-      +3/+5 public betting / sharp money (all)
-      -2/+3 feedback loop (all)
-      +1*/0**/0***  head-to-head (CBB/NHL/NFL: removed)
-      +5/+7 vegas trap (NBA only)
-      -3*  Tuesday penalty (NBA V5: 40.8% dog cover)
-      -4** Sunday penalty (CBB V3: 36.1% dog cover)
-      -3*** Friday penalty (NHL V2: 57.5% dog cover)
-      = 44 max (NBA), 42 max (NHL), 37 max (CBB), 48 max (CFB), 35 max (NFL)
+    Composite scoring using the override registry. Only validated overrides
+    deviate from UNIVERSAL_DEFAULTS; weak/insufficient_data fall back to
+    pre-tuning baselines.
 
     Returns:
         (total_score, breakdown_dict)
     """
+    defaults = UNIVERSAL_DEFAULTS
     breakdown = {"slot": 0, "line_movement": 0, "line_direction": 0,
                  "trell": 0,
                  "rank_scam": 0, "spread_discrepancy": 0,
@@ -616,15 +596,10 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
                  "public_betting": 0, "feedback": 0, "head_to_head": 0,
                  "vegas_trap": 0}
 
+    # Public slot bonus — validated overrides or universal default
     if slot_type == "public":
-        if sport == "nba":
-            breakdown["slot"] = 5
-        elif sport == "cbb":
-            breakdown["slot"] = 3
-        elif sport == "nhl":
-            breakdown["slot"] = 3   # NHL V1: public slot only 37.5% with fav lean, reduced
-        else:
-            breakdown["slot"] = 10
+        breakdown["slot"] = get_override(sport, "public_slot_bonus",
+                                         defaults["public_slot_bonus"])
     if line_confirms:
         breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
@@ -634,84 +609,86 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if spread_disc_applies:
         breakdown["spread_discrepancy"] = 5
     if trend_disc_applies:
-        breakdown["trend_discrepancy"] = 5  # NFL V1: +20% lift after lean flip
+        breakdown["trend_discrepancy"] = 5
     if ou_disc_applies:
-        breakdown["overunder"] = 5  # NFL V1: +6.9% lift after lean flip
+        breakdown["overunder"] = 5
     if weather_applies:
         breakdown["weather"] = 5
 
-    # B2B: NBA reduced (minimal lift); NHL V1: bonus hurts (-8%), penalty helps (+7.4%)
+    # B2B — override or universal default
     if b2b_bonus:
-        breakdown["b2b"] = 2 if sport == "nba" else (0 if sport == "nhl" else 4)
+        breakdown["b2b"] = get_override(sport, "b2b_bonus", defaults["b2b_bonus"])
     elif b2b_penalty:
-        breakdown["b2b"] = -1 if sport == "nba" else (-1 if sport == "nhl" else -3)
-    # ATS: CBB V3 bounce-back (+9.8% lift); NHL V2 removed penalty (64.1% vs 65.9%)
+        breakdown["b2b"] = get_override(sport, "b2b_penalty", defaults["b2b_penalty"])
+
+    # ATS — override or universal default
     if ats_bonus:
-        breakdown["ats_record"] = 0 if sport == "cbb" else 4
+        breakdown["ats_record"] = get_override(sport, "ats_bonus", defaults["ats_bonus"])
     elif ats_penalty:
-        if sport == "cbb":
-            breakdown["ats_record"] = 2   # CBB: bounce-back bonus
-        elif sport == "nhl":
-            breakdown["ats_record"] = 0   # NHL V2: penalty too harsh (-0.9% lift)
-        else:
-            breakdown["ats_record"] = -3
-    # Home/away split: CBB V2 removed (-7.9% lift); NFL V1 removed (-19.6% lift)
+        breakdown["ats_record"] = get_override(sport, "ats_penalty", defaults["ats_penalty"])
+
+    # Home/away split — override or universal default
     if home_away_applies:
-        breakdown["home_away_split"] = 0 if sport in ("cbb", "nfl") else 3
+        breakdown["home_away_split"] = get_override(sport, "home_away_split",
+                                                     defaults["home_away_split"])
+
     breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
-    # H2H: NBA revenge reduced; CBB/NHL/NFL removed (backtested — noise or harmful)
+
+    # H2H revenge / dominance — override or universal default
     if h2h_revenge_bonus:
-        breakdown["head_to_head"] = 0 if sport in ("cbb", "nhl", "nfl") else (1 if sport == "nba" else 3)
+        breakdown["head_to_head"] = get_override(sport, "h2h_revenge",
+                                                  defaults["h2h_revenge"])
     elif h2h_dominance_bonus:
-        breakdown["head_to_head"] = 0 if sport in ("cbb", "nfl") else 2
+        breakdown["head_to_head"] = get_override(sport, "h2h_dominance",
+                                                  defaults["h2h_dominance"])
+
     breakdown["vegas_trap"] = vegas_trap_bonus
 
-    # NBA V5 + NFL V1: line direction toward dog is strong signal
-    if sport in ("nba", "nfl"):
-        if line_toward_dog:
-            breakdown["line_direction"] = 3
-        elif line_toward_fav:
-            breakdown["line_direction"] = -2
+    # Line direction — override or universal default (0)
+    if line_toward_dog:
+        breakdown["line_direction"] = get_override(sport, "line_toward_dog",
+                                                    defaults["line_toward_dog"])
+    elif line_toward_fav:
+        breakdown["line_direction"] = get_override(sport, "line_toward_fav",
+                                                    defaults["line_toward_fav"])
 
-    # NBA V5: Tuesday penalty (40.8% dog cover — worst day)
-    # CBB V3: Sunday penalty (36.1% dog cover — worst day)
-    # NHL V2: Friday penalty (57.5% dog cover, Fri_public 46.2%)
-    if sport == "nba" and day_of_week.lower() == "tuesday":
-        breakdown["day_penalty"] = -3
-    elif sport == "cbb" and day_of_week.lower() == "sunday":
-        breakdown["day_penalty"] = -4
-    elif sport == "nhl" and day_of_week.lower() == "friday":
-        breakdown["day_penalty"] = -3
+    # Day penalties — each sport/day combo checked via override registry
+    day_lower = day_of_week.lower()
+    # Map sport+day to override names
+    _day_penalty_map = {
+        ("nba", "tuesday"): "tuesday_penalty",
+        ("cbb", "sunday"): "sunday_penalty",
+        ("nhl", "friday"): "friday_penalty",
+    }
+    day_override_name = _day_penalty_map.get((sport, day_lower))
+    if day_override_name:
+        breakdown["day_penalty"] = get_override(sport, day_override_name, 0)
 
-    # Spread size: NBA V5 has sweet spot + penalties; CBB V2 same; others penalize big spreads
+    # Spread adjustments — override registry for each bucket, fallback to generic rules
     if spread_value is not None:
         spread_abs = abs(spread_value)
         if sport == "nba":
-            # NBA V5: 3-4.5 sweet spot (+2, 57.1%), 5-6.5 death zone (-3, 47.6%),
-            # 13+ blowout (-3, 46.0%)
             if 3 <= spread_abs < 5:
-                breakdown["spread_penalty"] = 2    # sweet spot
+                breakdown["spread_penalty"] = get_override(sport, "spread_3_5_bonus", 0)
             elif 5 <= spread_abs < 7:
-                breakdown["spread_penalty"] = -3   # death zone
+                breakdown["spread_penalty"] = get_override(sport, "spread_5_7_penalty", 0)
             elif spread_abs >= 13:
-                breakdown["spread_penalty"] = -3   # blowout territory
+                breakdown["spread_penalty"] = get_override(sport, "spread_13_plus_penalty", 0)
         elif sport == "cbb":
-            # CBB V2: 6-10 sweet spot (+3), tiny spreads (-3), big spreads (-2)
             if 6 <= spread_abs < 10:
-                breakdown["spread_penalty"] = 3   # sweet spot bonus
+                breakdown["spread_penalty"] = get_override(sport, "spread_6_10_bonus", 0)
             elif spread_abs < 3:
-                breakdown["spread_penalty"] = -3  # coin-flip territory
+                breakdown["spread_penalty"] = get_override(sport, "spread_0_3_penalty", 0)
             elif spread_abs >= 15:
-                breakdown["spread_penalty"] = -2  # blowout territory
+                breakdown["spread_penalty"] = get_override(sport, "spread_15_plus_penalty", 0)
         elif sport == "nfl":
-            # NFL V1: 3-7 sweet spot (65.2% dog cover), <3 coin flip (47.6%), 10+ blowout (38.9%)
             if 3 <= spread_abs < 7:
-                breakdown["spread_penalty"] = 3   # sweet spot
+                breakdown["spread_penalty"] = get_override(sport, "spread_3_7_bonus", 0)
             elif spread_abs < 3:
-                breakdown["spread_penalty"] = -3  # coin flip
+                breakdown["spread_penalty"] = get_override(sport, "spread_0_3_penalty", 0)
             elif spread_abs >= 10:
-                breakdown["spread_penalty"] = -3  # blowout
+                breakdown["spread_penalty"] = get_override(sport, "spread_10_plus_penalty", 0)
         elif sport == "nhl" and spread_abs > 8:
             breakdown["spread_penalty"] = -3
         elif sport == "cfb" and spread_abs > 14:
