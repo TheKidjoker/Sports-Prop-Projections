@@ -1,4 +1,28 @@
 document.addEventListener("DOMContentLoaded", function () {
+    // ─── Constants ──────────────────────────────────────────────────────
+    var COVER_PCT = {
+        actionable: 68.5,
+        nearMiss: 58,
+        lotto: 72,
+        parlaySafety: 80,
+        parlayNormal: 67.5,
+        parlayYolo: 60,
+    };
+    var POLL_INTERVAL = 5000;
+
+    // ─── Helpers ─────────────────────────────────────────────────────────
+    function getSignalClass(signal) {
+        if (signal === "STRONG OVER") return "prism-strong-over";
+        if (signal === "STRONG UNDER") return "prism-strong-under";
+        if (signal === "LEAN OVER") return "prism-lean-over";
+        if (signal === "LEAN UNDER") return "prism-lean-under";
+        return "prism-skip";
+    }
+
+    function formatTeamLabel(team, rank) {
+        return rank ? '#' + rank + ' ' + team : team;
+    }
+
     // ─── Auth State ─────────────────────────────────────────────────────
     var _supabaseClient = null;
     var _accessToken = null;
@@ -310,8 +334,8 @@ document.addEventListener("DOMContentLoaded", function () {
         teamDropdown.innerHTML = "";
         matches.forEach(function (g) {
             var li = document.createElement("li");
-            var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
-            var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
+            var awayLabel = formatTeamLabel(g.away_team, g.away_rank);
+            var homeLabel = formatTeamLabel(g.home_team, g.home_rank);
             var text = awayLabel + " vs " + homeLabel + " - ";
             if (g.date_label) text += g.date_label + " ";
             text += g.game_time_est + " EST";
@@ -583,7 +607,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
+        var filtered = games.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
         var nonSkip = games.filter(function (g) { return !g.skip; });
 
         var sportLabel = currentSport.toUpperCase();
@@ -646,7 +670,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // "Other Games to Watch" — below threshold but above 58%, not already shown
         var filteredIds = filtered.map(function (g) { return g.home_team + g.away_team; });
         var nearMisses = nonSkip.filter(function (g) {
-            return g.cover_pct >= 58 && g.cover_pct < 68.5 && filteredIds.indexOf(g.home_team + g.away_team) === -1;
+            return g.cover_pct >= COVER_PCT.nearMiss && g.cover_pct < COVER_PCT.actionable && filteredIds.indexOf(g.home_team + g.away_team) === -1;
         }).sort(function (a, b) {
             var aDay = a.date_label === "Today" ? 0 : 1;
             var bDay = b.date_label === "Today" ? 0 : 1;
@@ -683,7 +707,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (aDay !== bDay) return aDay - bDay;
                 return b.confirmation_score - a.confirmation_score;
             });
-            var filtered = games.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
+            var filtered = games.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
 
             html += '<div class="all-sport-section">';
             html += '<h3 class="all-sport-header">' + sportNames[sport] + '</h3>';
@@ -715,10 +739,112 @@ document.addEventListener("DOMContentLoaded", function () {
         scanResultsVisible = true;
     }
 
+    function buildCardMetadata(g, sport) {
+        var html = '';
+        // Venue
+        if ((sport === "nhl" || sport === "cfb" || sport === "cbb" || sport === "nfl") && g.venue_name) {
+            var venueText = g.venue_name;
+            if (g.venue_city) {
+                venueText += " — " + g.venue_city;
+                if (g.venue_state) venueText += ", " + g.venue_state;
+            }
+            html += '<div class="scan-venue">' + venueText + '</div>';
+        }
+        // Time + Date label
+        var timeText = '';
+        if (g.date_label) timeText += '<span class="scan-date-label">' + g.date_label + '</span> — ';
+        timeText += g.game_time_est + ' EST';
+        html += '<div class="scan-time">' + timeText + '</div>';
+        // Slot type label
+        if ((sport === "cfb" || sport === "cbb" || sport === "nfl") && g.slot_type) {
+            html += '<div class="scan-slot slot-' + g.slot_type + '">' + g.slot_type.toUpperCase() + '</div>';
+        }
+        return html;
+    }
+
+    function buildCardFactors(g, sport) {
+        var html = '';
+        // Rank Scam
+        if (g.rank_scam && g.rank_scam.is_rank_scam) {
+            var tierLabel = g.rank_scam.tier ? g.rank_scam.tier.toUpperCase() : '';
+            html += '<div class="scan-rank-scam"><span class="rank-scam-label">RANK SCAM — ' + tierLabel + '</span> <span class="rank-scam-detail">' + g.rank_scam.scam_action + '</span></div>';
+        }
+        // Spread Discrepancy
+        if (g.spread_discrepancy && g.spread_discrepancy.is_discrepancy) {
+            html += '<div class="scan-spread-disc"><span class="spread-disc-label">SPREAD ALERT</span> <span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span></div>';
+        }
+        // NFL Weather
+        if (sport === "nfl") {
+            if (g.weather_dome) {
+                html += '<div class="scan-weather-alert dome"><span class="weather-label">DOME</span></div>';
+            } else if (g.weather_alerts && g.weather_alerts.length > 0) {
+                html += '<div class="scan-weather-alert"><span class="weather-label">WEATHER ALERT</span> <span class="weather-detail">' + g.weather_alerts.join(" | ") + '</span></div>';
+            } else if (g.weather) {
+                var wp = [];
+                if (g.weather.temperature) wp.push(g.weather.temperature + "°F");
+                if (g.weather.wind_speed) wp.push("Wind " + g.weather.wind_speed + " mph");
+                if (g.weather.condition) wp.push(g.weather.condition);
+                if (wp.length > 0) html += '<div class="scan-weather-info"><span class="weather-detail">' + wp.join(" | ") + '</span></div>';
+            }
+        }
+        // NFL Trend Discrepancy
+        if (g.trend_discrepancy && g.trend_discrepancy.applies) {
+            var td = g.trend_discrepancy;
+            html += '<div class="scan-trend-disc"><span class="trend-disc-label">TREND ALERT</span> ';
+            if (td.home_signal) html += '<span class="' + (td.home_signal === "bounce-back" ? "trend-bounce" : "trend-regress") + '">Home (' + td.home_record + '): ' + td.home_signal.toUpperCase() + '</span> ';
+            if (td.away_signal) html += '<span class="' + (td.away_signal === "bounce-back" ? "trend-bounce" : "trend-regress") + '">Away (' + td.away_record + '): ' + td.away_signal.toUpperCase() + '</span> ';
+            if (td.strong_contrarian) html += '<span class="trend-strong">STRONG CONTRARIAN</span>';
+            html += '</div>';
+        }
+        // NFL O/U
+        if (g.overunder && g.overunder.applies) {
+            html += '<div class="scan-ou-alert"><span class="ou-label">O/U ALERT</span> ';
+            g.overunder.flags.forEach(function (flag) { html += '<span class="ou-detail">' + flag + '</span> '; });
+            html += '</div>';
+        }
+        // B2B
+        if (g.b2b) {
+            html += '<div class="' + (g.b2b.b2b_bonus ? "scan-b2b-alert bonus" : "scan-b2b-alert penalty") + '"><span class="b2b-label">REST ALERT</span> <span class="b2b-detail">' + g.b2b.detail + '</span></div>';
+        }
+        // ATS
+        if (g.ats_record) {
+            html += '<div class="' + (g.ats_record.ats_bonus ? "scan-ats-record strong" : "scan-ats-record weak") + '"><span class="ats-label">ATS RECORD</span> <span class="ats-detail">' + g.ats_record.detail + '</span></div>';
+        }
+        // Sharp Money
+        if (g.public_betting && g.public_betting.public_betting_bonus > 0) {
+            html += '<div class="scan-sharp-money"><span class="sharp-label">SHARP MONEY</span> <span class="sharp-detail">' + g.public_betting.detail + '</span></div>';
+        }
+        // H2H
+        if (g.head_to_head) {
+            var h2hClass = g.head_to_head.h2h_revenge_bonus ? "scan-h2h revenge" : "scan-h2h dominance";
+            var h2hLabel = g.head_to_head.h2h_revenge_bonus ? "REVENGE GAME" : "PRIOR MATCHUP";
+            html += '<div class="' + h2hClass + '"><span class="h2h-label">' + h2hLabel + '</span> <span class="h2h-detail">' + g.head_to_head.detail + '</span></div>';
+        }
+        // Vegas Trap
+        if (g.vegas_trap && g.vegas_trap.is_vegas_trap) {
+            html += '<div class="scan-vegas-trap"><span class="vegas-trap-label">VEGAS TRAP</span> <span class="vegas-trap-detail">' + g.vegas_trap.detail + '</span></div>';
+        }
+        return html;
+    }
+
+    function buildCardProps(g, sport) {
+        if (sport !== "nba" || g.date_label !== "Today" || g.skip) return '';
+        var alreadyLoaded = loadedProps[g.event_id] && loadedProps[g.event_id].length > 0;
+        var html = '<div class="scan-prism-section' + (alreadyLoaded ? ' prism-expanded' : '') + '" id="prism-section-' + g.event_id + '">';
+        html += '<div class="prism-dropdown-toggle" data-event-id="' + g.event_id + '">';
+        html += '<span class="prism-dropdown-label">Player Props</span>';
+        html += '<span class="prism-dropdown-chevron">&#9660;</span>';
+        html += '</div>';
+        html += '<div class="prism-dropdown-body" id="prism-body-' + g.event_id + '">';
+        if (alreadyLoaded) html += buildPrismInner(loadedProps[g.event_id]);
+        html += '</div></div>';
+        return html;
+    }
+
     function buildScanCard(g, sport, isAlt) {
         var pct = g.cover_pct;
         var pctClass = "pct-mid";
-        if (pct >= 80) pctClass = "pct-high";
+        if (pct >= COVER_PCT.parlaySafety) pctClass = "pct-high";
         if (isAlt) pctClass = "pct-low";
 
         var cardClass = g.skip ? "scan-card scan-card-skip" : "scan-card";
@@ -733,168 +859,14 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="scan-pct ' + pctClass + '">' + pct + '%</div>';
         html += '</div>';
 
-        // Venue (NHL, CFB, and NFL)
-        if ((sport === "nhl" || sport === "cfb" || sport === "cbb" || sport === "nfl") && g.venue_name) {
-            var venueText = g.venue_name;
-            if (g.venue_city) {
-                venueText += " — " + g.venue_city;
-                if (g.venue_state) venueText += ", " + g.venue_state;
-            }
-            html += '<div class="scan-venue">' + venueText + '</div>';
-        }
+        html += buildCardMetadata(g, sport);
+        html += buildCardFactors(g, sport);
+        html += buildCardProps(g, sport);
 
-        // Time + Date label
-        var timeText = '';
-        if (g.date_label) {
-            timeText += '<span class="scan-date-label">' + g.date_label + '</span> — ';
-        }
-        timeText += g.game_time_est + ' EST';
-        html += '<div class="scan-time">' + timeText + '</div>';
+        // Skip badge
+        if (g.skip) html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';
 
-        // Slot type label (CFB and NFL)
-        if ((sport === "cfb" || sport === "cbb" || sport === "nfl") && g.slot_type) {
-            var slotLabel = g.slot_type.toUpperCase();
-            var slotClass = "slot-" + g.slot_type;
-            html += '<div class="scan-slot ' + slotClass + '">' + slotLabel + '</div>';
-        }
-
-        // Rank Scam badge (CFB)
-        if (g.rank_scam && g.rank_scam.is_rank_scam) {
-            var tierLabel = g.rank_scam.tier ? g.rank_scam.tier.toUpperCase() : '';
-            html += '<div class="scan-rank-scam">';
-            html += '<span class="rank-scam-label">RANK SCAM — ' + tierLabel + '</span> ';
-            html += '<span class="rank-scam-detail">' + g.rank_scam.scam_action + '</span>';
-            html += '</div>';
-        }
-
-        // Spread Discrepancy badge (CFB)
-        if (g.spread_discrepancy && g.spread_discrepancy.is_discrepancy) {
-            html += '<div class="scan-spread-disc">';
-            html += '<span class="spread-disc-label">SPREAD ALERT</span> ';
-            html += '<span class="spread-disc-detail">#' + g.spread_discrepancy.rank + ' expected ' + g.spread_discrepancy.expected_range + ' pts — ' + g.spread_discrepancy.discrepancy_action + '</span>';
-            html += '</div>';
-        }
-
-        // NFL: Weather badge
-        if (sport === "nfl") {
-            if (g.weather_dome) {
-                html += '<div class="scan-weather-alert dome">';
-                html += '<span class="weather-label">DOME</span>';
-                html += '</div>';
-            } else if (g.weather_alerts && g.weather_alerts.length > 0) {
-                html += '<div class="scan-weather-alert">';
-                html += '<span class="weather-label">WEATHER ALERT</span> ';
-                html += '<span class="weather-detail">' + g.weather_alerts.join(" | ") + '</span>';
-                html += '</div>';
-            } else if (g.weather) {
-                var weatherParts = [];
-                if (g.weather.temperature) weatherParts.push(g.weather.temperature + "°F");
-                if (g.weather.wind_speed) weatherParts.push("Wind " + g.weather.wind_speed + " mph");
-                if (g.weather.condition) weatherParts.push(g.weather.condition);
-                if (weatherParts.length > 0) {
-                    html += '<div class="scan-weather-info">';
-                    html += '<span class="weather-detail">' + weatherParts.join(" | ") + '</span>';
-                    html += '</div>';
-                }
-            }
-        }
-
-        // NFL: Trend Discrepancy badge
-        if (g.trend_discrepancy && g.trend_discrepancy.applies) {
-            var td = g.trend_discrepancy;
-            html += '<div class="scan-trend-disc">';
-            html += '<span class="trend-disc-label">TREND ALERT</span> ';
-            if (td.home_signal) {
-                var homeClass = td.home_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
-                html += '<span class="' + homeClass + '">Home (' + td.home_record + '): ' + td.home_signal.toUpperCase() + '</span> ';
-            }
-            if (td.away_signal) {
-                var awayClass = td.away_signal === "bounce-back" ? "trend-bounce" : "trend-regress";
-                html += '<span class="' + awayClass + '">Away (' + td.away_record + '): ' + td.away_signal.toUpperCase() + '</span> ';
-            }
-            if (td.strong_contrarian) {
-                html += '<span class="trend-strong">STRONG CONTRARIAN</span>';
-            }
-            html += '</div>';
-        }
-
-        // NFL: O/U Alert badge
-        if (g.overunder && g.overunder.applies) {
-            var ou = g.overunder;
-            html += '<div class="scan-ou-alert">';
-            html += '<span class="ou-label">O/U ALERT</span> ';
-            ou.flags.forEach(function (flag) {
-                html += '<span class="ou-detail">' + flag + '</span> ';
-            });
-            html += '</div>';
-        }
-
-        // B2B / Rest Alert badge
-        if (g.b2b) {
-            var b2bClass = g.b2b.b2b_bonus ? "scan-b2b-alert bonus" : "scan-b2b-alert penalty";
-            html += '<div class="' + b2bClass + '">';
-            html += '<span class="b2b-label">REST ALERT</span> ';
-            html += '<span class="b2b-detail">' + g.b2b.detail + '</span>';
-            html += '</div>';
-        }
-
-        // ATS Record badge
-        if (g.ats_record) {
-            var atsClass = g.ats_record.ats_bonus ? "scan-ats-record strong" : "scan-ats-record weak";
-            html += '<div class="' + atsClass + '">';
-            html += '<span class="ats-label">ATS RECORD</span> ';
-            html += '<span class="ats-detail">' + g.ats_record.detail + '</span>';
-            html += '</div>';
-        }
-
-        // Sharp Money badge
-        if (g.public_betting && g.public_betting.public_betting_bonus > 0) {
-            html += '<div class="scan-sharp-money">';
-            html += '<span class="sharp-label">SHARP MONEY</span> ';
-            html += '<span class="sharp-detail">' + g.public_betting.detail + '</span>';
-            html += '</div>';
-        }
-
-        // H2H / Revenge Game badge
-        if (g.head_to_head) {
-            var h2hClass = g.head_to_head.h2h_revenge_bonus ? "scan-h2h revenge" : "scan-h2h dominance";
-            var h2hLabel = g.head_to_head.h2h_revenge_bonus ? "REVENGE GAME" : "PRIOR MATCHUP";
-            html += '<div class="' + h2hClass + '">';
-            html += '<span class="h2h-label">' + h2hLabel + '</span> ';
-            html += '<span class="h2h-detail">' + g.head_to_head.detail + '</span>';
-            html += '</div>';
-        }
-
-        // Vegas Trap badge (NBA)
-        if (g.vegas_trap && g.vegas_trap.is_vegas_trap) {
-            html += '<div class="scan-vegas-trap">';
-            html += '<span class="vegas-trap-label">VEGAS TRAP</span> ';
-            html += '<span class="vegas-trap-detail">' + g.vegas_trap.detail + '</span>';
-            html += '</div>';
-        }
-
-        // PRISM Player Props — dropdown arrow (NBA today only)
-        if (sport === "nba" && g.date_label === "Today" && !g.skip) {
-            var alreadyLoaded = loadedProps[g.event_id] && loadedProps[g.event_id].length > 0;
-            html += '<div class="scan-prism-section' + (alreadyLoaded ? ' prism-expanded' : '') + '" id="prism-section-' + g.event_id + '">';
-            html += '<div class="prism-dropdown-toggle" data-event-id="' + g.event_id + '">';
-            html += '<span class="prism-dropdown-label">Player Props</span>';
-            html += '<span class="prism-dropdown-chevron">&#9660;</span>';
-            html += '</div>';
-            html += '<div class="prism-dropdown-body" id="prism-body-' + g.event_id + '">';
-            if (alreadyLoaded) {
-                html += buildPrismInner(loadedProps[g.event_id]);
-            }
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // NFL: Skip badge
-        if (g.skip) {
-            html += '<div class="scan-skip-badge">SNF — Even the Joker passes</div>';
-        }
-
-        // Action — what to do (split spread vs ML when both exist)
+        // Action
         if (g.action) {
             var parts = g.action.split(' | ');
             if (parts.length === 2) {
@@ -914,12 +886,9 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
-        // Historical accuracy badge (backtested data)
+        // Historical accuracy badge
         if (g.historical_accuracy && g.historical_sample_size) {
-            html += '<div class="scan-backtest-badge">';
-            html += '<span class="backtest-rate">' + g.historical_accuracy + '% hit rate</span>';
-            html += '<span class="backtest-sample">(' + g.historical_sample_size + ' similar picks)</span>';
-            html += '</div>';
+            html += '<div class="scan-backtest-badge"><span class="backtest-rate">' + g.historical_accuracy + '% hit rate</span><span class="backtest-sample">(' + g.historical_sample_size + ' similar picks)</span></div>';
         }
 
         html += '</div>';
@@ -933,11 +902,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         var html = '';
         actionable.forEach(function (p) {
-            var signalClass = "prism-skip";
-            if (p.signal === "STRONG OVER") signalClass = "prism-strong-over";
-            else if (p.signal === "STRONG UNDER") signalClass = "prism-strong-under";
-            else if (p.signal === "LEAN OVER") signalClass = "prism-lean-over";
-            else if (p.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+            var signalClass = getSignalClass(p.signal);
 
             html += '<div class="prism-prop">';
             html += '<div class="prism-prop-info">';
@@ -1094,7 +1059,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Rebuild parlays section
         var parlaysEl = document.querySelector(".parlays-section");
         if (parlaysEl) {
-            var filtered = gamesWithProps.filter(function (g) { return g.cover_pct >= 68.5 || g.skip; });
+            var filtered = gamesWithProps.filter(function (g) { return g.cover_pct >= COVER_PCT.actionable || g.skip; });
             if (filtered.length < 2) filtered = gamesWithProps;
             var newParlayHtml = buildParlaySection(filtered);
             if (newParlayHtml) {
@@ -1118,11 +1083,7 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="top-props-grid">';
 
         topProps.forEach(function (prop) {
-            var signalClass = "prism-skip";
-            if (prop.signal === "STRONG OVER") signalClass = "prism-strong-over";
-            else if (prop.signal === "STRONG UNDER") signalClass = "prism-strong-under";
-            else if (prop.signal === "LEAN OVER") signalClass = "prism-lean-over";
-            else if (prop.signal === "LEAN UNDER") signalClass = "prism-lean-under";
+            var signalClass = getSignalClass(prop.signal);
 
             html += '<div class="top-prop-card">';
             html += '<div class="prism-prop-info">';
@@ -1161,47 +1122,70 @@ document.addEventListener("DOMContentLoaded", function () {
     function buildParlaySection(games) {
         if (games.length < 2) return "";
 
-        // Build combined pool: spread legs + player prop legs
+        // Spread legs only for parlays
         var spreadLegs = games.slice().sort(function (a, b) { return b.cover_pct - a.cover_pct; });
 
-        // Extract player props from games (loaded on-demand) into parlay-compatible leg objects
-        // Only include Today's props (tomorrow's lines aren't firm yet)
-        var propLegs = [];
+        // Collect all props across games (today only) to find Best Prop of the Day
+        var allProps = [];
         games.forEach(function (g) {
             var props = g.player_props || loadedProps[g.event_id] || [];
             if (!props.length) return;
             if (g.date_label === "Tomorrow") return;
             props.forEach(function (p) {
-                var direction = p.signal.indexOf("OVER") !== -1 ? "OVER" : "UNDER";
-                propLegs.push({
-                    cover_pct: p.confidence,
-                    action: p.player_name + " " + direction + " " + p.line + " " + p.stat_type,
-                    is_prop: true,
-                    _prop_signal: p.signal,
-                    _prop_edge: p.edge,
+                allProps.push({
+                    player_name: p.player_name,
+                    team: p.team || '',
+                    matchup: p.matchup || g.away_team + ' @ ' + g.home_team,
+                    stat_type: p.stat_type,
+                    projection: p.projection,
+                    line: p.line,
+                    edge: p.edge,
+                    signal: p.signal,
+                    confidence: p.confidence,
+                    streak: p.streak
                 });
             });
         });
-        propLegs.sort(function (a, b) { return b.cover_pct - a.cover_pct; });
-
-        // Merge both pools sorted by cover_pct
-        var allLegs = spreadLegs.concat(propLegs).sort(function (a, b) {
-            return b.cover_pct - a.cover_pct;
-        });
+        allProps.sort(function (a, b) { return b.confidence - a.confidence; });
 
         var html = '<div class="parlays-section">';
         html += '<h2 class="scan-title">The Joker\'s Parlays</h2>';
 
-        // Safety Parlay: 2 legs, 80%+ each
-        var safetyLegs = allLegs.filter(function (g) { return g.cover_pct >= 80; }).slice(0, 2);
+        // Best Prop of the Day — top prop across all games
+        if (allProps.length > 0) {
+            var best = allProps[0];
+            var direction = best.signal.indexOf("OVER") !== -1 ? "OVER" : "UNDER";
+            var bestOdds = pctToAmericanOdds(best.confidence);
+            var signalClass = getSignalClass(best.signal);
+
+            html += '<div class="best-prop-card">';
+            html += '<div class="best-prop-header">';
+            html += '<span class="best-prop-label">Best Prop of the Day</span>';
+            html += '<span class="best-prop-odds">' + bestOdds + '</span>';
+            html += '</div>';
+            html += '<div class="best-prop-pick">' + best.player_name + ' ' + direction + ' ' + best.line + ' ' + best.stat_type + '</div>';
+            html += '<div class="best-prop-details">';
+            html += '<span class="best-prop-matchup">' + best.matchup + '</span>';
+            html += '<span class="prism-signal-badge ' + signalClass + '">' + best.signal + '</span>';
+            html += '<span class="best-prop-confidence">' + best.confidence + '%</span>';
+            html += '</div>';
+            html += '<div class="best-prop-line">Proj ' + best.projection + ' vs Line ' + best.line + ' (' + (best.edge > 0 ? '+' : '') + best.edge + ' edge)</div>';
+            if (best.streak && best.streak.count >= 3) {
+                html += '<div class="best-prop-streak">' + best.streak.count + '/5 ' + best.streak.direction + '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Safety Parlay: 2 legs, 80%+ each (spreads only)
+        var safetyLegs = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlaySafety; }).slice(0, 2);
         if (safetyLegs.length >= 2) {
             var safetyOdds = calcParlayOdds(safetyLegs);
             var safetyProb = calcCombinedProb(safetyLegs);
             html += buildParlayCard("Two-Face's Safe Bet", safetyLegs, safetyOdds, safetyProb, "parlay-safety");
         }
 
-        // Normal Parlay: 4-6 legs, 67.5%+ each
-        var normalPool = allLegs.filter(function (g) { return g.cover_pct >= 67.5; });
+        // Normal Parlay: 4-6 legs, 67.5%+ each (spreads only)
+        var normalPool = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlayNormal; });
         var normalLegs = normalPool.slice(0, Math.min(6, Math.max(4, normalPool.length)));
         if (normalLegs.length >= 4) {
             var normalOdds = calcParlayOdds(normalLegs);
@@ -1213,14 +1197,10 @@ document.addEventListener("DOMContentLoaded", function () {
             html += buildParlayCard("Gotham Gambit", normalPool, normalOdds, normalProb, "parlay-normal");
         }
 
-        // YOLO Parlay: spread legs + sprinkle in top player props
-        var yoloSpreads = spreadLegs.filter(function (g) { return g.cover_pct >= 60; });
-        var yoloProps = propLegs.slice(0, 3); // top 3 props by confidence
-        var yoloPool = yoloSpreads.concat(yoloProps).sort(function (a, b) {
-            return b.cover_pct - a.cover_pct;
-        });
-        if (yoloPool.length >= 3) {
-            var yoloLegs = yoloPool.slice(0, Math.min(10, yoloPool.length));
+        // YOLO Parlay: spread legs 60%+ (spreads only)
+        var yoloSpreads = spreadLegs.filter(function (g) { return g.cover_pct >= COVER_PCT.parlayYolo; });
+        if (yoloSpreads.length >= 3) {
+            var yoloLegs = yoloSpreads.slice(0, Math.min(10, yoloSpreads.length));
             var yoloOdds = calcParlayOdds(yoloLegs);
             var yoloProb = calcCombinedProb(yoloLegs);
             html += buildParlayCard("Gotham Breakout", yoloLegs, yoloOdds, yoloProb, "parlay-yolo");
@@ -1304,8 +1284,8 @@ document.addEventListener("DOMContentLoaded", function () {
         var items = "";
 
         games.forEach(function (g) {
-            var awayLabel = g.away_rank ? '#' + g.away_rank + ' ' + g.away_team : g.away_team;
-            var homeLabel = g.home_rank ? '#' + g.home_rank + ' ' + g.home_team : g.home_team;
+            var awayLabel = formatTeamLabel(g.away_team, g.away_rank);
+            var homeLabel = formatTeamLabel(g.home_team, g.home_rank);
             var tickerTime = '';
             if (g.date_label) {
                 tickerTime += g.date_label + ' — ';
@@ -1378,7 +1358,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var games = allSports[sport] || [];
             // Filter: >= 72% cover, not skip
             var eligible = games.filter(function (g) {
-                return g.cover_pct >= 72 && !g.skip;
+                return g.cover_pct >= COVER_PCT.lotto && !g.skip;
             });
             if (eligible.length === 0) return;
 
@@ -1518,164 +1498,150 @@ document.addEventListener("DOMContentLoaded", function () {
             });
     }
 
-    function renderDashboard(data) {
-        var o = data.overall;
-
-        // Stat cards
+    function renderDashboardStats(o) {
         var rateClass = o.win_rate >= 55 ? "stat-green" : o.win_rate >= 45 ? "stat-yellow" : "stat-red";
-        var statsHtml = '<div class="dash-stat-cards">';
-        statsHtml += '<div class="dash-stat-card">';
-        statsHtml += '<div class="dash-stat-label">Record</div>';
-        statsHtml += '<div class="dash-stat-value">' + o.wins + '-' + o.losses + (o.pushes > 0 ? '-' + o.pushes : '') + '</div>';
-        statsHtml += '</div>';
-        statsHtml += '<div class="dash-stat-card">';
-        statsHtml += '<div class="dash-stat-label">Win Rate</div>';
-        statsHtml += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%</div>';
-        statsHtml += '</div>';
-        statsHtml += '<div class="dash-stat-card">';
-        statsHtml += '<div class="dash-stat-label">Total Picks</div>';
-        statsHtml += '<div class="dash-stat-value">' + o.total + '</div>';
-        statsHtml += '</div>';
-        statsHtml += '<div class="dash-stat-card">';
-        statsHtml += '<div class="dash-stat-label">Pending</div>';
-        statsHtml += '<div class="dash-stat-value stat-muted">' + o.pending + '</div>';
-        statsHtml += '</div>';
-        statsHtml += '</div>';
-        document.getElementById("dashboard-stats").innerHTML = statsHtml;
+        var html = '<div class="dash-stat-cards">';
+        html += '<div class="dash-stat-card">';
+        html += '<div class="dash-stat-label">Record</div>';
+        html += '<div class="dash-stat-value">' + o.wins + '-' + o.losses + (o.pushes > 0 ? '-' + o.pushes : '') + '</div>';
+        html += '</div>';
+        html += '<div class="dash-stat-card">';
+        html += '<div class="dash-stat-label">Win Rate</div>';
+        html += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%</div>';
+        html += '</div>';
+        html += '<div class="dash-stat-card">';
+        html += '<div class="dash-stat-label">Total Picks</div>';
+        html += '<div class="dash-stat-value">' + o.total + '</div>';
+        html += '</div>';
+        html += '<div class="dash-stat-card">';
+        html += '<div class="dash-stat-label">Pending</div>';
+        html += '<div class="dash-stat-value stat-muted">' + o.pending + '</div>';
+        html += '</div>';
+        html += '</div>';
+        return html;
+    }
 
-        // Breakdowns
-        var breakHtml = '';
-
+    function renderDashboardBreakdowns(data) {
+        var html = '';
         if (data.by_sport && data.by_sport.length > 0) {
-            breakHtml += '<div class="dash-breakdown">';
-            breakHtml += '<h3 class="dash-section-title">By Sport</h3>';
+            html += '<div class="dash-breakdown">';
+            html += '<h3 class="dash-section-title">By Sport</h3>';
             data.by_sport.forEach(function (s) {
-                breakHtml += buildBreakdownRow(s.sport.toUpperCase(), s);
+                html += buildBreakdownRow(s.sport.toUpperCase(), s);
             });
-            breakHtml += '</div>';
+            html += '</div>';
         }
-
         if (data.by_slot && data.by_slot.length > 0) {
-            breakHtml += '<div class="dash-breakdown">';
-            breakHtml += '<h3 class="dash-section-title">By Slot Type</h3>';
+            html += '<div class="dash-breakdown">';
+            html += '<h3 class="dash-section-title">By Slot Type</h3>';
             data.by_slot.forEach(function (s) {
-                breakHtml += buildBreakdownRow(s.slot_type.toUpperCase(), s);
+                html += buildBreakdownRow(s.slot_type.toUpperCase(), s);
             });
-            breakHtml += '</div>';
+            html += '</div>';
         }
-
         if (data.by_recommendation && data.by_recommendation.length > 0) {
-            breakHtml += '<div class="dash-breakdown">';
-            breakHtml += '<h3 class="dash-section-title">By Recommendation</h3>';
+            html += '<div class="dash-breakdown">';
+            html += '<h3 class="dash-section-title">By Recommendation</h3>';
             data.by_recommendation.forEach(function (s) {
-                breakHtml += buildBreakdownRow(s.recommendation, s);
+                html += buildBreakdownRow(s.recommendation, s);
             });
-            breakHtml += '</div>';
+            html += '</div>';
         }
+        return html;
+    }
 
-        document.getElementById("dashboard-breakdowns").innerHTML = breakHtml;
-
-        // Recent predictions grouped by date
-        var recentHtml = '';
-        if (data.recent && data.recent.length > 0) {
-            recentHtml += '<h3 class="dash-section-title">Pick History</h3>';
-
-            // Group by game_date (fall back to created_at date)
-            var groups = {};
-            var groupOrder = [];
-            data.recent.forEach(function (p) {
-                var dateKey = p.game_date || "";
-                if (!dateKey && p.created_at) {
-                    dateKey = p.created_at.substring(0, 10);
-                }
-                if (!dateKey) dateKey = "Unknown";
-                if (!groups[dateKey]) {
-                    groups[dateKey] = [];
-                    groupOrder.push(dateKey);
-                }
-                groups[dateKey].push(p);
-            });
-
-            groupOrder.forEach(function (dateKey) {
-                var preds = groups[dateKey];
-
-                // Format date header
-                var dateLabel = dateKey;
-                if (dateKey !== "Unknown" && dateKey.length >= 10) {
-                    try {
-                        var parts = dateKey.split("-");
-                        var dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                        var today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        var yesterday = new Date(today);
-                        yesterday.setDate(yesterday.getDate() - 1);
-                        var dtDay = new Date(dt);
-                        dtDay.setHours(0, 0, 0, 0);
-
-                        if (dtDay.getTime() === today.getTime()) {
-                            dateLabel = "Today";
-                        } else if (dtDay.getTime() === yesterday.getTime()) {
-                            dateLabel = "Yesterday";
-                        } else {
-                            var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-                            var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                            dateLabel = days[dt.getDay()] + ", " + months[dt.getMonth()] + " " + dt.getDate();
-                        }
-                    } catch (e) {
-                        dateLabel = dateKey;
-                    }
-                }
-
-                // Compute day record
-                var dayW = 0, dayL = 0, dayP = 0, dayPend = 0;
-                preds.forEach(function (p) {
-                    if (p.result === "HIT") dayW++;
-                    else if (p.result === "MISS") dayL++;
-                    else if (p.result === "PUSH") dayP++;
-                    else dayPend++;
-                });
-                var dayRecord = dayW + "-" + dayL;
-                if (dayP > 0) dayRecord += "-" + dayP;
-                if (dayPend > 0) dayRecord += " (" + dayPend + " pending)";
-
-                recentHtml += '<div class="dash-date-group">';
-                recentHtml += '<div class="dash-date-header">';
-                recentHtml += '<span class="dash-date-label">' + dateLabel + '</span>';
-                recentHtml += '<span class="dash-date-record">' + dayRecord + '</span>';
-                recentHtml += '</div>';
-
-                recentHtml += '<div class="dash-recent-list">';
-                preds.forEach(function (p) {
-                    var statusClass = "status-pending";
-                    if (p.result === "HIT") statusClass = "status-hit";
-                    else if (p.result === "MISS") statusClass = "status-miss";
-                    else if (p.result === "PUSH") statusClass = "status-push";
-
-                    var borderClass = "dash-recent-border-pending";
-                    if (p.result === "HIT") borderClass = "dash-recent-border-hit";
-                    else if (p.result === "MISS") borderClass = "dash-recent-border-miss";
-                    else if (p.result === "PUSH") borderClass = "dash-recent-border-push";
-
-                    recentHtml += '<div class="dash-recent-item ' + borderClass + '">';
-                    recentHtml += '<div class="dash-recent-top">';
-                    recentHtml += '<span class="dash-recent-sport">' + p.sport.toUpperCase() + '</span>';
-                    recentHtml += '<span class="dash-recent-matchup">' + p.away_team + ' vs ' + p.home_team + '</span>';
-                    recentHtml += '<span class="dash-recent-status ' + statusClass + '">' + p.result + '</span>';
-                    recentHtml += '</div>';
-                    recentHtml += '<div class="dash-recent-bottom">';
-                    recentHtml += '<span class="dash-recent-action">' + (p.action || '') + '</span>';
-                    if (p.home_score !== null && p.away_score !== null) {
-                        recentHtml += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
-                    }
-                    recentHtml += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
-                    recentHtml += '</div>';
-                    recentHtml += '</div>';
-                });
-                recentHtml += '</div>';
-                recentHtml += '</div>';
-            });
+    function formatDateLabel(dateKey) {
+        if (dateKey === "Unknown" || dateKey.length < 10) return dateKey;
+        try {
+            var parts = dateKey.split("-");
+            var dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            var today = new Date();
+            today.setHours(0, 0, 0, 0);
+            var yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            var dtDay = new Date(dt);
+            dtDay.setHours(0, 0, 0, 0);
+            if (dtDay.getTime() === today.getTime()) return "Today";
+            if (dtDay.getTime() === yesterday.getTime()) return "Yesterday";
+            var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            return days[dt.getDay()] + ", " + months[dt.getMonth()] + " " + dt.getDate();
+        } catch (e) {
+            return dateKey;
         }
-        document.getElementById("dashboard-recent").innerHTML = recentHtml;
+    }
+
+    function renderDashboardHistory(recent) {
+        if (!recent || recent.length === 0) return '';
+        var html = '<h3 class="dash-section-title">Pick History</h3>';
+
+        // Group by game_date (fall back to created_at date)
+        var groups = {};
+        var groupOrder = [];
+        recent.forEach(function (p) {
+            var dateKey = p.game_date || "";
+            if (!dateKey && p.created_at) dateKey = p.created_at.substring(0, 10);
+            if (!dateKey) dateKey = "Unknown";
+            if (!groups[dateKey]) { groups[dateKey] = []; groupOrder.push(dateKey); }
+            groups[dateKey].push(p);
+        });
+
+        groupOrder.forEach(function (dateKey) {
+            var preds = groups[dateKey];
+            var dayW = 0, dayL = 0, dayP = 0, dayPend = 0;
+            preds.forEach(function (p) {
+                if (p.result === "HIT") dayW++;
+                else if (p.result === "MISS") dayL++;
+                else if (p.result === "PUSH") dayP++;
+                else dayPend++;
+            });
+            var dayRecord = dayW + "-" + dayL;
+            if (dayP > 0) dayRecord += "-" + dayP;
+            if (dayPend > 0) dayRecord += " (" + dayPend + " pending)";
+
+            html += '<div class="dash-date-group">';
+            html += '<div class="dash-date-header">';
+            html += '<span class="dash-date-label">' + formatDateLabel(dateKey) + '</span>';
+            html += '<span class="dash-date-record">' + dayRecord + '</span>';
+            html += '</div>';
+
+            html += '<div class="dash-recent-list">';
+            preds.forEach(function (p) {
+                var statusClass = "status-pending";
+                if (p.result === "HIT") statusClass = "status-hit";
+                else if (p.result === "MISS") statusClass = "status-miss";
+                else if (p.result === "PUSH") statusClass = "status-push";
+
+                var borderClass = "dash-recent-border-pending";
+                if (p.result === "HIT") borderClass = "dash-recent-border-hit";
+                else if (p.result === "MISS") borderClass = "dash-recent-border-miss";
+                else if (p.result === "PUSH") borderClass = "dash-recent-border-push";
+
+                html += '<div class="dash-recent-item ' + borderClass + '">';
+                html += '<div class="dash-recent-top">';
+                html += '<span class="dash-recent-sport">' + p.sport.toUpperCase() + '</span>';
+                html += '<span class="dash-recent-matchup">' + p.away_team + ' vs ' + p.home_team + '</span>';
+                html += '<span class="dash-recent-status ' + statusClass + '">' + p.result + '</span>';
+                html += '</div>';
+                html += '<div class="dash-recent-bottom">';
+                html += '<span class="dash-recent-action">' + (p.action || '') + '</span>';
+                if (p.home_score !== null && p.away_score !== null) {
+                    html += '<span class="dash-recent-score">' + p.away_score + '-' + p.home_score + '</span>';
+                }
+                html += '<span class="dash-recent-pct">' + p.cover_pct + '%</span>';
+                html += '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+            html += '</div>';
+        });
+        return html;
+    }
+
+    function renderDashboard(data) {
+        document.getElementById("dashboard-stats").innerHTML = renderDashboardStats(data.overall);
+        document.getElementById("dashboard-breakdowns").innerHTML = renderDashboardBreakdowns(data);
+        document.getElementById("dashboard-recent").innerHTML = renderDashboardHistory(data.recent);
     }
 
     function buildBreakdownRow(label, stats) {
@@ -1696,10 +1662,30 @@ document.addEventListener("DOMContentLoaded", function () {
     var testmodelBtn = document.getElementById("testmodel-btn");
     var testmodelLoading = document.getElementById("testmodel-loading");
     var testmodelSection = document.getElementById("testmodel-section");
-    var tmCollectPollTimer = null;
-    var tmBacktestPollTimer = null;
-    var tmRulesPollTimer = null;
+    var tmPollTimers = { collect: null, backtest: null, rules: null };
     var tmSport = "nba";
+
+    function clearAllPolls() {
+        Object.keys(tmPollTimers).forEach(function (key) {
+            if (tmPollTimers[key]) {
+                clearInterval(tmPollTimers[key]);
+                tmPollTimers[key] = null;
+            }
+        });
+    }
+
+    function startPoll(name, fn, interval) {
+        if (tmPollTimers[name]) clearInterval(tmPollTimers[name]);
+        tmPollTimers[name] = setInterval(fn, interval || POLL_INTERVAL);
+        fn();
+    }
+
+    function stopPoll(name) {
+        if (tmPollTimers[name]) {
+            clearInterval(tmPollTimers[name]);
+            tmPollTimers[name] = null;
+        }
+    }
 
     // TM Sport switcher
     var tmSportBtns = document.querySelectorAll(".tm-sport-btn");
@@ -1720,9 +1706,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("tm-collect-status").innerHTML = "";
             document.getElementById("tm-metrics-content").innerHTML = "";
             // Stop any active poll timers
-            if (tmCollectPollTimer) { clearInterval(tmCollectPollTimer); tmCollectPollTimer = null; }
-            if (tmBacktestPollTimer) { clearInterval(tmBacktestPollTimer); tmBacktestPollTimer = null; }
-            if (tmRulesPollTimer) { clearInterval(tmRulesPollTimer); tmRulesPollTimer = null; }
+            clearAllPolls();
             // Re-enable buttons
             document.getElementById("tm-collect-btn").disabled = false;
             document.getElementById("tm-collect-btn").textContent = "Start Collection";
@@ -1768,7 +1752,6 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     // Hide testmodel section on home/sport change
-    var origHomeClick = document.getElementById("nav-home-btn").onclick;
     document.getElementById("nav-home-btn").addEventListener("click", function () {
         testmodelSection.classList.add("hidden");
     });
@@ -1816,9 +1799,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     function tmStartCollectPoll() {
-        if (tmCollectPollTimer) clearInterval(tmCollectPollTimer);
-        tmCollectPollTimer = setInterval(tmPollCollect, 5000);
-        tmPollCollect();
+        startPoll("collect", tmPollCollect);
     }
 
     function tmPollCollect() {
@@ -1839,10 +1820,10 @@ document.addEventListener("DOMContentLoaded", function () {
                     status.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-green)">Collection complete! ' + (data.total_games || 0) + ' games collected.</div>';
                     document.getElementById("tm-collect-btn").disabled = false;
                     document.getElementById("tm-collect-btn").textContent = "Start Collection";
-                    if (tmCollectPollTimer) clearInterval(tmCollectPollTimer);
+                    stopPoll("collect");
                 } else {
                     // Not started or unknown — stop polling if timer is active
-                    if (tmCollectPollTimer) { clearInterval(tmCollectPollTimer); tmCollectPollTimer = null; }
+                    stopPoll("collect");
                     var dbProg = data.db_progress || {};
                     var doneCount = dbProg["DONE"] || 0;
                     var withSpreads = data.games_with_spreads || 0;
@@ -1916,9 +1897,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     function tmStartBacktestPoll() {
-        if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
-        tmBacktestPollTimer = setInterval(tmPollBacktest, 5000);
-        tmPollBacktest();
+        startPoll("backtest", tmPollBacktest);
     }
 
     function tmPollBacktest() {
@@ -1938,7 +1917,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     el.innerHTML = '';
                     document.getElementById("tm-backtest-btn").disabled = false;
                     document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
-                    if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
+                    stopPoll("backtest");
 
                     if (prog.metrics) {
                         resEl.innerHTML = tmRenderMetrics(prog.metrics);
@@ -1948,7 +1927,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Backtest error') + '</div>';
                     document.getElementById("tm-backtest-btn").disabled = false;
                     document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
-                    if (tmBacktestPollTimer) clearInterval(tmBacktestPollTimer);
+                    stopPoll("backtest");
                 }
             })
             .catch(function () {});
@@ -1984,9 +1963,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     function tmStartRulesPoll() {
-        if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
-        tmRulesPollTimer = setInterval(tmPollRules, 5000);
-        tmPollRules();
+        startPoll("rules", tmPollRules);
     }
 
     function tmPollRules() {
@@ -2006,7 +1983,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     el.innerHTML = '';
                     document.getElementById("tm-rules-btn").disabled = false;
                     document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
-                    if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
+                    stopPoll("rules");
 
                     if (prog.metrics) {
                         resEl.innerHTML = tmRenderRulesMetrics(prog.metrics);
@@ -2015,7 +1992,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Rules replay error') + '</div>';
                     document.getElementById("tm-rules-btn").disabled = false;
                     document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
-                    if (tmRulesPollTimer) clearInterval(tmRulesPollTimer);
+                    stopPoll("rules");
                 }
             })
             .catch(function () {});

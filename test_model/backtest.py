@@ -12,6 +12,7 @@ from test_model import db as tm_db
 from test_model.model import train_model, predict_game, compute_edge_metrics
 from test_model.clustering import train_clusters, assign_cluster
 from test_model.metrics import compute_metrics
+from test_model.date_utils import days_between
 
 MIN_TRAINING_GAMES = 100  # Adaptive: works with smaller datasets, ideal is 500+
 RETRAIN_INTERVAL_DAYS = 30
@@ -145,12 +146,7 @@ def run_backtest(sport):
 
 def _days_apart(date_str1, date_str2):
     """Approximate days between two date strings."""
-    try:
-        d1 = datetime.fromisoformat(date_str1.replace("Z", "+00:00"))
-        d2 = datetime.fromisoformat(date_str2.replace("Z", "+00:00"))
-        return abs((d2 - d1).days)
-    except (ValueError, TypeError, AttributeError):
-        return 999
+    return days_between(date_str1, date_str2, default=999)
 
 
 def start_backtest_thread(sport):

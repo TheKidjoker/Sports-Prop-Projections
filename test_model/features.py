@@ -14,6 +14,7 @@ from time_slots import classify_slot
 from line_movement import detect_movement, confirms_slot
 from rank_analysis import _detect_rank_scam, _detect_spread_discrepancy
 from test_model import db as tm_db
+from test_model.date_utils import days_between as _shared_days_between, parse_game_dt
 
 # Feature columns (order matters for model consistency)
 FEATURE_COLUMNS = [
@@ -46,30 +47,17 @@ def _safe_avg(values, default=0.0):
 
 def _days_between(date_str1, date_str2):
     """Days between two ISO date strings (approximate)."""
-    try:
-        d1 = datetime.fromisoformat(date_str1.replace("Z", "+00:00"))
-        d2 = datetime.fromisoformat(date_str2.replace("Z", "+00:00"))
-        return abs((d2 - d1).days)
-    except (ValueError, TypeError, AttributeError):
-        return 3  # default rest days
+    return _shared_days_between(date_str1, date_str2, default=3)
 
 
 def _classify_slot_for_game(game_date_str, sport):
     """Classify slot type from a game date string."""
-    try:
-        game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-        if sport in ("cfb", "cbb"):
-            tz_dt = game_dt - timedelta(hours=5)
-        elif sport == "nhl":
-            tz_dt = game_dt - timedelta(hours=6)
-        else:
-            tz_dt = game_dt - timedelta(hours=8)
-
-        day = tz_dt.strftime("%A")
-        hour, minute = tz_dt.hour, tz_dt.minute
-        return classify_slot(day, hour, minute, sport=sport)
-    except (ValueError, TypeError, AttributeError):
+    tz_dt = parse_game_dt(game_date_str, sport)
+    if tz_dt is None:
         return "unknown"
+    day = tz_dt.strftime("%A")
+    hour, minute = tz_dt.hour, tz_dt.minute
+    return classify_slot(day, hour, minute, sport=sport)
 
 
 def compute_all_features(sport):

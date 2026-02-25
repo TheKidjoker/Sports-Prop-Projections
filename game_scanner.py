@@ -24,6 +24,7 @@ from prism import calculate_prism_projection, get_league_defensive_average
 from rank_analysis import (
     _get_rank_tier, _detect_rank_scam, _detect_spread_discrepancy,
 )
+from constants import get_max_score, get_recommendation, ML_THRESHOLDS
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
@@ -32,6 +33,82 @@ from analysis_factors import (
     _detect_vegas_trap,
     _calculate_score, _determine_lean, _fmt_spread,
 )
+
+
+def classify_game_slot(game_date_str, day_of_week, sport, is_first_game=False,
+                       total_games_on_slate=1, game_index=0,
+                       is_last_sunday_game=False):
+    """
+    Classify a game's slot type from its date/time.
+    Single source of truth — used by scan, predict, and backtest.
+
+    Returns:
+        (slot_type, hour, minute, game_time_est) tuple.
+        hour/minute may be None if parsing fails.
+    """
+    hour, minute = None, None
+    game_time_est = ""
+
+    if game_date_str:
+        try:
+            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
+
+            # Classification timezone
+            if sport in ("cfb", "cbb"):
+                classify_dt = game_dt - timedelta(hours=5)  # EST (same as display)
+            elif sport == "nhl":
+                classify_dt = game_dt - timedelta(hours=6)  # CST
+            else:
+                classify_dt = game_dt - timedelta(hours=8)  # PST (NBA & NFL)
+            hour, minute = classify_dt.hour, classify_dt.minute
+
+            # Use game's own date for day_of_week (important for tomorrow's games)
+            day_of_week = classify_dt.strftime("%A")
+
+            # Display timezone: always EST
+            est_dt = game_dt - timedelta(hours=5)
+            try:
+                game_time_est = est_dt.strftime("%-I:%M %p")
+            except ValueError:
+                game_time_est = est_dt.strftime("%I:%M %p").lstrip("0")
+        except (ValueError, TypeError):
+            pass
+
+    # Classify slot
+    if sport == "nfl":
+        if hour is not None:
+            slot_type = classify_slot(
+                day_of_week, hour, minute,
+                sport="nfl",
+                is_last_sunday_game=is_last_sunday_game,
+            )
+        else:
+            slot_type = "unknown"
+    elif sport in ("cfb", "cbb"):
+        if hour is not None:
+            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
+        else:
+            slot_type = "unknown"
+    elif sport == "nhl":
+        if hour is not None:
+            slot_type = classify_slot(
+                day_of_week, hour, minute,
+                sport="nhl",
+                total_games_on_slate=total_games_on_slate,
+                game_index=game_index,
+            )
+        else:
+            slot_type = "unknown"
+    else:
+        # NBA: first-game override
+        if is_first_game:
+            slot_type = first_game_slot_override(day_of_week)
+        elif hour is not None:
+            slot_type = classify_slot(day_of_week, hour, minute)
+        else:
+            slot_type = "unknown"
+
+    return slot_type, hour, minute, game_time_est, day_of_week
 
 
 def scan_all_games(sport="nba", date_str=None):
@@ -135,6 +212,127 @@ def scan_all_games(sport="nba", date_str=None):
     return results
 
 
+def _process_line_movement(opening, current, slot_type):
+    """
+    Process spread line movement data.
+    Returns (line_confirms, line_magnitude, line_toward_dog, line_toward_fav).
+    """
+    if opening is None or current is None:
+        return False, 0.0, False, False
+
+    movement, magnitude = detect_movement(opening, current)
+    confirmed = confirms_slot(movement, slot_type)
+
+    # NBA V5: raw line direction toward dog/fav
+    raw_movement = current - opening
+    toward_dog = False
+    toward_fav = False
+    if current < 0:  # home favored
+        toward_dog = raw_movement > 0.5
+        toward_fav = raw_movement < -0.5
+    elif current > 0:  # away favored
+        toward_dog = raw_movement < -0.5
+        toward_fav = raw_movement > 0.5
+
+    return confirmed, magnitude, toward_dog, toward_fav
+
+
+def _build_action_string(lean_team, current_spread, home_team, moneyline_recommend):
+    """Build the action recommendation string with spread numbers."""
+    if not lean_team or current_spread is None:
+        return None
+
+    if lean_team == home_team:
+        lean_spread = current_spread
+    else:
+        lean_spread = -current_spread
+    limit = lean_spread - 1.5
+    spread_action = ("Take " + lean_team + " " + _fmt_spread(lean_spread) +
+                     " or better — don't take past " + _fmt_spread(limit))
+    if moneyline_recommend:
+        return (spread_action + " (Best Bet)"
+                + " | " + lean_team + " ML (Aggressive)")
+    return spread_action
+
+
+def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
+                       action, slot_type, game_time_est, current_spread,
+                       rank_scam, spread_discrepancy,
+                       nfl_weather, nfl_trend, nfl_overunder,
+                       b2b_result, ats_result, public_betting_result,
+                       h2h_result, vegas_trap_result):
+    """Assemble the final result dict for a game analysis."""
+    home_team = game["home_team"]
+    away_team = game["away_team"]
+
+    result = {
+        "home_team": home_team,
+        "away_team": away_team,
+        "event_id": game["event_id"],
+        "game_date": game.get("game_date", ""),
+        "game_time_est": game_time_est,
+        "date_label": game.get("date_label", ""),
+        "confirmation_score": score,
+        "cover_pct": cover_pct,
+        "lean_team": lean_team,
+        "action": action,
+        "recommendation": recommendation,
+        "current_spread": current_spread,
+    }
+
+    # Historical accuracy from backtesting (NBA V4 tuned data)
+    if sport == "nba" and recommendation != "MONITOR":
+        if score >= 10:
+            result["historical_accuracy"] = 68.9
+            result["historical_sample_size"] = 29
+        elif score >= 5:
+            result["historical_accuracy"] = 62.7
+            result["historical_sample_size"] = 51
+
+    # Venue for NHL, CFB, CBB, and NFL
+    if sport in ("nhl", "cfb", "cbb", "nfl"):
+        result["venue_name"] = game.get("venue_name", "")
+        result["venue_city"] = game.get("venue_city", "")
+        result["venue_state"] = game.get("venue_state", "")
+
+    # Rank data and slot info for CFB and CBB
+    if sport in ("cfb", "cbb"):
+        result["home_rank"] = game.get("home_rank")
+        result["away_rank"] = game.get("away_rank")
+        result["slot_type"] = slot_type
+        if rank_scam["is_rank_scam"]:
+            result["rank_scam"] = rank_scam
+        if spread_discrepancy["is_discrepancy"]:
+            result["spread_discrepancy"] = spread_discrepancy
+
+    # NFL-specific data
+    if sport == "nfl":
+        result["slot_type"] = slot_type
+        if nfl_weather.get("is_dome"):
+            result["weather_dome"] = True
+        elif nfl_weather.get("weather") or nfl_weather.get("alerts"):
+            result["weather"] = nfl_weather.get("weather", {})
+            result["weather_alerts"] = nfl_weather.get("alerts", [])
+        if nfl_trend.get("applies"):
+            result["trend_discrepancy"] = nfl_trend
+        if nfl_overunder.get("applies"):
+            result["overunder"] = nfl_overunder
+
+    # Factor badges
+    if b2b_result["b2b_bonus"] or b2b_result["b2b_penalty"]:
+        result["b2b"] = b2b_result
+    if ats_result["ats_bonus"] or ats_result["ats_penalty"]:
+        result["ats_record"] = ats_result
+    if public_betting_result["public_betting_bonus"] > 0:
+        result["public_betting"] = public_betting_result
+    if h2h_result["h2h_revenge_bonus"] or h2h_result["h2h_dominance_bonus"]:
+        result["head_to_head"] = h2h_result
+    if vegas_trap_result["is_vegas_trap"]:
+        result["vegas_trap"] = vegas_trap_result
+
+    return result
+
+
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
                           is_last_sunday_game=False, odds_data=None,
@@ -149,69 +347,14 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     away_team = game["away_team"]
     game_date_str = game.get("game_date", "")
 
-    # Parse game time
-    # NBA: classify using PST (UTC-8), display using EST (UTC-5)
-    # NHL: classify using CST (UTC-6), display using EST (UTC-5)
-    hour, minute = None, None
-    game_time_est = ""
-    if game_date_str:
-        try:
-            game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-
-            # Classification timezone
-            if sport in ("cfb", "cbb"):
-                classify_dt = game_dt - timedelta(hours=5)  # EST (same as display)
-            elif sport == "nhl":
-                classify_dt = game_dt - timedelta(hours=6)  # CST
-            else:
-                classify_dt = game_dt - timedelta(hours=8)  # PST (NBA & NFL)
-            hour, minute = classify_dt.hour, classify_dt.minute
-
-            # Use game's own date for day_of_week (important for tomorrow's games)
-            day_of_week = classify_dt.strftime("%A")
-
-            # Display timezone: always EST
-            est_dt = game_dt - timedelta(hours=5)
-            try:
-                game_time_est = est_dt.strftime("%-I:%M %p")
-            except ValueError:
-                game_time_est = est_dt.strftime("%I:%M %p").lstrip("0")
-        except (ValueError, TypeError):
-            pass
-
-    # Classify slot
-    if sport == "nfl":
-        if hour is not None:
-            slot_type = classify_slot(
-                day_of_week, hour, minute,
-                sport="nfl",
-                is_last_sunday_game=is_last_sunday_game,
-            )
-        else:
-            slot_type = "unknown"
-    elif sport in ("cfb", "cbb"):
-        if hour is not None:
-            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
-        else:
-            slot_type = "unknown"
-    elif sport == "nhl":
-        if hour is not None:
-            slot_type = classify_slot(
-                day_of_week, hour, minute,
-                sport="nhl",
-                total_games_on_slate=total_games_on_slate,
-                game_index=game_index,
-            )
-        else:
-            slot_type = "unknown"
-    else:
-        # NBA: first-game override
-        if is_first_game:
-            slot_type = first_game_slot_override(day_of_week)
-        elif hour is not None:
-            slot_type = classify_slot(day_of_week, hour, minute)
-        else:
-            slot_type = "unknown"
+    # Parse game time + classify slot (shared helper)
+    slot_type, hour, minute, game_time_est, day_of_week = classify_game_slot(
+        game_date_str, day_of_week, sport,
+        is_first_game=is_first_game,
+        total_games_on_slate=total_games_on_slate,
+        game_index=game_index,
+        is_last_sunday_game=is_last_sunday_game,
+    )
 
     # NFL: early return for SKIP slot
     if sport == "nfl" and slot_type == "skip":
@@ -286,33 +429,9 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         # ── Collect spread result ──
         opening, current = spread_future.result()
 
-    # ── Process spread / line movement (no API calls) ──
-    line_movement_data = {"available": False}
-    line_confirms = False
-    line_magnitude = 0.0
-    line_toward_dog = False
-    line_toward_fav = False
-
-    if opening is not None and current is not None:
-        movement, line_magnitude = detect_movement(opening, current)
-        confirmed = confirms_slot(movement, slot_type)
-        line_confirms = confirmed
-        line_movement_data = {
-            "available": True,
-            "opening_spread": opening,
-            "current_spread": current,
-            "movement": movement,
-            "magnitude": line_magnitude,
-            "confirms_slot": confirmed,
-        }
-        # NBA V5: raw line direction toward dog/fav
-        raw_movement = current - opening
-        if current < 0:  # home favored
-            line_toward_dog = raw_movement > 0.5
-            line_toward_fav = raw_movement < -0.5
-        elif current > 0:  # away favored
-            line_toward_dog = raw_movement < -0.5
-            line_toward_fav = raw_movement > 0.5
+    # ── Process spread / line movement ──
+    line_confirms, line_magnitude, line_toward_dog, line_toward_fav = \
+        _process_line_movement(opening, current, slot_type)
 
     # ── Build injured_stars from parallel results ──
     injured_stars = []
@@ -345,7 +464,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     # Moneyline rule
     moneyline_recommend = False
     current_spread = current
-    ml_threshold = {"nba": 6, "nfl": 3, "cfb": 7, "cbb": 7}.get(sport)
+    ml_threshold = ML_THRESHOLDS.get(sport)
     if opening is not None and current is not None and ml_threshold:
         if abs(current) >= ml_threshold:
             moneyline_recommend = True
@@ -466,155 +585,21 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         line_toward_fav=line_toward_fav,
         day_of_week=day_of_week,
     )
-    if sport == "nfl":
-        max_score = 53
-    elif sport == "cfb":
-        max_score = 48
-    elif sport == "cbb":
-        max_score = 37  # CBB V2 backtested adjustments
-    elif sport == "nba":
-        max_score = 44  # V5: added line direction +3, spread sweet spot +2
-    else:
-        max_score = 42
+    max_score = get_max_score(sport)
     cover_pct = round(50 + (score / max_score) * 45, 1)
 
-    # Recommendation label
-    # NBA backtested: sweet spot is score 4-7, public slot drags accuracy.
-    # Use lower thresholds + demote public-slot picks.
-    # CBB backtested: STRONG PLAY (>=15) at 56.9%, LEAN 10-14 bucket is dead zone.
-    if sport == "nba":
-        if slot_type == "public":
-            # Public V5: >= 10 = 73.3% (45 bets), score 8-9 is dead zone
-            if score >= 10:
-                recommendation = "STRONG PLAY"
-            elif score >= 7:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
-        else:
-            # Vegas V5: >= 10 = 81.8%, 7-9 = 64.3% (28 bets), 5-6 = 53.8%
-            if score >= 10:
-                recommendation = "STRONG PLAY"
-            elif score >= 7:
-                recommendation = "CONFIDENT"
-            elif score >= 5:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
-    elif sport == "cbb":
-        # CBB V2 backtested: score 10-13 is 62.5% acc, lower thresholds
-        if score >= 13:
-            recommendation = "STRONG PLAY"
-        elif score >= 10:
-            recommendation = "LEAN"
-        else:
-            recommendation = "MONITOR"
-    elif sport == "nhl":
-        # NHL V1 backtested: low scores (0-5) hit 72-82%, high scores hurt
-        # Public slot capped at LEAN (favorite lean was 37.5%, now underdog)
-        if slot_type == "public":
-            if score >= 5:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
-        else:
-            if score >= 8:
-                recommendation = "STRONG PLAY"
-            elif score >= 3:
-                recommendation = "LEAN"
-            else:
-                recommendation = "MONITOR"
-    else:
-        if score >= 15:
-            recommendation = "STRONG PLAY"
-        elif score >= 10:
-            recommendation = "LEAN"
-        else:
-            recommendation = "MONITOR"
+    recommendation = get_recommendation(score, slot_type, sport)
 
-    # Build clear action string with spread numbers
-    action = None
-    if lean_team and current_spread is not None:
-        # Get the spread from the lean team's perspective
-        if lean_team == home_team:
-            lean_spread = current_spread
-        else:
-            lean_spread = -current_spread
-        limit = lean_spread - 1.5
-        spread_action = ("Take " + lean_team + " " + _fmt_spread(lean_spread) +
-                         " or better — don't take past " + _fmt_spread(limit))
-        if moneyline_recommend:
-            action = (spread_action + " (Best Bet)"
-                      + " | " + lean_team + " ML (Aggressive)")
-        else:
-            action = spread_action
+    action = _build_action_string(lean_team, current_spread, home_team, moneyline_recommend)
 
-    result = {
-        "home_team": home_team,
-        "away_team": away_team,
-        "event_id": event_id,
-        "game_date": game_date_str,
-        "game_time_est": game_time_est,
-        "date_label": game.get("date_label", ""),
-        "confirmation_score": score,
-        "cover_pct": cover_pct,
-        "lean_team": lean_team,
-        "action": action,
-        "recommendation": recommendation,
-        "current_spread": current_spread,
-    }
-
-    # Historical accuracy from backtesting (NBA V4 tuned data)
-    if sport == "nba" and recommendation != "MONITOR":
-        if score >= 10:
-            result["historical_accuracy"] = 68.9
-            result["historical_sample_size"] = 29
-        elif score >= 5:
-            result["historical_accuracy"] = 62.7
-            result["historical_sample_size"] = 51
-
-    # Include venue for NHL, CFB, CBB, and NFL
-    if sport in ("nhl", "cfb", "cbb", "nfl"):
-        result["venue_name"] = game.get("venue_name", "")
-        result["venue_city"] = game.get("venue_city", "")
-        result["venue_state"] = game.get("venue_state", "")
-
-    # Include rank data and slot info for CFB and CBB
-    if sport in ("cfb", "cbb"):
-        result["home_rank"] = home_rank
-        result["away_rank"] = away_rank
-        result["slot_type"] = slot_type
-        if rank_scam["is_rank_scam"]:
-            result["rank_scam"] = rank_scam
-        if spread_discrepancy["is_discrepancy"]:
-            result["spread_discrepancy"] = spread_discrepancy
-
-    # Include NFL-specific data
-    if sport == "nfl":
-        result["slot_type"] = slot_type
-        if nfl_weather.get("is_dome"):
-            result["weather_dome"] = True
-        elif nfl_weather.get("weather") or nfl_weather.get("alerts"):
-            result["weather"] = nfl_weather.get("weather", {})
-            result["weather_alerts"] = nfl_weather.get("alerts", [])
-        if nfl_trend.get("applies"):
-            result["trend_discrepancy"] = nfl_trend
-        if nfl_overunder.get("applies"):
-            result["overunder"] = nfl_overunder
-
-    # ── New factor badges ──
-    if b2b_result["b2b_bonus"] or b2b_result["b2b_penalty"]:
-        result["b2b"] = b2b_result
-    if ats_result["ats_bonus"] or ats_result["ats_penalty"]:
-        result["ats_record"] = ats_result
-    if public_betting_result["public_betting_bonus"] > 0:
-        result["public_betting"] = public_betting_result
-    if h2h_result["h2h_revenge_bonus"] or h2h_result["h2h_dominance_bonus"]:
-        result["head_to_head"] = h2h_result
-    if vegas_trap_result["is_vegas_trap"]:
-        result["vegas_trap"] = vegas_trap_result
-
-    return result
+    return _build_game_result(
+        game, sport, score, cover_pct, recommendation, lean_team,
+        action, slot_type, game_time_est, current_spread,
+        rank_scam, spread_discrepancy,
+        nfl_weather, nfl_trend, nfl_overunder,
+        b2b_result, ats_result, public_betting_result,
+        h2h_result, vegas_trap_result,
+    )
 
 
 def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,

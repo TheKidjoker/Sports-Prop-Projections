@@ -1516,6 +1516,74 @@ button[type="submit"]:disabled {
     flex-shrink: 0;
 }
 
+/* Best Prop of the Day */
+.best-prop-card {
+    background: linear-gradient(135deg, rgba(230, 57, 70, 0.12), rgba(255, 152, 0, 0.08));
+    border: 1px solid var(--accent-red);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    margin-bottom: 0.8rem;
+    position: relative;
+}
+
+.best-prop-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
+}
+
+.best-prop-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-red);
+}
+
+.best-prop-odds {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent-orange);
+}
+
+.best-prop-pick {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+}
+
+.best-prop-details {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.best-prop-matchup {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.best-prop-confidence {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent-green);
+}
+
+.best-prop-line {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.best-prop-streak {
+    font-size: 0.72rem;
+    color: var(--accent-yellow);
+    margin-top: 0.2rem;
+}
+
 /* =========================================
    All Sports Sections
    ========================================= */

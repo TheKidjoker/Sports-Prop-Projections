@@ -1,6 +1,7 @@
 # ─── BallDontLie NBA Player Stats ─────────────────────────────────────────────
 # Player ID lookups, recent game points, and game logs via balldontlie.io.
 
+import threading
 import requests
 from api_cache import _cached_request
 
@@ -8,11 +9,13 @@ BASE_URL = "https://www.balldontlie.io/api/v1"
 
 # In-memory cache for player ID lookups (avoids redundant HTTP requests)
 _player_id_cache = {}
+_player_id_lock = threading.Lock()
 
 
 def get_player_id(player_name):
-    if player_name in _player_id_cache:
-        return _player_id_cache[player_name]
+    with _player_id_lock:
+        if player_name in _player_id_cache:
+            return _player_id_cache[player_name]
 
     response = requests.get(
         f"{BASE_URL}/players",
@@ -24,13 +27,13 @@ def get_player_id(player_name):
 
     data = response.json()
 
+    result = None
     if data["data"]:
         result = data["data"][0]["id"]
-        _player_id_cache[player_name] = result
-        return result
 
-    _player_id_cache[player_name] = None
-    return None
+    with _player_id_lock:
+        _player_id_cache[player_name] = result
+    return result
 
 
 def get_recent_game_points(player_id, games=5):
