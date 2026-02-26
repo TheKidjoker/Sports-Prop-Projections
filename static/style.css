@@ -2572,9 +2572,14 @@ button[type="submit"]:disabled {
     letter-spacing: 0;
 }
 
-#testmodel-btn:hover {
+#testmodel-btn:hover:not(:disabled) {
     background: var(--accent-red-dim);
     border-color: var(--accent-red);
+}
+
+#testmodel-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 /* =========================================

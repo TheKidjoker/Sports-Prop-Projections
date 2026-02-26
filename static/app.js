@@ -26,6 +26,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // ─── Auth State ─────────────────────────────────────────────────────
     var _supabaseClient = null;
     var _accessToken = null;
+    var _isAdmin = false;
 
     function authFetch(url, opts) {
         opts = opts || {};
@@ -50,9 +51,32 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("app-container").classList.add("hidden");
     }
 
+    function updateAdminUI() {
+        var btn = document.getElementById("testmodel-btn");
+        if (!btn) return;
+        if (_isAdmin) {
+            btn.disabled = false;
+            btn.title = "";
+        } else {
+            btn.disabled = true;
+            btn.title = "Admin only";
+        }
+    }
+
     function showApp() {
         document.getElementById("auth-gate").classList.add("hidden");
         document.getElementById("app-container").classList.remove("hidden");
+        // Check admin status
+        authFetch("/api/auth/me")
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                _isAdmin = !!data.is_admin;
+                updateAdminUI();
+            })
+            .catch(function () {
+                _isAdmin = false;
+                updateAdminUI();
+            });
         // Kick off initial data loads
         fetchGames();
         tmPollCollect();
@@ -64,6 +88,7 @@ document.addEventListener("DOMContentLoaded", function () {
             .then(function (cfg) {
                 if (!cfg.supabase_url || !cfg.supabase_anon_key) {
                     // Auth not configured — skip login, show app directly
+                    _isAdmin = true;
                     showApp();
                     return;
                 }
@@ -1985,6 +2010,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Show Test Model section
     testmodelBtn.addEventListener("click", function () {
+        if (!_isAdmin) return;
         welcomeHero.classList.add("hidden");
         scanResults.classList.add("hidden");
         scanResultsVisible = false;

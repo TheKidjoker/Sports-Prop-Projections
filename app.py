@@ -58,6 +58,7 @@ scan_cache.init()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 
 _jwks_client = None
 
@@ -79,6 +80,7 @@ def require_auth(f):
         jwks = _get_jwks_client()
         if not SUPABASE_JWT_SECRET and not jwks:
             # Auth not configured — allow through (local dev)
+            request.user_email = "dev@local"
             return f(*args, **kwargs)
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
@@ -87,10 +89,11 @@ def require_auth(f):
         try:
             header = jwt.get_unverified_header(token)
             alg = header.get("alg", "HS256")
+            payload = None
 
             if alg == "HS256" and SUPABASE_JWT_SECRET:
                 # Standard HS256 verification
-                jwt.decode(
+                payload = jwt.decode(
                     token, SUPABASE_JWT_SECRET,
                     algorithms=["HS256"],
                     audience="authenticated",
@@ -99,7 +102,7 @@ def require_auth(f):
                 # ES256 via JWKS
                 try:
                     signing_key = jwks.get_signing_key_from_jwt(token)
-                    jwt.decode(
+                    payload = jwt.decode(
                         token, signing_key.key,
                         algorithms=["ES256"],
                         audience="authenticated",
@@ -109,20 +112,21 @@ def require_auth(f):
                         raise
                     # JWKS unavailable — verify claims without signature
                     print(f"[AUTH] JWKS unavailable ({jwks_err}), verifying claims only", flush=True)
-                    jwt.decode(
+                    payload = jwt.decode(
                         token, options={"verify_signature": False},
                         algorithms=["ES256"],
                         audience="authenticated",
                     )
             elif alg == "ES256" and SUPABASE_JWT_SECRET:
                 # ES256 token but no JWKS — verify claims without signature
-                jwt.decode(
+                payload = jwt.decode(
                     token, options={"verify_signature": False},
                     algorithms=["ES256"],
                     audience="authenticated",
                 )
             else:
                 return jsonify({"error": "Unsupported token algorithm"}), 401
+            request.user_email = (payload or {}).get("email", "")
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError as e:
@@ -188,6 +192,15 @@ def auth_config():
     return jsonify({
         "supabase_url": SUPABASE_URL,
         "supabase_anon_key": SUPABASE_ANON_KEY,
+    })
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def auth_me():
+    return jsonify({
+        "email": getattr(request, "user_email", ""),
+        "is_admin": _is_admin(),
     })
 
 
@@ -692,9 +705,18 @@ def api_model_health():
 
 # ─── Test Model API Endpoints ──────────────────────────────────────────────
 
+def _is_admin():
+    email = getattr(request, "user_email", "")
+    if not ADMIN_EMAILS:
+        return True  # No allowlist configured = everyone is admin
+    return email.lower() in ADMIN_EMAILS
+
+
 def _require_test_model():
     if not HAS_TEST_MODEL:
         return jsonify({"success": False, "error": "Test model module not available"}), 501
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin access required"}), 403
     return None
 
 

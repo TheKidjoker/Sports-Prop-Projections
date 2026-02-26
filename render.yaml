@@ -17,5 +17,7 @@ services:
         sync: false
       - key: NEWSAPI_KEY
         sync: false
+      - key: ADMIN_EMAILS
+        value: "chance.kelly2003@gmail.com"
       - key: PYTHON_VERSION
         value: 3.11.4
