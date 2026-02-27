@@ -2,7 +2,7 @@ services:
   - type: web
     name: jokers-edge
     runtime: python
-    buildCommand: pip install -r requirements.txt && cd frontend && npm install && npm run build
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 300
     envVars:
       - key: DATABASE_URL
