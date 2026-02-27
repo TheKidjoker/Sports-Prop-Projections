@@ -1,13 +1,16 @@
 import { Bell, LogOut, Shield } from "lucide-react";
 import { SportPills, type Sport } from "./SportPills";
+import { useAuth } from "@/lib/auth";
 
 interface TopNavProps {
   selectedSport: Sport | null;
   onSelectSport: (sport: Sport | null) => void;
-  isAdmin?: boolean;
+  onAdminClick?: () => void;
 }
 
-export function TopNav({ selectedSport, onSelectSport, isAdmin = false }: TopNavProps) {
+export function TopNav({ selectedSport, onSelectSport, onAdminClick }: TopNavProps) {
+  const { isAdmin, signOut } = useAuth();
+
   return (
     <header className="h-14 border-b border-border glass sticky top-0 z-40">
       <div className="h-full flex items-center justify-between px-4">
@@ -27,15 +30,19 @@ export function TopNav({ selectedSport, onSelectSport, isAdmin = false }: TopNav
         {/* Right actions */}
         <div className="flex items-center gap-2 min-w-[160px] justify-end">
           {isAdmin && (
-            <button className="p-2 text-secondary hover:text-secondary/80 transition-colors" title="Admin">
+            <button
+              onClick={onAdminClick}
+              className="p-2 text-secondary hover:text-secondary/80 transition-colors"
+              title="Admin Panel"
+            >
               <Shield className="w-4 h-4" />
             </button>
           )}
-          <button className="p-2 text-muted-foreground hover:text-foreground transition-colors relative">
-            <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full" />
-          </button>
-          <button className="p-2 text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            onClick={() => signOut()}
+            className="p-2 text-muted-foreground hover:text-foreground transition-colors"
+            title="Sign Out"
+          >
             <LogOut className="w-4 h-4" />
           </button>
         </div>

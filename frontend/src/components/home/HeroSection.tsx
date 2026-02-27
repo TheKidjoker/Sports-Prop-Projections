@@ -1,6 +1,8 @@
 import { motion } from "framer-motion";
-import { SPORTS, type Sport } from "../navigation/SportPills";
+import { SPORTS } from "../navigation/SportPills";
 import { ArrowRight } from "lucide-react";
+import { useAllGameCounts } from "@/hooks/use-games";
+import type { Sport } from "@/lib/types";
 
 const confidenceBadge = {
   validated: { label: "VALIDATED", className: "bg-success/15 text-success border-success/30" },
@@ -15,6 +17,8 @@ interface HeroSectionProps {
 }
 
 export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectionProps) {
+  const gameCounts = useAllGameCounts();
+
   return (
     <div className="py-16 px-6">
       {/* Tagline */}
@@ -37,6 +41,7 @@ export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectio
         {SPORTS.map((sport, i) => {
           const badge = confidenceBadge[sport.confidence];
           const isSelected = selectedSport === sport.id;
+          const count = gameCounts[sport.id] ?? 0;
           return (
             <motion.button
               key={sport.id}
@@ -62,12 +67,12 @@ export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectio
                 {sport.subtitle}
               </p>
               <p className="font-mono text-xs text-foreground">
-                {sport.gamesCount > 0 ? (
+                {count > 0 ? (
                   <>
-                    <span className="text-primary font-semibold">{sport.gamesCount}</span> games today
+                    <span className="text-primary font-semibold">{count}</span> games today
                   </>
                 ) : (
-                  <span className="text-muted-foreground">Off season</span>
+                  <span className="text-muted-foreground">No games today</span>
                 )}
               </p>
             </motion.button>

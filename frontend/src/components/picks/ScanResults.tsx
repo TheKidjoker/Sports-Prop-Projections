@@ -1,27 +1,25 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AlertTriangle } from "lucide-react";
 import { PickCard } from "./PickCard";
 import { PickCardSkeleton } from "./PickCardSkeleton";
-import { MOCK_PICKS } from "./mockPicks";
-import type { Sport } from "../navigation/SportPills";
+import { useScan } from "@/hooks/use-scan";
+import { toLowerSport, type Sport } from "@/lib/types";
+import type { BetSlipItem } from "@/components/bets/BetSlip";
 
 interface ScanResultsProps {
   sport: Sport;
   isAdmin?: boolean;
+  onTrackBet?: (bet: BetSlipItem) => void;
 }
 
-export function ScanResults({ sport, isAdmin }: ScanResultsProps) {
-  const [loading, setLoading] = useState(true);
-  const [picks, setPicks] = useState(MOCK_PICKS);
+export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
+  const lowerSport = toLowerSport(sport);
+  const { scan, isScanning, picks, pendingReview, error } = useScan(lowerSport);
 
   useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => {
-      setPicks(MOCK_PICKS);
-      setLoading(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [sport]);
+    scan();
+  }, [sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const topPicks = picks.filter((p) => p.coverPct >= 68.5);
   const watchPicks = picks.filter((p) => p.coverPct >= 58 && p.coverPct < 68.5);
@@ -37,7 +35,24 @@ export function ScanResults({ sport, isAdmin }: ScanResultsProps) {
         </span>
       </div>
 
-      {loading ? (
+      {pendingReview && !isAdmin && (
+        <div className="mb-4 px-4 py-2 bg-warning/10 border border-warning/30 rounded-sm flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-warning" />
+          <span className="text-xs text-warning font-heading tracking-wider">
+            PICKS PENDING ADMIN REVIEW
+          </span>
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm">
+          <span className="text-xs text-primary font-mono">
+            Scan error: {(error as Error).message}
+          </span>
+        </div>
+      )}
+
+      {isScanning ? (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <PickCardSkeleton key={i} />
@@ -53,7 +68,7 @@ export function ScanResults({ sport, isAdmin }: ScanResultsProps) {
                 </h3>
                 <div className="space-y-3">
                   {topPicks.map((pick, i) => (
-                    <PickCard key={pick.id} pick={pick} index={i} isAdmin={isAdmin} />
+                    <PickCard key={pick.id} pick={pick} index={i} isAdmin={isAdmin} onTrackBet={onTrackBet} />
                   ))}
                 </div>
               </div>
@@ -66,9 +81,25 @@ export function ScanResults({ sport, isAdmin }: ScanResultsProps) {
                 </h3>
                 <div className="space-y-3">
                   {watchPicks.map((pick, i) => (
-                    <PickCard key={pick.id} pick={pick} index={i + topPicks.length} isAdmin={isAdmin} />
+                    <PickCard key={pick.id} pick={pick} index={i + topPicks.length} isAdmin={isAdmin} onTrackBet={onTrackBet} />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {picks.length > 0 && topPicks.length === 0 && watchPicks.length === 0 && (
+              <div className="text-center py-10">
+                <p className="text-muted-foreground text-sm font-heading tracking-wider">
+                  No actionable picks found in this scan
+                </p>
+              </div>
+            )}
+
+            {picks.length === 0 && !isScanning && !error && (
+              <div className="text-center py-10">
+                <p className="text-muted-foreground text-sm font-heading tracking-wider">
+                  No games found for {sport}
+                </p>
               </div>
             )}
           </motion.div>

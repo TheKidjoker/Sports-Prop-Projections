@@ -1,30 +1,23 @@
 import { motion } from "framer-motion";
-import { Zap } from "lucide-react";
+import {
+  Zap, RefreshCw, BarChart3, Target, AlertTriangle, Cloud, Users, Clock, Plus,
+} from "lucide-react";
+import { approvePick, rejectPick } from "@/lib/api";
+import type { PickData, Tier, SportLower } from "@/lib/types";
+import type { BetSlipItem } from "@/components/bets/BetSlip";
 
-type Tier = "STRONG PLAY" | "CONFIDENT" | "LEAN" | "MONITOR";
+export type { PickData, Tier };
 
-interface Factor {
-  label: string;
-  icon: string;
-  points: number;
-  unvalidated?: boolean;
-}
-
-export interface PickData {
-  id: string;
-  tier: Tier;
-  coverPct: number;
-  compositeScore: number;
-  awayTeam: string;
-  homeTeam: string;
-  gameTime: string;
-  slotType: string;
-  actionString: string;
-  spreadLine: string;
-  factors: Factor[];
-  moneyline?: string;
-  hasUnvalidated?: boolean;
-}
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  rest: RefreshCw,
+  chart: BarChart3,
+  target: Target,
+  alert: AlertTriangle,
+  cloud: Cloud,
+  users: Users,
+  clock: Clock,
+  zap: Zap,
+};
 
 const tierConfig: Record<Tier, { className: string; borderClass: string }> = {
   "STRONG PLAY": {
@@ -49,10 +42,44 @@ interface PickCardProps {
   pick: PickData;
   index: number;
   isAdmin?: boolean;
+  onTrackBet?: (bet: BetSlipItem) => void;
 }
 
-export function PickCard({ pick, index, isAdmin = false }: PickCardProps) {
-  const config = tierConfig[pick.tier];
+export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardProps) {
+  const config = tierConfig[pick.tier] ?? tierConfig.MONITOR;
+
+  const handleApprove = async () => {
+    if (!pick.eventId || !pick.sport) return;
+    try {
+      await approvePick(pick.eventId, pick.sport as SportLower);
+    } catch (e) {
+      console.error("Approve failed:", e);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!pick.eventId || !pick.sport) return;
+    try {
+      await rejectPick(pick.eventId, pick.sport as SportLower);
+    } catch (e) {
+      console.error("Reject failed:", e);
+    }
+  };
+
+  const handleTrack = () => {
+    if (!onTrackBet || !pick.eventId || !pick.sport) return;
+    // Parse spread number from spreadLine (e.g. "Lakers +6.5" → 6.5)
+    const spreadMatch = pick.spreadLine.match(/([+-]?\d+\.?\d*)/);
+    const line = spreadMatch ? parseFloat(spreadMatch[1]) : 0;
+    onTrackBet({
+      event_id: pick.eventId,
+      sport: pick.sport,
+      type: "spread",
+      team: pick.spreadLine.split(/\s[+-]/)[0] || pick.awayTeam,
+      line,
+      label: `${pick.awayTeam} @ ${pick.homeTeam} — ${pick.spreadLine}`,
+    });
+  };
 
   return (
     <motion.div
@@ -86,7 +113,9 @@ export function PickCard({ pick, index, isAdmin = false }: PickCardProps) {
           </span>
           <div className="text-right">
             <span className="text-xs text-muted-foreground">{pick.gameTime}</span>
-            <span className="text-[10px] text-muted-foreground ml-2">{pick.slotType}</span>
+            {pick.slotType && (
+              <span className="text-[10px] text-muted-foreground ml-2">{pick.slotType}</span>
+            )}
           </div>
         </div>
         <p className="text-xs text-muted-foreground">{pick.spreadLine}</p>
@@ -99,25 +128,33 @@ export function PickCard({ pick, index, isAdmin = false }: PickCardProps) {
 
       {/* Factor pills */}
       <div className="px-4 py-3 flex flex-wrap gap-2">
-        {pick.factors.map((factor, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-sm text-[10px] font-mono border ${
-              factor.points > 0
-                ? "bg-success/10 text-success border-success/20"
-                : factor.points < 0
-                ? "bg-primary/10 text-primary border-primary/20"
-                : "bg-muted text-muted-foreground border-border"
-            }`}
-          >
-            {factor.icon} {factor.label}
-            {factor.unvalidated && <Zap className="w-2.5 h-2.5 text-warning" />}
-            <span className="font-semibold">
-              {factor.points > 0 ? "+" : ""}
-              {factor.points}
+        {pick.factors.map((factor, i) => {
+          const IconComponent = iconMap[factor.icon];
+          return (
+            <span
+              key={i}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-sm text-[10px] font-mono border ${
+                factor.points > 0
+                  ? "bg-success/10 text-success border-success/20"
+                  : factor.points < 0
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "bg-muted text-muted-foreground border-border"
+              }`}
+            >
+              {IconComponent ? (
+                <IconComponent className="w-2.5 h-2.5" />
+              ) : (
+                factor.icon
+              )}{" "}
+              {factor.label}
+              {factor.unvalidated && <Zap className="w-2.5 h-2.5 text-warning" />}
+              <span className="font-semibold">
+                {factor.points > 0 ? "+" : ""}
+                {factor.points}
+              </span>
             </span>
-          </span>
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer */}
@@ -135,19 +172,32 @@ export function PickCard({ pick, index, isAdmin = false }: PickCardProps) {
           )}
         </div>
 
-        {isAdmin && (
-          <div className="flex items-center gap-1">
-            <button className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 rounded-sm hover:bg-success/25 transition-colors">
-              ✓ APPROVE
+        <div className="flex items-center gap-1">
+          {onTrackBet && pick.eventId && (
+            <button
+              onClick={handleTrack}
+              className="px-2 py-1 text-[10px] font-heading bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors flex items-center gap-1"
+            >
+              <Plus className="w-2.5 h-2.5" /> TRACK
             </button>
-            <button className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors">
-              ✗ REJECT
-            </button>
-            <button className="px-2 py-1 text-[10px] font-heading bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors">
-              👁 WATCH
-            </button>
-          </div>
-        )}
+          )}
+          {isAdmin && (
+            <>
+              <button
+                onClick={handleApprove}
+                className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 rounded-sm hover:bg-success/25 transition-colors"
+              >
+                APPROVE
+              </button>
+              <button
+                onClick={handleReject}
+                className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors"
+              >
+                REJECT
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </motion.div>
   );
