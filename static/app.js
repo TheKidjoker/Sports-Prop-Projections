@@ -450,7 +450,15 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            if (currentSport === "all" && data.all_sports) {
+            // "Picks coming soon" for non-admin when admin hasn't reviewed
+            if (data.picks_pending_review) {
+                welcomeHero.classList.add("hidden");
+                scanResults.innerHTML = '<div class="picks-pending-state">' +
+                    '<div class="pending-headline">Picks coming soon</div>' +
+                    '<div>' + currentSport.toUpperCase() + ' picks are being reviewed. Check back shortly.</div>' +
+                    '</div>';
+                scanResults.classList.remove("hidden");
+            } else if (currentSport === "all" && data.all_sports) {
                 renderAllSportsResults(data.all_sports);
             } else {
                 renderScanResults(data.games || []);
@@ -712,6 +720,15 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<button id="generate-top-props-btn" class="generate-top-props-btn">Generate Top Props</button>';
         }
 
+        // Admin: "Approve All" button when there are pending picks
+        if (_isAdmin) {
+            var hasPending = filtered.some(function (g) { return !g.approval_status || g.approval_status === "PENDING"; });
+            if (hasPending) {
+                var approveDate = (filtered[0] && filtered[0].game_date) ? filtered[0].game_date.slice(0, 10) : "";
+                html += '<button type="button" class="approve-all-btn" data-approve-all-sport="' + currentSport + '" data-approve-all-date="' + approveDate + '">Approve All Picks</button>';
+            }
+        }
+
         html += '<div class="scan-grid">';
 
         filtered.forEach(function (g) {
@@ -968,9 +985,24 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
-        // EXPERIMENTAL model warning (NBA)
-        if (g.model_status === "EXPERIMENTAL") {
-            html += '<div class="scan-experimental-badge">EXPERIMENTAL MODEL — 49% OOS</div>';
+        // Per-sport validation badge
+        if (g.model_status_text && g.model_status_class) {
+            html += '<div class="scan-validation-badge ' + g.model_status_class + '">' + g.model_status_text + '</div>';
+        }
+
+        // Admin pick approval controls
+        if (_isAdmin && g.recommendation && g.recommendation !== "MONITOR" && !g.skip) {
+            var apStatus = g.approval_status || "";
+            if (apStatus === "APPROVED") {
+                html += '<div class="pick-status-approved">APPROVED</div>';
+            } else if (apStatus === "REJECTED") {
+                html += '<div class="pick-status-rejected">REJECTED' + (g.admin_notes ? ' — ' + g.admin_notes : '') + '</div>';
+            } else {
+                html += '<div class="pick-approval-controls">';
+                html += '<button type="button" class="pick-approve-btn" data-approve-event="' + g.event_id + '" data-approve-sport="' + (sport || currentSport) + '" data-approve-date="' + (g.game_date || '').slice(0, 10) + '">Approve</button>';
+                html += '<button type="button" class="pick-reject-btn" data-reject-event="' + g.event_id + '" data-reject-sport="' + (sport || currentSport) + '" data-reject-date="' + (g.game_date || '').slice(0, 10) + '">Reject</button>';
+                html += '</div>';
+            }
         }
 
         // Track Spread button (admin only, actionable games)
@@ -3038,6 +3070,103 @@ document.addEventListener("DOMContentLoaded", function () {
                 btn.innerHTML = "&#10003;";
             }
             renderPicksPanel();
+        }
+    });
+
+    // Event delegation: Approve pick button
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-approve-event]");
+        if (btn) {
+            e.preventDefault();
+            var eventId = btn.getAttribute("data-approve-event");
+            var sport = btn.getAttribute("data-approve-sport");
+            var gameDate = btn.getAttribute("data-approve-date");
+            btn.disabled = true;
+            btn.textContent = "...";
+            authFetch("/api/picks/approve", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ event_id: eventId, sport: sport, game_date: gameDate })
+            }).then(function (res) { return res.json(); }).then(function (data) {
+                if (data.success) {
+                    var controls = btn.closest(".pick-approval-controls");
+                    if (controls) {
+                        controls.outerHTML = '<div class="pick-status-approved">APPROVED</div>';
+                    }
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = "Approve";
+                }
+            }).catch(function () {
+                btn.disabled = false;
+                btn.textContent = "Approve";
+            });
+        }
+    });
+
+    // Event delegation: Reject pick button
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-reject-event]");
+        if (btn) {
+            e.preventDefault();
+            var eventId = btn.getAttribute("data-reject-event");
+            var sport = btn.getAttribute("data-reject-sport");
+            var gameDate = btn.getAttribute("data-reject-date");
+            var notes = prompt("Rejection note (optional):");
+            if (notes === null) return; // cancelled
+            btn.disabled = true;
+            btn.textContent = "...";
+            authFetch("/api/picks/reject", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ event_id: eventId, sport: sport, game_date: gameDate, notes: notes || "" })
+            }).then(function (res) { return res.json(); }).then(function (data) {
+                if (data.success) {
+                    var controls = btn.closest(".pick-approval-controls");
+                    if (controls) {
+                        var card = controls.closest(".scan-card");
+                        controls.outerHTML = '<div class="pick-status-rejected">REJECTED' + (notes ? ' \u2014 ' + notes : '') + '</div>';
+                        if (card) card.classList.add("scan-card-rejected");
+                    }
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = "Reject";
+                }
+            }).catch(function () {
+                btn.disabled = false;
+                btn.textContent = "Reject";
+            });
+        }
+    });
+
+    // Event delegation: Approve All button
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest(".approve-all-btn");
+        if (btn) {
+            e.preventDefault();
+            var sport = btn.getAttribute("data-approve-all-sport");
+            var gameDate = btn.getAttribute("data-approve-all-date");
+            btn.disabled = true;
+            btn.textContent = "Approving...";
+            authFetch("/api/picks/approve-all", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sport: sport, game_date: gameDate })
+            }).then(function (res) { return res.json(); }).then(function (data) {
+                if (data.success) {
+                    // Update all pending controls to approved
+                    document.querySelectorAll(".pick-approval-controls").forEach(function (ctrl) {
+                        ctrl.outerHTML = '<div class="pick-status-approved">APPROVED</div>';
+                    });
+                    btn.textContent = "All Approved";
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = "Approve All Picks";
+                }
+            }).catch(function () {
+                btn.disabled = false;
+                btn.textContent = "Approve All Picks";
+            });
         }
     });
 

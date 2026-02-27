@@ -115,6 +115,14 @@ DATA_CONFIDENCE_LEVELS = {
     "cfb": {"level": "very_low", "games": 51,   "label": "Very Low", "reason": "All weights essentially unvalidated"},
 }
 
+SPORT_VALIDATION_STATUS = {
+    "nhl": {"badge": "VALIDATED",    "css_class": "badge-validated",    "text": "VALIDATED \u2014 67% OOS"},
+    "nba": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 49% OOS"},
+    "cbb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 49% OOS"},
+    "nfl": {"badge": "LIMITED DATA", "css_class": "badge-limited",      "text": "LIMITED DATA \u2014 34% OOS (n=29)"},
+    "cfb": {"badge": "UNVALIDATED",  "css_class": "badge-unvalidated",  "text": "UNVALIDATED \u2014 No OOS data"},
+}
+
 
 def wilson_interval(wins, total, z=1.96):
     """

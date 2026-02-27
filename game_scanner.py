@@ -655,9 +655,13 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     if ev_model_data:
         result["ev_model"] = ev_model_data
 
-    # NBA EXPERIMENTAL badge + unvalidated factor flag
+    # Per-sport validation badge
+    from constants import SPORT_VALIDATION_STATUS
+    _vs = SPORT_VALIDATION_STATUS.get(sport, {})
+    result["model_status"] = _vs.get("badge", "UNKNOWN")
+    result["model_status_text"] = _vs.get("text", "")
+    result["model_status_class"] = _vs.get("css_class", "")
     if sport == "nba":
-        result["model_status"] = "EXPERIMENTAL"
         result["crossed_unvalidated"] = crossed_unvalidated
 
     return result

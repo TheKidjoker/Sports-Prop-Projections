@@ -2,7 +2,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import jwt
 from projections import points_prediction, cover_rate
 from api_client import (
@@ -19,6 +19,7 @@ from game_scanner import (
 )
 import tracker
 import bet_tracker
+import pick_curation
 import scan_cache
 
 try:
@@ -36,10 +37,12 @@ except Exception as _tm_err:
     print("[test_model] Import failed:", traceback.format_exc())
     HAS_TEST_MODEL = False
 
-app = Flask(__name__)
+REACT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+app = Flask(__name__, static_folder=None)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 tracker.init_db()
 bet_tracker.init_tracked_bets_db()
+pick_curation.init_pick_approvals_db()
 if HAS_TEST_MODEL:
     tm_db.init_tm_db()
     # Load calibration models from latest backtest runs
@@ -219,13 +222,20 @@ def _get_games_with_transition(sport):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return send_from_directory(REACT_DIST, "index.html")
 
 
 @app.route("/auth/<path:subpath>")
 def auth_redirect(subpath):
     """Handle Supabase email confirmation/callback redirects."""
-    return render_template("index.html")
+    return send_from_directory(REACT_DIST, "index.html")
+
+
+# Legacy static assets (old app.js, style.css still served from /static/)
+@app.route("/static/<path:filename>")
+def legacy_static(filename):
+    legacy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    return send_from_directory(legacy_dir, filename)
 
 
 @app.route("/api/auth/config", methods=["GET"])
@@ -303,10 +313,12 @@ def api_games():
 def api_scan():
     """Scans all today's games, returns ranked results.
     Returns cached results instantly when available, queues background refresh.
+    Admin sees all picks with approval controls; non-admin sees only approved picks.
     """
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
+        is_admin = _is_admin()
 
         if sport == "all":
             sports = ("nba", "nhl", "cfb", "nfl", "cbb")
@@ -320,23 +332,27 @@ def api_scan():
                     missing.append(s)
 
             if not missing:
-                # All cached — return instantly, queue refresh
                 scan_cache.request_refresh(*sports)
-                return jsonify({"success": True, "all_sports": all_results, "cached": True})
+            else:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = {pool.submit(scan_all_games, s): s for s in missing}
+                    for future in futures:
+                        s = futures[future]
+                        result = future.result()
+                        all_results[s] = result
+                        scan_cache.put(s, result)
+                        try:
+                            pick_curation.sync_picks_from_scan(result, s)
+                        except Exception:
+                            pass
 
-            # Scan missing sports (blocking)
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {pool.submit(scan_all_games, s): s for s in missing}
-                for future in futures:
-                    s = futures[future]
-                    result = future.result()
-                    all_results[s] = result
-                    scan_cache.put(s, result)
-                    try:
-                        tracker.save_predictions(result, s)
-                    except Exception:
-                        pass
-            return jsonify({"success": True, "all_sports": all_results})
+            # Apply approval filtering per sport
+            filtered_results = {}
+            for s, games in all_results.items():
+                filtered_results[s] = _apply_approval_filter(games, s, is_admin)
+
+            return jsonify({"success": True, "all_sports": filtered_results,
+                            "cached": not missing})
 
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
             sport = "nba"
@@ -345,8 +361,12 @@ def api_scan():
         cached, age = scan_cache.get(sport)
         if cached is not None:
             scan_cache.request_refresh(sport)
+            games = _apply_approval_filter(cached, sport, is_admin)
+            if games is None:
+                return jsonify({"success": True, "games": [],
+                                "picks_pending_review": True})
             return jsonify({
-                "success": True, "games": cached,
+                "success": True, "games": games,
                 "cached": True, "cache_age": round(age),
             })
 
@@ -354,12 +374,66 @@ def api_scan():
         results = scan_all_games(sport)
         scan_cache.put(sport, results)
         try:
-            tracker.save_predictions(results, sport)
+            pick_curation.sync_picks_from_scan(results, sport)
         except Exception:
             pass
-        return jsonify({"success": True, "games": results})
+        games = _apply_approval_filter(results, sport, is_admin)
+        if games is None:
+            return jsonify({"success": True, "games": [],
+                            "picks_pending_review": True})
+        return jsonify({"success": True, "games": games})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _today_est():
+    """Return today's date string in EST (UTC-5)."""
+    from datetime import timedelta
+    return (datetime.now(timezone.utc) - timedelta(hours=5)).strftime("%Y-%m-%d")
+
+
+def _apply_approval_filter(games, sport, is_admin):
+    """
+    Filter scan results based on admin approval status.
+    Admin: annotate games with approval_status.
+    Non-admin: return None if no picks reviewed, or only approved games.
+    """
+    if not games:
+        return games
+
+    game_date = _today_est()
+    event_ids = [str(g.get("event_id", "")) for g in games]
+    approval_map = pick_curation.get_approval_map(event_ids, sport, game_date)
+
+    if is_admin:
+        for g in games:
+            eid = str(g.get("event_id", ""))
+            ap = approval_map.get(eid, {})
+            g["approval_status"] = ap.get("status", "")
+            g["admin_notes"] = ap.get("admin_notes", "")
+            if ap.get("admin_lean_override"):
+                g["admin_lean_override"] = ap["admin_lean_override"]
+            if ap.get("admin_confidence_override") is not None:
+                g["admin_confidence_override"] = ap["admin_confidence_override"]
+        return games
+
+    # Non-admin: check if admin has reviewed
+    if not pick_curation.has_admin_reviewed(sport, game_date):
+        return None  # Signal "picks pending review"
+
+    # Filter to approved only, apply overrides
+    approved_ids = pick_curation.get_approved_event_ids(sport, game_date)
+    filtered = []
+    for g in games:
+        eid = str(g.get("event_id", ""))
+        if eid in approved_ids:
+            ap = approval_map.get(eid, {})
+            if ap.get("admin_lean_override"):
+                g["lean_team"] = ap["admin_lean_override"]
+            if ap.get("admin_confidence_override") is not None:
+                g["cover_pct"] = ap["admin_confidence_override"]
+            filtered.append(g)
+    return filtered
 
 
 @app.route("/api/props", methods=["GET"])
@@ -1197,6 +1271,97 @@ def api_tm_cbb_ev_metrics():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ─── Pick Curation (Admin) ────────────────────────────────────────────────────
+
+
+@app.route("/api/picks/pending", methods=["GET"])
+@require_auth
+def api_picks_pending():
+    """List picks for admin review."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        game_date = request.args.get("date") or _today_est()
+        picks = pick_curation.get_pending_picks(sport, game_date)
+        return jsonify({"success": True, "picks": picks})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/picks/approve", methods=["POST"])
+@require_auth
+def api_picks_approve():
+    """Approve a single pick."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        data = request.get_json(force=True)
+        event_id = data.get("event_id")
+        sport = data.get("sport", "nba").lower()
+        game_date = data.get("game_date") or _today_est()
+        notes = data.get("notes")
+        lean_override = data.get("lean_override")
+        confidence_override = data.get("confidence_override")
+        if not event_id:
+            return jsonify({"success": False, "error": "event_id required"}), 400
+        pick_curation.approve_pick(event_id, sport, game_date,
+                                   notes=notes, lean_override=lean_override,
+                                   confidence_override=confidence_override)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/picks/reject", methods=["POST"])
+@require_auth
+def api_picks_reject():
+    """Reject a single pick."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        data = request.get_json(force=True)
+        event_id = data.get("event_id")
+        sport = data.get("sport", "nba").lower()
+        game_date = data.get("game_date") or _today_est()
+        notes = data.get("notes")
+        if not event_id:
+            return jsonify({"success": False, "error": "event_id required"}), 400
+        pick_curation.reject_pick(event_id, sport, game_date, notes=notes)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/picks/approve-all", methods=["POST"])
+@require_auth
+def api_picks_approve_all():
+    """Approve all pending picks for a sport+date."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        data = request.get_json(force=True)
+        sport = data.get("sport", "nba").lower()
+        game_date = data.get("game_date") or _today_est()
+        pick_curation.approve_all_picks(sport, game_date)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/picks/status", methods=["GET"])
+@require_auth
+def api_picks_status():
+    """Check if admin has reviewed picks for a sport+date."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        game_date = request.args.get("date") or _today_est()
+        reviewed = pick_curation.has_admin_reviewed(sport, game_date)
+        return jsonify({"success": True, "reviewed": reviewed})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ─── Bet Tracker (Admin) ──────────────────────────────────────────────────────
 
 
@@ -1524,6 +1689,19 @@ def api_tm_prism_backtest_status():
         return jsonify({"success": True, "progress": progress})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── React SPA catch-all (must be last) ───────────────────────────────────────
+# Serves index.html for any non-API, non-static path so React Router handles it.
+
+@app.route("/<path:path>")
+def react_catchall(path):
+    # If the path points to an actual file in dist, serve it (e.g. assets/*, favicon.ico)
+    file_path = os.path.join(REACT_DIST, path)
+    if os.path.isfile(file_path):
+        return send_from_directory(REACT_DIST, path)
+    # Otherwise fall through to React Router
+    return send_from_directory(REACT_DIST, "index.html")
 
 
 if __name__ == "__main__":

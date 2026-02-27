@@ -60,14 +60,14 @@ def request_refresh(*sports):
 
 
 def _scan(sport):
-    """Run scan_all_games, cache results, save to tracker."""
+    """Run scan_all_games, cache results, sync to pick curation."""
     from game_scanner import scan_all_games
-    import tracker
+    import pick_curation
     try:
         results = scan_all_games(sport)
         put(sport, results)
         try:
-            tracker.save_predictions(results, sport)
+            pick_curation.sync_picks_from_scan(results, sport)
         except Exception:
             pass
         logger.info("[scan_cache] Refreshed %s: %d games", sport, len(results))

@@ -1022,17 +1022,117 @@ button[type="submit"]:disabled {
     color: var(--text-muted);
 }
 
-.scan-experimental-badge {
+.scan-validation-badge {
     text-align: center;
     font-size: 0.62rem;
     font-weight: 600;
     padding: 0.2rem 0.5rem;
     border-radius: 4px;
     margin-top: 0.3rem;
+    letter-spacing: 0.4px;
+}
+.scan-validation-badge.badge-validated {
+    background: rgba(76, 175, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+.scan-validation-badge.badge-experimental {
     background: rgba(255, 152, 0, 0.12);
     color: var(--accent-orange);
     border: 1px solid rgba(255, 152, 0, 0.25);
-    letter-spacing: 0.4px;
+}
+.scan-validation-badge.badge-limited,
+.scan-validation-badge.badge-unvalidated {
+    background: rgba(230, 57, 70, 0.12);
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+/* ─── Pick Approval Controls ─── */
+.pick-approval-controls {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    justify-content: center;
+}
+.pick-approve-btn,
+.pick-reject-btn {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    background: transparent;
+    transition: background 0.15s;
+}
+.pick-approve-btn {
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+}
+.pick-approve-btn:hover {
+    background: rgba(76, 175, 80, 0.15);
+}
+.pick-reject-btn {
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.4);
+}
+.pick-reject-btn:hover {
+    background: rgba(230, 57, 70, 0.15);
+}
+.pick-status-approved {
+    text-align: center;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.3rem;
+    background: rgba(76, 175, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+.pick-status-rejected {
+    text-align: center;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.3rem;
+    background: rgba(230, 57, 70, 0.12);
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.25);
+}
+.approve-all-btn {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.35rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    background: rgba(76, 175, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+    margin-bottom: 0.8rem;
+    letter-spacing: 0.3px;
+    transition: background 0.15s;
+}
+.approve-all-btn:hover {
+    background: rgba(76, 175, 80, 0.25);
+}
+.scan-card-rejected {
+    opacity: 0.45;
+}
+.picks-pending-state {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+.picks-pending-state .pending-headline {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
 }
 
 /* =========================================
