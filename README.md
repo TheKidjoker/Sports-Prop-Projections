@@ -1,6 +1,8 @@
 # Joker's Edge
 
-A rules-based sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, **CBB**, and **NFL**. Combines time-slot theory, line movement tracking, injury impact analysis, player prop projections, sharp money detection, and sport-specific intelligence signals to produce a confidence score for every game on the board.
+A sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, **CBB**, and **NFL**. Combines time-slot theory, line movement tracking, injury impact analysis, player prop projections, sharp money detection, and sport-specific intelligence signals to produce a confidence score for every game on the board.
+
+For NBA, NHL, and CBB, an **EV model** (L2-regularized logistic regression) replaces the heuristic scoring system when trained and validated. The EV model outputs calibrated probabilities and edge-based recommendations. The heuristic system remains as a fallback.
 
 All scoring weights have been calibrated through historical backtesting against real outcomes (NBA: 607 games, NHL: 529, CBB: 1,977, NFL: 105, CFB: 51).
 
@@ -203,6 +205,7 @@ When the Trell Rule fires (star player recently injured + out + vegas slot), the
 - **Home/away split:** Removed (was +3, -7.9% lift).
 - **H2H:** Removed (was +3/+2, -2.2% lift — noise).
 - **Moneyline threshold:** 7+ points. No player props (excluded from PRISM).
+- **EV Model:** When trained, replaces heuristic scoring with L2-regularized logistic regression (8 features, C=0.05, 4% minimum edge). See EV Models section.
 
 ### NFL
 - **Timezone:** PST (UTC-8) for slot classification, EST for display
@@ -299,6 +302,22 @@ The system learns from its own history. The Ledger's tracked results feed back i
 - +1/-1 overall sport adjustment (minimum 50 decided games)
 - Cached with 5-minute TTL to avoid DB churn
 
+### Bet Tracker (Admin)
+Personal bet slip for admin users. Track which spread bets and PRISM player props were actually placed, then verify results against actual outcomes.
+
+- **Track Spread:** One-click button on every actionable scan card to add the spread pick to your bet slip
+- **Track Props:** "+" button on each PRISM prop row to add individual player prop bets
+- **My Picks Panel:** Floating bottom panel (shopping cart style) shows all selected bets before confirmation. Remove individual picks or clear all. "Confirm Picks" saves to the database.
+- **My Bets Dashboard:** Sidebar button opens a dedicated dashboard with:
+  - Overall record, win rate (with Wilson CI), ROI at -110 odds, current streak, pending count
+  - Breakdowns by bet type (spread vs prop), sport, recommendation tier, and stat type
+  - Full bet history grouped by date with result badges and delete buttons for pending bets
+- **Auto-Grading:**
+  - Spread bets graded via ESPN final scores using the same ATS logic as The Ledger
+  - Prop bets graded via balldontlie game logs (NBA only) — compares actual stat value against the prop line and direction
+- **Persistence:** Tracked bets persist across sessions. On admin login, existing PENDING bets are loaded so button states reflect what's already been tracked.
+- **Admin-only:** All tracking buttons, the My Picks panel, and the My Bets dashboard are invisible to non-admin users.
+
 ### ATS Record Factor
 Checks the Ledger for the lean team's historical against-the-spread record:
 - +4 if >60% ATS (minimum 3 decided games)
@@ -364,7 +383,12 @@ constants.py          Recommendation thresholds, max scores, ML thresholds
 prism.py              PRISM player prop projection engine (pure math, no API calls)
 projections.py        Manual prediction math (over/under probability)
 tracker.py            SQLite/PostgreSQL prediction storage + grading + dashboard stats
+bet_tracker.py        Admin bet slip — track, grade, and dashboard personal spread/prop bets
 scan_cache.py         Background scan cache daemon (thread-safe, hourly refresh)
+calibration.py        Logistic/isotonic calibration for heuristic cover percentages
+nba_ev_model.py       NBA EV model — L2-regularized logistic regression (10 features)
+nhl_ev_model.py       NHL EV model — L2-regularized logistic regression (8 features)
+cbb_ev_model.py       CBB EV model — L2-regularized logistic regression (8 features)
 templates/            index.html (single-page app)
 static/               app.js (frontend logic), style.css (dark Gotham theme)
 test_model/           Backtesting engine (collector, features, rules backtest, ML scanner)
@@ -382,6 +406,16 @@ test_model/           Backtesting engine (collector, features, rules backtest, M
 | `/api/grade` | POST | Manually trigger grading of pending predictions |
 | `/api/auth/config` | GET | Supabase configuration (public, no auth required) |
 
+### Bet Tracker Endpoints (Admin)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/bets/save` | POST | Save confirmed bets from the frontend |
+| `/api/bets` | GET | List tracked bets (optional `?sport=&status=` filters) |
+| `/api/bets/grade` | POST | Grade all PENDING bets against actual outcomes |
+| `/api/bets/dashboard` | GET | Dashboard aggregation stats (optional `?sport=` filter) |
+| `/api/bets/<id>` | DELETE | Delete a PENDING bet |
+
 ### Test Model Endpoints
 
 | Endpoint | Method | Description |
@@ -395,6 +429,15 @@ test_model/           Backtesting engine (collector, features, rules backtest, M
 | `/api/tm/rules-backtest/status` | GET | Poll rules backtest progress |
 | `/api/tm/scan` | POST | Scan today's games with ML model overlay |
 | `/api/tm/metrics` | GET | Get backtest performance metrics |
+| `/api/tm/nba-ev/train` | POST | Start background NBA EV model training |
+| `/api/tm/nba-ev/status` | GET | Poll NBA EV training progress |
+| `/api/tm/nba-ev/metrics` | GET | Get latest NBA EV model metrics |
+| `/api/tm/nhl-ev/train` | POST | Start background NHL EV model training |
+| `/api/tm/nhl-ev/status` | GET | Poll NHL EV training progress |
+| `/api/tm/nhl-ev/metrics` | GET | Get latest NHL EV model metrics |
+| `/api/tm/cbb-ev/train` | POST | Start background CBB EV model training |
+| `/api/tm/cbb-ev/status` | GET | Poll CBB EV training progress |
+| `/api/tm/cbb-ev/metrics` | GET | Get latest CBB EV model metrics |
 
 ### Data Sources
 
@@ -568,6 +611,60 @@ Parlay tiers depend on `cover_pct` accuracy. With calibration:
 | Gotham Breakout | 60%+ | Gated by 68.5% actionable filter | NHL score ≥ 10, NBA score ≥ 11, CBB score ≥ 11 |
 
 Parlay thresholds remain unchanged — they now represent honest probabilities.
+
+---
+
+## EV Models (Logistic Regression)
+
+For NBA, NHL, and CBB, an L2-regularized logistic regression model can replace the heuristic scoring system. When trained and validated (AUC gate passed), the EV model overrides the heuristic score, cover percentage, and recommendation tier for every game in that sport.
+
+### How It Works
+
+1. **Training**: Walk-forward rolling validation (250-train / 50-test windows) on historical game data
+2. **Prediction**: Model outputs P(underdog covers) for each game
+3. **Edge**: `edge = model_probability - 0.5238` (implied probability at -110 odds)
+4. **EV**: `ev_per_unit = P * (100/110) - (1-P)` — expected value per dollar wagered
+5. **Recommendation**: Tiered by edge size (STRONG 8%+, CONFIDENT 5%+, LEAN at sport-specific minimum)
+6. **Fallback**: If AUC < gate or model not trained, the heuristic system runs unchanged
+
+### Sport-Specific Configuration
+
+| Setting | NBA | NHL | CBB |
+|---------|-----|-----|-----|
+| Features | 10 | 8 | 8 |
+| Regularization (C) | 0.1 | 0.05 | 0.05 |
+| AUC gate | 0.54 | 0.53 | 0.53 |
+| LEAN edge minimum | 3% | 3% | 4% |
+| Regressed prior weight | 10 | 12 | 15 |
+| Warmup games | 20 | 20 | 30 |
+| Training mode | 70/30 split | Walk-forward rolling | Walk-forward rolling |
+
+### Features
+
+**NBA** (10): spread_abs, clv, line_movement_abs, rest_diff, dog_off_regressed, fav_off_regressed, net_rating_diff, dog_win_pct_10, fav_win_pct_10, total
+
+**NHL** (8): spread_abs, clv, line_movement_abs, rest_diff, dog_gf_regressed, fav_gf_regressed, goal_diff_net, total
+
+**CBB** (8): spread_abs, clv, line_movement_abs, rest_diff, dog_ppg_regressed, fav_ppg_regressed, net_efficiency_diff, total
+
+All offensive/defensive stats use Bayesian shrinkage (blend season average with recent 5 games, weighted by sport-specific prior) to reduce noise from small samples.
+
+### Calibration
+
+Isotonic calibration is applied post-hoc only when ECE > 5% and the AUC gate has been passed (ranking integrity confirmed first). NBA uses Platt scaling instead.
+
+### Edge Tiers
+
+| Tier | Edge | Description |
+|------|------|-------------|
+| STRONG PLAY | 8%+ | High-confidence edge |
+| CONFIDENT | 5-8% | Solid edge |
+| LEAN | 3-4%+ | Minimum actionable edge (4% for CBB, 3% for NBA/NHL) |
+| MONITOR | < min | Below threshold — no bet recommended |
+
+### Frontend Integration
+
+EV model games display an edge badge showing edge% and EV cents. The actionable threshold shifts from 68.5% (heuristic) to 55.4% (NBA/NHL) or 56.4% (CBB) for EV games, reflecting the tighter probability range of calibrated models.
 
 ---
 

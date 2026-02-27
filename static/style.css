@@ -3780,3 +3780,289 @@ button[type="submit"]:disabled {
     font-weight: 400;
     margin-left: 3px;
 }
+
+/* =========================================
+   Bet Tracker — Track Buttons
+   ========================================= */
+.track-bet-btn {
+    display: inline-block;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-primary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-top: 0.3rem;
+}
+
+.track-bet-btn:hover {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.track-bet-btn.selected {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+    background: rgba(230, 57, 70, 0.08);
+}
+
+.track-bet-btn.tracked {
+    border-color: rgba(63, 185, 80, 0.5);
+    color: #3fb950;
+    background: rgba(63, 185, 80, 0.08);
+    cursor: default;
+}
+
+.track-prop-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-primary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    margin-left: 0.4rem;
+    padding: 0;
+    line-height: 1;
+}
+
+.track-prop-btn:hover {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.track-prop-btn.selected {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+    background: rgba(230, 57, 70, 0.1);
+}
+
+.track-prop-btn.tracked {
+    border-color: rgba(63, 185, 80, 0.5);
+    color: #3fb950;
+    background: rgba(63, 185, 80, 0.08);
+    cursor: default;
+}
+
+/* =========================================
+   Bet Tracker — My Picks Panel (Floating)
+   ========================================= */
+.picks-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 900;
+    background: rgba(22, 22, 30, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--accent-red);
+    padding: 0.75rem 1rem;
+    transform: translateY(0);
+    transition: transform 0.25s ease;
+    max-height: 40vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.picks-panel.hidden {
+    transform: translateY(100%);
+    pointer-events: none;
+}
+
+.picks-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    flex-shrink: 0;
+}
+
+.picks-panel-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--accent-red);
+}
+
+.picks-panel-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.picks-clear-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.picks-clear-btn:hover {
+    color: var(--text-secondary);
+    border-color: var(--text-secondary);
+}
+
+.confirm-picks-btn {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--accent-red);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.confirm-picks-btn:hover {
+    opacity: 0.85;
+}
+
+.confirm-picks-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.picks-list {
+    overflow-y: auto;
+    max-height: 25vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.picks-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+}
+
+.picks-item-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+}
+
+.picks-type-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.picks-badge-spread {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-blue);
+}
+
+.picks-badge-prop {
+    background: rgba(210, 153, 255, 0.15);
+    color: #d299ff;
+}
+
+.picks-matchup {
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.picks-detail {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.picks-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0 0.3rem;
+    flex-shrink: 0;
+}
+
+.picks-remove-btn:hover {
+    color: var(--accent-red);
+}
+
+/* =========================================
+   Bet Tracker — My Bets Dashboard
+   ========================================= */
+.mybets-title {
+    color: var(--accent-red);
+}
+
+#mybets-btn {
+    display: block;
+    width: 100%;
+    padding: 0.6rem;
+    background: transparent;
+    color: var(--accent-red);
+    border: 1px solid rgba(230, 57, 70, 0.4);
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0;
+}
+
+#mybets-btn:hover:not(:disabled) {
+    background: var(--accent-red-dim);
+    border-color: var(--accent-red);
+}
+
+#mybets-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.mybets-bet-row {
+    /* Inherits from dash-recent-item */
+}
+
+.mybets-delete-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0.1rem 0.3rem;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+
+.mybets-delete-btn:hover {
+    opacity: 1;
+}
+
+/* ─── Responsive: Picks Panel ─── */
+@media (max-width: 768px) {
+    .picks-panel {
+        padding: 0.6rem 0.75rem;
+    }
+    .picks-item-info {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+    .picks-detail {
+        font-size: 0.7rem;
+    }
+}

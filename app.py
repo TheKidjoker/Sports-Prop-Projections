@@ -18,6 +18,7 @@ from game_scanner import (
     classify_game_slot, _build_action_string,
 )
 import tracker
+import bet_tracker
 import scan_cache
 
 try:
@@ -38,6 +39,7 @@ except Exception as _tm_err:
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 tracker.init_db()
+bet_tracker.init_tracked_bets_db()
 if HAS_TEST_MODEL:
     tm_db.init_tm_db()
     # Load calibration models from latest backtest runs
@@ -78,6 +80,19 @@ if HAS_TEST_MODEL:
                 nhl_load_state()
     except Exception as _nhl_ev_err:
         print(f"[nhl_ev] Startup load skipped: {_nhl_ev_err}", flush=True)
+
+    # Load CBB EV model if available and validated
+    try:
+        from cbb_ev_model import load_cbb_ev_model, load_live_team_state as cbb_load_state, CBB_EV_CONFIG
+        _cbb_ev_run = tm_db.get_latest_model_run("cbb", "ev_logistic")
+        if _cbb_ev_run and _cbb_ev_run.get("model_params"):
+            _cbb_ev_params = _cbb_ev_run["model_params"]
+            _cbb_auc = _cbb_ev_params.get("mean_auc") or _cbb_ev_params.get("auc", 0)
+            if _cbb_auc >= CBB_EV_CONFIG["auc_gate"]:
+                load_cbb_ev_model(_cbb_ev_params)
+                cbb_load_state()
+    except Exception as _cbb_ev_err:
+        print(f"[cbb_ev] Startup load skipped: {_cbb_ev_err}", flush=True)
 scan_cache.init()
 
 # ─── Supabase Auth ──────────────────────────────────────────────────────
@@ -1126,6 +1141,142 @@ def api_tm_nhl_ev_metrics():
             "ev_metrics": ev_run,
             "model_active": is_ev_model_active(),
         })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── CBB EV Model Endpoints ───────────────────────────────────────────────
+
+
+@app.route("/api/tm/cbb-ev/train", methods=["POST"])
+@require_auth
+def api_tm_cbb_ev_train():
+    """Start background CBB EV model training."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from cbb_ev_model import start_ev_training_thread
+        started = start_ev_training_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/cbb-ev/status", methods=["GET"])
+@require_auth
+def api_tm_cbb_ev_status():
+    """Poll CBB EV model training progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from cbb_ev_model import get_ev_training_status
+        progress = get_ev_training_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/cbb-ev/metrics", methods=["GET"])
+@require_auth
+def api_tm_cbb_ev_metrics():
+    """Get latest CBB EV model metrics."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        ev_run = tm_db.get_latest_model_run("cbb", "ev_logistic")
+        from cbb_ev_model import is_ev_model_active
+        return jsonify({
+            "success": True,
+            "ev_metrics": ev_run,
+            "model_active": is_ev_model_active(),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Bet Tracker (Admin) ──────────────────────────────────────────────────────
+
+
+@app.route("/api/bets/save", methods=["POST"])
+@require_auth
+def api_bets_save():
+    """Save confirmed bets from the frontend."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        data = request.get_json(force=True)
+        bets = data.get("bets", [])
+        if not bets:
+            return jsonify({"success": False, "error": "No bets provided"}), 400
+        result = bet_tracker.save_tracked_bets(bets, request.user_email)
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/bets", methods=["GET"])
+@require_auth
+def api_bets_list():
+    """List tracked bets with optional sport/status filters."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        sport = request.args.get("sport", "").lower() or None
+        status = request.args.get("status", "").upper() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        if status and status not in ("PENDING", "WIN", "LOSS", "PUSH"):
+            status = None
+        bets = bet_tracker.get_tracked_bets(request.user_email, sport=sport, status=status)
+        return jsonify({"success": True, "bets": bets})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/bets/grade", methods=["POST"])
+@require_auth
+def api_bets_grade():
+    """Grade all PENDING bets for this user."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        result = bet_tracker.grade_tracked_bets(request.user_email)
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/bets/dashboard", methods=["GET"])
+@require_auth
+def api_bets_dashboard():
+    """Dashboard aggregation stats for tracked bets."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        sport = request.args.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        stats = bet_tracker.get_tracked_dashboard(request.user_email, sport=sport)
+        return jsonify({"success": True, **stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/bets/<int:bet_id>", methods=["DELETE"])
+@require_auth
+def api_bets_delete(bet_id):
+    """Delete a PENDING bet."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        deleted = bet_tracker.delete_tracked_bet(bet_id, request.user_email)
+        if deleted:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": "Bet not found or not PENDING"}), 404
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -597,7 +597,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     # ── EV Model Override (NBA + NHL) ─────────────────────────────────
     ev_model_data = None
-    if sport in ("nba", "nhl") and not lightweight:
+    if sport in ("nba", "nhl", "cbb") and not lightweight:
         ev_result = _try_ev_prediction(
             sport, current, opening, game.get("game_date", ""),
             home_team, away_team,
@@ -648,6 +648,8 @@ def _try_ev_prediction(sport, current_spread, opening_spread, game_date_str,
             from nba_ev_model import is_ev_model_active, extract_live_features, predict_single
         elif sport == "nhl":
             from nhl_ev_model import is_ev_model_active, extract_live_features, predict_single
+        elif sport == "cbb":
+            from cbb_ev_model import is_ev_model_active, extract_live_features, predict_single
         else:
             return None
 

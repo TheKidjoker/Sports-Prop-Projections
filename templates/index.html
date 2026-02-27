@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260225a">
+    <link rel="stylesheet" href="/static/style.css?v=20260226a">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -68,6 +68,8 @@
             <button type="button" id="player-search-btn">Player Search</button>
 
             <button type="button" id="ledger-btn">The Ledger</button>
+
+            <button type="button" id="mybets-btn" disabled>My Bets</button>
 
             <button type="button" id="testmodel-btn">Test Model</button>
             <div id="testmodel-loading" class="sonar-loading hidden">
@@ -200,6 +202,32 @@
             <div id="dashboard-model-health" class="dashboard-model-health"></div>
             <div id="dashboard-breakdowns" class="dashboard-breakdowns"></div>
             <div id="dashboard-recent" class="dashboard-recent"></div>
+        </section>
+
+        <section id="mybets-section" class="dashboard-section hidden">
+            <div class="dashboard-header">
+                <h2 class="dashboard-title mybets-title">The Joker's Bet Slip</h2>
+                <div class="dashboard-controls">
+                    <select id="mybets-sport-filter" class="dashboard-filter">
+                        <option value="">All Sports</option>
+                        <option value="nba">NBA</option>
+                        <option value="nhl">NHL</option>
+                        <option value="cfb">CFB</option>
+                        <option value="nfl">NFL</option>
+                        <option value="cbb">CBB</option>
+                    </select>
+                    <button type="button" id="mybets-grade-btn" class="grade-btn">Grade Pending</button>
+                </div>
+            </div>
+
+            <div id="mybets-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Loading your bets...</p>
+            </div>
+
+            <div id="mybets-stats"></div>
+            <div id="mybets-breakdowns"></div>
+            <div id="mybets-recent"></div>
         </section>
 
         <div id="lotto-results" class="lotto-results hidden"></div>
@@ -355,6 +383,18 @@
         </div>
     </main>
 
+    <!-- Floating Picks Panel -->
+    <div id="picks-panel" class="picks-panel hidden">
+        <div class="picks-panel-header">
+            <span class="picks-panel-title">My Picks (<span id="picks-count">0</span>)</span>
+            <div class="picks-panel-actions">
+                <button type="button" id="picks-clear-btn" class="picks-clear-btn">Clear</button>
+                <button type="button" id="picks-confirm-btn" class="confirm-picks-btn">Confirm Picks</button>
+            </div>
+        </div>
+        <div id="picks-list" class="picks-list"></div>
+    </div>
+
     <!-- Bottom ticker -->
     <div class="ticker-bar">
         <div class="ticker-track" id="ticker-track"></div>
@@ -369,6 +409,6 @@
 
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260225a"></script>
+    <script src="/static/app.js?v=20260226a"></script>
 </body>
 </html>

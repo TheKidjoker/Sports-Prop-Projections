@@ -54,13 +54,38 @@ document.addEventListener("DOMContentLoaded", function () {
     function updateAdminUI() {
         var btn = document.getElementById("testmodel-btn");
         if (!btn) return;
+        var mybetsBtn = document.getElementById("mybets-btn");
         if (_isAdmin) {
             btn.disabled = false;
             btn.title = "";
+            if (mybetsBtn) { mybetsBtn.disabled = false; mybetsBtn.title = ""; }
+            loadTrackedBetsState();
         } else {
             btn.disabled = true;
             btn.title = "Admin only";
+            if (mybetsBtn) { mybetsBtn.disabled = true; mybetsBtn.title = "Admin only"; }
         }
+    }
+
+    function loadTrackedBetsState() {
+        authFetch("/api/bets?status=PENDING")
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success && data.bets) {
+                    data.bets.forEach(function (b) {
+                        var key = _betKey(b);
+                        trackedBets[key] = b;
+                    });
+                }
+            })
+            .catch(function () {});
+    }
+
+    function _betKey(b) {
+        if (b.bet_type === "prop") {
+            return b.event_id + ":prop:" + (b.player_name || "") + ":" + (b.stat_type || "");
+        }
+        return b.event_id + ":spread";
     }
 
     function showApp() {
@@ -212,6 +237,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var dashboardVisible = false;
     var loadedProps = {};       // event_id -> props array
     var lastScanGames = [];    // games from last scan (for parlay rebuild)
+    var selectedBets = [];     // bets selected but not confirmed
+    var trackedBets = {};      // confirmed bets keyed by composite ID
 
     // Sidebar toggle
     var navSportBadge = document.getElementById("nav-sport-badge");
@@ -245,6 +272,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         playerSearchSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         welcomeHero.classList.remove("hidden");
         closeSidebar();
     });
@@ -402,6 +430,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         playerSearchSection.classList.add("hidden");
         welcomeHero.classList.add("hidden");
 
@@ -866,7 +895,7 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<span class="prism-dropdown-chevron">&#9660;</span>';
         html += '</div>';
         html += '<div class="prism-dropdown-body" id="prism-body-' + g.event_id + '">';
-        if (alreadyLoaded) html += buildPrismInner(loadedProps[g.event_id]);
+        if (alreadyLoaded) html += buildPrismInner(loadedProps[g.event_id], g.event_id);
         html += '</div></div>';
         return html;
     }
@@ -883,7 +912,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function getActionableThreshold(sport, g) {
         // EV models: probabilities cluster 48-62%, use ~55.4% (3% edge over 52.38%)
-        if ((sport === "nba" || sport === "nhl") && g && isEvModelGame(g)) return 55.4;
+        if (g && isEvModelGame(g)) {
+            if (sport === "cbb") return 56.4;
+            if (sport === "nba" || sport === "nhl") return 55.4;
+        }
         return COVER_PCT.actionable;
     }
 
@@ -936,6 +968,24 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
+        // Track Spread button (admin only, actionable games)
+        if (_isAdmin && g.recommendation && g.recommendation !== "MONITOR" && !g.skip) {
+            var spreadKey = g.event_id + ":spread";
+            var isTracked = !!trackedBets[spreadKey];
+            var isSelected = selectedBets.some(function (sb) { return _betKey(sb) === spreadKey; });
+            var tClass = isTracked ? "track-bet-btn tracked" : isSelected ? "track-bet-btn selected" : "track-bet-btn";
+            var tLabel = isTracked ? "Tracked" : isSelected ? "Selected" : "Track Spread";
+            html += '<button type="button" class="' + tClass + '" data-track-spread="' + g.event_id + '"';
+            html += ' data-home="' + g.home_team + '" data-away="' + g.away_team + '"';
+            html += ' data-lean="' + (g.lean_team || '') + '" data-spread="' + (g.current_spread || '') + '"';
+            html += ' data-action="' + (g.action || '').replace(/"/g, '&quot;') + '"';
+            html += ' data-rec="' + g.recommendation + '" data-pct="' + (getEffectivePct(g) || '') + '"';
+            html += ' data-slot="' + (g.slot_type || '') + '" data-date="' + (g.game_date || '') + '"';
+            html += ' data-sport="' + (sport || currentSport) + '"';
+            if (isTracked) html += ' disabled';
+            html += '>' + tLabel + '</button>';
+        }
+
         // EV model edge badge (NBA only)
         if (isEvModelGame(g)) {
             var evEdge = g.ev_model.edge;
@@ -956,7 +1006,7 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
-    function buildPrismInner(props) {
+    function buildPrismInner(props, eventId) {
         if (!props || props.length === 0) return '<div class="prism-empty">No actionable props found</div>';
         var actionable = props.filter(function (p) { return p.signal && p.signal !== "SKIP"; });
         if (actionable.length === 0) return '<div class="prism-empty">No actionable props found</div>';
@@ -964,6 +1014,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var html = '';
         actionable.forEach(function (p) {
             var signalClass = getSignalClass(p.signal);
+            // Parse direction from signal
+            var propDir = "";
+            if (p.signal && p.signal.indexOf("OVER") >= 0) propDir = "OVER";
+            else if (p.signal && p.signal.indexOf("UNDER") >= 0) propDir = "UNDER";
 
             html += '<div class="prism-prop">';
             html += '<div class="prism-prop-info">';
@@ -978,6 +1032,26 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             if (p.minutes_volatile) {
                 html += '<span class="prism-minutes-warn">MIN VOLATILE</span>';
+            }
+            // Track prop button (admin only)
+            if (_isAdmin && eventId) {
+                var propKey = eventId + ":prop:" + p.player_name + ":" + p.stat_type;
+                var isTracked = !!trackedBets[propKey];
+                var isSelected = selectedBets.some(function (sb) { return _betKey(sb) === propKey; });
+                var tpClass = isTracked ? "track-prop-btn tracked" : isSelected ? "track-prop-btn selected" : "track-prop-btn";
+                var tpLabel = isTracked ? "&#10003;" : isSelected ? "&#10003;" : "+";
+                html += '<button type="button" class="' + tpClass + '"';
+                html += ' data-track-prop="' + eventId + '"';
+                html += ' data-player="' + p.player_name + '"';
+                html += ' data-stat="' + p.stat_type + '"';
+                html += ' data-line="' + p.line + '"';
+                html += ' data-dir="' + propDir + '"';
+                html += ' data-proj="' + p.projection + '"';
+                html += ' data-edge="' + p.edge + '"';
+                html += ' data-conf="' + p.confidence + '"';
+                html += ' data-signal="' + p.signal + '"';
+                if (isTracked) html += ' disabled';
+                html += '>' + tpLabel + '</button>';
             }
             html += '</div>';
             html += '</div>';
@@ -1002,7 +1076,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (data.success) {
                     var props = data.props || [];
                     loadedProps[eventId] = props;
-                    body.innerHTML = buildPrismInner(props);
+                    body.innerHTML = buildPrismInner(props, eventId);
                     // Update the toggle label with count
                     var section = document.getElementById("prism-section-" + eventId);
                     if (section) {
@@ -1066,7 +1140,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     // Inject props into per-game dropdown bodies
                     Object.keys(loadedProps).forEach(function (eid) {
                         var body = document.getElementById("prism-body-" + eid);
-                        if (body) body.innerHTML = buildPrismInner(loadedProps[eid]);
+                        if (body) body.innerHTML = buildPrismInner(loadedProps[eid], eid);
                         // Expand and update label
                         var section = document.getElementById("prism-section-" + eid);
                         if (section) {
@@ -1382,6 +1456,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         playerSearchSection.classList.add("hidden");
 
         authFetch("/api/scan", {
@@ -1500,7 +1575,9 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         playerSearchSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         dashboardSection.classList.remove("hidden");
         dashboardVisible = true;
         fetchDashboard();
@@ -2048,6 +2125,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         playerSearchSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
         testmodelSection.classList.remove("hidden");
 
         // Load metrics on first open
@@ -2868,6 +2946,411 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         return html;
+    }
+
+    // ─── Bet Tracker (My Picks + My Bets) ──────────────────────────────────────
+
+    var picksPanel = document.getElementById("picks-panel");
+    var picksList = document.getElementById("picks-list");
+    var picksCount = document.getElementById("picks-count");
+    var mybetsSection = document.getElementById("mybets-section");
+    var mybetsBtn = document.getElementById("mybets-btn");
+    var mybetsGradeBtn = document.getElementById("mybets-grade-btn");
+    var mybetsSportFilter = document.getElementById("mybets-sport-filter");
+    var mybetsLoading = document.getElementById("mybets-loading");
+
+    // Event delegation: Track Spread buttons
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-track-spread]");
+        if (btn && !btn.disabled) {
+            e.preventDefault();
+            var eventId = btn.getAttribute("data-track-spread");
+            var spreadKey = eventId + ":spread";
+            // Toggle selection
+            var idx = selectedBets.findIndex(function (sb) { return _betKey(sb) === spreadKey; });
+            if (idx >= 0) {
+                selectedBets.splice(idx, 1);
+                btn.className = "track-bet-btn";
+                btn.textContent = "Track Spread";
+            } else {
+                selectedBets.push({
+                    bet_type: "spread",
+                    sport: btn.getAttribute("data-sport") || currentSport,
+                    event_id: eventId,
+                    game_date: btn.getAttribute("data-date"),
+                    home_team: btn.getAttribute("data-home"),
+                    away_team: btn.getAttribute("data-away"),
+                    lean_team: btn.getAttribute("data-lean"),
+                    spread_at_pick: parseFloat(btn.getAttribute("data-spread")) || null,
+                    action: btn.getAttribute("data-action"),
+                    recommendation: btn.getAttribute("data-rec"),
+                    cover_pct: parseFloat(btn.getAttribute("data-pct")) || null,
+                    slot_type: btn.getAttribute("data-slot"),
+                });
+                btn.className = "track-bet-btn selected";
+                btn.textContent = "Selected";
+            }
+            renderPicksPanel();
+        }
+    });
+
+    // Event delegation: Track Prop buttons
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-track-prop]");
+        if (btn && !btn.disabled) {
+            e.preventDefault();
+            var eventId = btn.getAttribute("data-track-prop");
+            var playerName = btn.getAttribute("data-player");
+            var statType = btn.getAttribute("data-stat");
+            var propKey = eventId + ":prop:" + playerName + ":" + statType;
+            var idx = selectedBets.findIndex(function (sb) { return _betKey(sb) === propKey; });
+            if (idx >= 0) {
+                selectedBets.splice(idx, 1);
+                btn.className = "track-prop-btn";
+                btn.innerHTML = "+";
+            } else {
+                // Find the game data from lastScanGames to get team info
+                var game = lastScanGames.find(function (g) { return g.event_id === eventId; });
+                selectedBets.push({
+                    bet_type: "prop",
+                    sport: currentSport,
+                    event_id: eventId,
+                    game_date: game ? game.game_date : null,
+                    home_team: game ? game.home_team : "",
+                    away_team: game ? game.away_team : "",
+                    player_name: playerName,
+                    stat_type: statType,
+                    prop_line: parseFloat(btn.getAttribute("data-line")) || null,
+                    prop_direction: btn.getAttribute("data-dir"),
+                    projection: parseFloat(btn.getAttribute("data-proj")) || null,
+                    edge: parseFloat(btn.getAttribute("data-edge")) || null,
+                    confidence: parseFloat(btn.getAttribute("data-conf")) || null,
+                    signal: btn.getAttribute("data-signal"),
+                });
+                btn.className = "track-prop-btn selected";
+                btn.innerHTML = "&#10003;";
+            }
+            renderPicksPanel();
+        }
+    });
+
+    function renderPicksPanel() {
+        if (selectedBets.length === 0) {
+            picksPanel.classList.add("hidden");
+            return;
+        }
+        picksPanel.classList.remove("hidden");
+        picksCount.textContent = selectedBets.length;
+
+        var html = '';
+        selectedBets.forEach(function (b, i) {
+            html += '<div class="picks-item">';
+            html += '<div class="picks-item-info">';
+            if (b.bet_type === "spread") {
+                html += '<span class="picks-type-badge picks-badge-spread">SPREAD</span>';
+                html += '<span class="picks-matchup">' + b.away_team + ' vs ' + b.home_team + '</span>';
+                html += '<span class="picks-detail">' + (b.lean_team || '') + ' ' + (b.spread_at_pick || '') + '</span>';
+            } else {
+                html += '<span class="picks-type-badge picks-badge-prop">PROP</span>';
+                html += '<span class="picks-matchup">' + b.player_name + '</span>';
+                html += '<span class="picks-detail">' + b.stat_type + ' ' + b.prop_direction + ' ' + b.prop_line + '</span>';
+            }
+            html += '</div>';
+            html += '<button type="button" class="picks-remove-btn" data-picks-remove="' + i + '">&times;</button>';
+            html += '</div>';
+        });
+        picksList.innerHTML = html;
+    }
+
+    // Remove individual pick
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-picks-remove]");
+        if (btn) {
+            var idx = parseInt(btn.getAttribute("data-picks-remove"));
+            selectedBets.splice(idx, 1);
+            renderPicksPanel();
+        }
+    });
+
+    // Clear all picks
+    document.getElementById("picks-clear-btn").addEventListener("click", function () {
+        selectedBets = [];
+        renderPicksPanel();
+    });
+
+    // Confirm picks
+    document.getElementById("picks-confirm-btn").addEventListener("click", function () {
+        if (selectedBets.length === 0) return;
+        var confirmBtn = document.getElementById("picks-confirm-btn");
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Saving...";
+
+        authFetch("/api/bets/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bets: selectedBets })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Confirm Picks";
+            if (data.success) {
+                // Move to tracked
+                selectedBets.forEach(function (b) {
+                    var key = _betKey(b);
+                    trackedBets[key] = b;
+                });
+                selectedBets = [];
+                renderPicksPanel();
+                // Update button states in the DOM
+                document.querySelectorAll("[data-track-spread]").forEach(function (btn) {
+                    var eid = btn.getAttribute("data-track-spread");
+                    if (trackedBets[eid + ":spread"]) {
+                        btn.className = "track-bet-btn tracked";
+                        btn.textContent = "Tracked";
+                        btn.disabled = true;
+                    }
+                });
+                document.querySelectorAll("[data-track-prop]").forEach(function (btn) {
+                    var eid = btn.getAttribute("data-track-prop");
+                    var pn = btn.getAttribute("data-player");
+                    var st = btn.getAttribute("data-stat");
+                    if (trackedBets[eid + ":prop:" + pn + ":" + st]) {
+                        btn.className = "track-prop-btn tracked";
+                        btn.innerHTML = "&#10003;";
+                        btn.disabled = true;
+                    }
+                });
+            }
+        })
+        .catch(function () {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Confirm Picks";
+        });
+    });
+
+    // ─── My Bets Dashboard ───────────────────────────────────────────────────
+    mybetsBtn.addEventListener("click", function () {
+        welcomeHero.classList.add("hidden");
+        scanResults.classList.add("hidden");
+        scanResultsVisible = false;
+        results.classList.add("hidden");
+        errorBanner.classList.add("hidden");
+        lottoResults.classList.add("hidden");
+        lottoResults.innerHTML = "";
+        if (testmodelSection) testmodelSection.classList.add("hidden");
+        if (mybetsSection) mybetsSection.classList.add("hidden");
+        playerSearchSection.classList.add("hidden");
+        dashboardSection.classList.add("hidden");
+        dashboardVisible = false;
+        mybetsSection.classList.remove("hidden");
+        fetchMyBetsDashboard();
+        if (window.innerWidth <= 768) closeSidebar();
+    });
+
+    mybetsGradeBtn.addEventListener("click", function () {
+        mybetsGradeBtn.disabled = true;
+        mybetsGradeBtn.textContent = "Grading...";
+        authFetch("/api/bets/grade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            mybetsGradeBtn.disabled = false;
+            mybetsGradeBtn.textContent = "Grade Pending";
+            if (data.success) fetchMyBetsDashboard();
+        })
+        .catch(function () {
+            mybetsGradeBtn.disabled = false;
+            mybetsGradeBtn.textContent = "Grade Pending";
+        });
+    });
+
+    mybetsSportFilter.addEventListener("change", function () {
+        fetchMyBetsDashboard();
+    });
+
+    function fetchMyBetsDashboard() {
+        mybetsLoading.classList.remove("hidden");
+        document.getElementById("mybets-stats").innerHTML = "";
+        document.getElementById("mybets-breakdowns").innerHTML = "";
+        document.getElementById("mybets-recent").innerHTML = "";
+
+        var sportParam = mybetsSportFilter.value;
+        var url = "/api/bets/dashboard";
+        if (sportParam) url += "?sport=" + sportParam;
+
+        authFetch(url)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                mybetsLoading.classList.add("hidden");
+                if (data.success) renderMyBetsDashboard(data);
+            })
+            .catch(function () {
+                mybetsLoading.classList.add("hidden");
+            });
+    }
+
+    function renderMyBetsDashboard(data) {
+        document.getElementById("mybets-stats").innerHTML = renderMyBetsStats(data.overall);
+        document.getElementById("mybets-breakdowns").innerHTML = renderMyBetsBreakdowns(data);
+        document.getElementById("mybets-recent").innerHTML = renderMyBetsHistory(data.recent);
+    }
+
+    function renderMyBetsStats(o) {
+        var rateClass = o.win_rate >= 55 ? "stat-green" : o.win_rate >= 45 ? "stat-yellow" : "stat-red";
+        var ciHtml = o.win_rate_ci ? formatCi(o.win_rate_ci) : '';
+        var roiClass = o.roi > 0 ? "stat-green" : o.roi < 0 ? "stat-red" : "stat-yellow";
+        var streakClass = o.streak && o.streak.type === "WIN" ? "stat-green" : o.streak && o.streak.type === "LOSS" ? "stat-red" : "stat-muted";
+        var streakText = o.streak && o.streak.count > 0 ? o.streak.type[0] + o.streak.count : "--";
+
+        var html = '<div class="dash-stat-cards">';
+        html += '<div class="dash-stat-card"><div class="dash-stat-label">Record</div>';
+        html += '<div class="dash-stat-value">' + o.wins + '-' + o.losses + (o.pushes > 0 ? '-' + o.pushes : '') + '</div></div>';
+        html += '<div class="dash-stat-card"><div class="dash-stat-label">Win Rate</div>';
+        html += '<div class="dash-stat-value ' + rateClass + '">' + o.win_rate + '%' + ciHtml + '</div></div>';
+        html += '<div class="dash-stat-card"><div class="dash-stat-label">ROI</div>';
+        html += '<div class="dash-stat-value ' + roiClass + '">' + (o.roi > 0 ? '+' : '') + o.roi + '%</div></div>';
+        html += '<div class="dash-stat-card"><div class="dash-stat-label">Streak</div>';
+        html += '<div class="dash-stat-value ' + streakClass + '">' + streakText + '</div></div>';
+        html += '<div class="dash-stat-card"><div class="dash-stat-label">Pending</div>';
+        html += '<div class="dash-stat-value stat-muted">' + o.pending + '</div></div>';
+        html += '</div>';
+        return html;
+    }
+
+    function renderMyBetsBreakdowns(data) {
+        var html = '';
+        if (data.by_type && data.by_type.length > 0) {
+            html += '<div class="dash-breakdown"><h3 class="dash-section-title">By Type</h3>';
+            data.by_type.forEach(function (s) {
+                html += buildBreakdownRow(s.label.toUpperCase(), s);
+            });
+            html += '</div>';
+        }
+        if (data.by_sport && data.by_sport.length > 0) {
+            html += '<div class="dash-breakdown"><h3 class="dash-section-title">By Sport</h3>';
+            data.by_sport.forEach(function (s) {
+                html += buildBreakdownRow(s.label.toUpperCase(), s);
+            });
+            html += '</div>';
+        }
+        if (data.by_recommendation && data.by_recommendation.length > 0) {
+            html += '<div class="dash-breakdown"><h3 class="dash-section-title">By Recommendation</h3>';
+            data.by_recommendation.forEach(function (s) {
+                html += buildBreakdownRow(s.label, s);
+            });
+            html += '</div>';
+        }
+        if (data.by_stat_type && data.by_stat_type.length > 0) {
+            html += '<div class="dash-breakdown"><h3 class="dash-section-title">By Stat Type</h3>';
+            data.by_stat_type.forEach(function (s) {
+                html += buildBreakdownRow(s.label, s);
+            });
+            html += '</div>';
+        }
+        return html;
+    }
+
+    function renderMyBetsHistory(recent) {
+        if (!recent || recent.length === 0) return '<div class="prism-empty">No bets tracked yet</div>';
+        var html = '<h3 class="dash-section-title">Bet History</h3>';
+
+        var groups = {};
+        var groupOrder = [];
+        recent.forEach(function (b) {
+            var dateKey = b.game_date || "";
+            if (!dateKey && b.created_at) dateKey = b.created_at.substring(0, 10);
+            if (!dateKey) dateKey = "Unknown";
+            if (!groups[dateKey]) { groups[dateKey] = []; groupOrder.push(dateKey); }
+            groups[dateKey].push(b);
+        });
+
+        groupOrder.forEach(function (dateKey) {
+            var bets = groups[dateKey];
+            var dayW = 0, dayL = 0, dayP = 0, dayPend = 0;
+            bets.forEach(function (b) {
+                if (b.result === "WIN") dayW++;
+                else if (b.result === "LOSS") dayL++;
+                else if (b.result === "PUSH") dayP++;
+                else dayPend++;
+            });
+            var dayRecord = dayW + "-" + dayL;
+            if (dayP > 0) dayRecord += "-" + dayP;
+            if (dayPend > 0) dayRecord += " (" + dayPend + " pending)";
+
+            html += '<div class="dash-date-group">';
+            html += '<div class="dash-date-header">';
+            html += '<span class="dash-date-label">' + formatDateLabel(dateKey) + '</span>';
+            html += '<span class="dash-date-record">' + dayRecord + '</span>';
+            html += '</div>';
+            html += '<div class="dash-recent-list">';
+
+            bets.forEach(function (b) {
+                var statusClass = "status-pending";
+                var borderClass = "dash-recent-border-pending";
+                if (b.result === "WIN") { statusClass = "status-hit"; borderClass = "dash-recent-border-hit"; }
+                else if (b.result === "LOSS") { statusClass = "status-miss"; borderClass = "dash-recent-border-miss"; }
+                else if (b.result === "PUSH") { statusClass = "status-push"; borderClass = "dash-recent-border-push"; }
+
+                html += '<div class="dash-recent-item ' + borderClass + ' mybets-bet-row">';
+                html += '<div class="dash-recent-top">';
+                html += '<span class="dash-recent-sport">' + b.sport.toUpperCase() + '</span>';
+                if (b.bet_type === "prop") {
+                    html += '<span class="picks-type-badge picks-badge-prop">PROP</span>';
+                    html += '<span class="dash-recent-matchup">' + b.player_name + ' — ' + b.stat_type + ' ' + (b.prop_direction || '') + ' ' + (b.prop_line || '') + '</span>';
+                } else {
+                    html += '<span class="picks-type-badge picks-badge-spread">SPREAD</span>';
+                    html += '<span class="dash-recent-matchup">' + b.away_team + ' vs ' + b.home_team + '</span>';
+                }
+                html += '<span class="dash-recent-status ' + statusClass + '">' + b.result + '</span>';
+                html += '</div>';
+
+                html += '<div class="dash-recent-bottom">';
+                if (b.bet_type === "spread") {
+                    html += '<span class="dash-recent-action">' + (b.action || (b.lean_team + ' ' + (b.spread_at_pick || ''))) + '</span>';
+                } else {
+                    html += '<span class="dash-recent-action">Proj: ' + (b.projection || '--') + '</span>';
+                    if (b.actual_value !== null && b.actual_value !== undefined) {
+                        html += '<span class="dash-recent-score">Actual: ' + b.actual_value + '</span>';
+                    }
+                }
+                if (b.home_score !== null && b.away_score !== null && b.home_score !== undefined) {
+                    html += '<span class="dash-recent-score">' + b.away_score + '-' + b.home_score + '</span>';
+                }
+                if (b.cover_pct) {
+                    html += '<span class="dash-recent-pct">' + b.cover_pct + '%</span>';
+                }
+                // Delete button for pending bets
+                if (b.result === "PENDING") {
+                    html += '<button type="button" class="mybets-delete-btn" data-delete-bet="' + b.id + '">&#128465;</button>';
+                }
+                html += '</div>';
+                html += '</div>';
+            });
+            html += '</div></div>';
+        });
+        return html;
+    }
+
+    // Delete bet
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-delete-bet]");
+        if (btn) {
+            var betId = btn.getAttribute("data-delete-bet");
+            authFetch("/api/bets/" + betId, { method: "DELETE" })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (data.success) fetchMyBetsDashboard();
+                })
+                .catch(function () {});
+        }
+    });
+
+    // Hide My Bets section when switching to other views
+    function hideMyBets() {
+        if (mybetsSection) mybetsSection.classList.add("hidden");
     }
 
     // Start auth flow — fetchGames() and tmPollCollect() are called from showApp() after auth

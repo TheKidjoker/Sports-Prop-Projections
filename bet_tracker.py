@@ -1,0 +1,471 @@
+"""
+Bet Tracker — personal bet slip for admin users.
+Tracks which spread bets and PRISM player props were actually placed,
+then grades results against actual outcomes.
+
+Uses the same dual Supabase/SQLite persistence pattern as tracker.py.
+"""
+
+import sqlite3
+import os
+from datetime import datetime, timezone
+from constants import wilson_interval
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions.db")
+
+TABLE = "tm_tracked_bets"
+
+# ─── Supabase singleton ──────────────────────────────────────────────────────
+_supabase_client = None
+
+
+def _use_supabase():
+    return bool(SUPABASE_URL and SUPABASE_KEY)
+
+
+def _get_supabase():
+    global _supabase_client
+    if _supabase_client is None:
+        from supabase import create_client
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
+
+
+def _get_sqlite():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ─── init ─────────────────────────────────────────────────────────────────────
+
+def init_tracked_bets_db():
+    """Creates tm_tracked_bets table if it doesn't exist (SQLite only)."""
+    if _use_supabase():
+        return
+    conn = _get_sqlite()
+    cur = conn.cursor()
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT NOT NULL,
+            bet_type TEXT NOT NULL,
+            sport TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            game_date TEXT,
+            home_team TEXT NOT NULL,
+            away_team TEXT NOT NULL,
+            lean_team TEXT,
+            spread_at_pick REAL,
+            action TEXT,
+            recommendation TEXT,
+            cover_pct REAL,
+            slot_type TEXT,
+            player_name TEXT,
+            stat_type TEXT,
+            prop_line REAL,
+            prop_direction TEXT,
+            projection REAL,
+            edge REAL,
+            confidence REAL,
+            signal TEXT,
+            result TEXT DEFAULT 'PENDING',
+            actual_value REAL,
+            home_score INTEGER,
+            away_score INTEGER,
+            created_at TEXT NOT NULL,
+            graded_at TEXT,
+            notes TEXT,
+            UNIQUE(user_email, event_id, bet_type, player_name, stat_type)
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# ─── save_tracked_bets ────────────────────────────────────────────────────────
+
+def save_tracked_bets(bets, user_email):
+    """Upsert a list of bet dicts for this user."""
+    if not bets:
+        return {"saved": 0}
+
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for b in bets:
+        rows.append({
+            "user_email": user_email,
+            "bet_type": b.get("bet_type", "spread"),
+            "sport": b.get("sport", "nba"),
+            "event_id": str(b.get("event_id", "")),
+            "game_date": b.get("game_date"),
+            "home_team": b.get("home_team", ""),
+            "away_team": b.get("away_team", ""),
+            "lean_team": b.get("lean_team"),
+            "spread_at_pick": b.get("spread_at_pick"),
+            "action": b.get("action"),
+            "recommendation": b.get("recommendation"),
+            "cover_pct": b.get("cover_pct"),
+            "slot_type": b.get("slot_type"),
+            "player_name": b.get("player_name"),
+            "stat_type": b.get("stat_type"),
+            "prop_line": b.get("prop_line"),
+            "prop_direction": b.get("prop_direction"),
+            "projection": b.get("projection"),
+            "edge": b.get("edge"),
+            "confidence": b.get("confidence"),
+            "signal": b.get("signal"),
+            "result": "PENDING",
+            "created_at": now,
+        })
+
+    if _use_supabase():
+        sb = _get_supabase()
+        sb.table(TABLE).upsert(
+            rows,
+            on_conflict="user_email,event_id,bet_type,player_name,stat_type"
+        ).execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        for r in rows:
+            cur.execute(f"""
+                INSERT INTO {TABLE}
+                    (user_email, bet_type, sport, event_id, game_date,
+                     home_team, away_team, lean_team, spread_at_pick,
+                     action, recommendation, cover_pct, slot_type,
+                     player_name, stat_type, prop_line, prop_direction,
+                     projection, edge, confidence, signal, result, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_email, event_id, bet_type, player_name, stat_type)
+                DO UPDATE SET
+                    spread_at_pick = excluded.spread_at_pick,
+                    action = excluded.action,
+                    recommendation = excluded.recommendation,
+                    cover_pct = excluded.cover_pct,
+                    slot_type = excluded.slot_type,
+                    prop_line = excluded.prop_line,
+                    prop_direction = excluded.prop_direction,
+                    projection = excluded.projection,
+                    edge = excluded.edge,
+                    confidence = excluded.confidence,
+                    signal = excluded.signal
+            """, (
+                r["user_email"], r["bet_type"], r["sport"], r["event_id"],
+                r["game_date"], r["home_team"], r["away_team"], r["lean_team"],
+                r["spread_at_pick"], r["action"], r["recommendation"],
+                r["cover_pct"], r["slot_type"], r["player_name"],
+                r["stat_type"], r["prop_line"], r["prop_direction"],
+                r["projection"], r["edge"], r["confidence"], r["signal"],
+                r["result"], r["created_at"],
+            ))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    return {"saved": len(rows)}
+
+
+# ─── get_tracked_bets ─────────────────────────────────────────────────────────
+
+def get_tracked_bets(user_email, sport=None, status=None):
+    """Fetch tracked bets with optional filters, sorted by created_at DESC."""
+    if _use_supabase():
+        sb = _get_supabase()
+        q = sb.table(TABLE).select("*").eq("user_email", user_email)
+        if sport:
+            q = q.eq("sport", sport)
+        if status:
+            q = q.eq("result", status)
+        q = q.order("created_at", desc=True)
+        resp = q.execute()
+        return resp.data or []
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        sql = f"SELECT * FROM {TABLE} WHERE user_email = ?"
+        params = [user_email]
+        if sport:
+            sql += " AND sport = ?"
+            params.append(sport)
+        if status:
+            sql += " AND result = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC"
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+
+
+# ─── grade_tracked_bets ───────────────────────────────────────────────────────
+
+def grade_tracked_bets(user_email):
+    """
+    Grades all PENDING bets for this user.
+    Spread bets: reuses tracker._determine_result() with ESPN final scores.
+    Prop bets (NBA only): uses balldontlie game log to get actual stat value.
+    """
+    from api_client import get_game_final_score
+    from tracker import _determine_result
+
+    pending = get_tracked_bets(user_email, status="PENDING")
+    if not pending:
+        return {"graded": 0, "wins": 0, "losses": 0, "pushes": 0, "not_final": 0}
+
+    now = datetime.now(timezone.utc).isoformat()
+    graded = 0
+    wins = 0
+    losses = 0
+    pushes = 0
+    not_final = 0
+
+    for bet in pending:
+        bet_id = bet["id"]
+        event_id = bet["event_id"]
+        sport = bet["sport"]
+        bet_type = bet["bet_type"]
+
+        home_score, away_score, is_final = get_game_final_score(event_id, sport)
+        if not is_final:
+            not_final += 1
+            continue
+
+        result = None
+        actual_value = None
+
+        if bet_type == "spread":
+            tracker_result = _determine_result(
+                bet["lean_team"], bet["home_team"], bet["away_team"],
+                bet["spread_at_pick"], bet["action"],
+                home_score, away_score
+            )
+            result = {"HIT": "WIN", "MISS": "LOSS", "PUSH": "PUSH"}.get(tracker_result, "LOSS")
+
+        elif bet_type == "prop":
+            result, actual_value = _grade_prop_bet(bet, event_id, sport)
+            if result is None:
+                not_final += 1
+                continue
+
+        if result:
+            _update_bet_result(bet_id, user_email, result, actual_value,
+                               home_score, away_score, now)
+            graded += 1
+            if result == "WIN":
+                wins += 1
+            elif result == "LOSS":
+                losses += 1
+            elif result == "PUSH":
+                pushes += 1
+
+    return {
+        "graded": graded,
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "not_final": not_final,
+    }
+
+
+def _grade_prop_bet(bet, event_id, sport):
+    """Grade a prop bet by looking up actual player stats. Returns (result, actual_value) or (None, None)."""
+    if sport != "nba":
+        return None, None
+
+    try:
+        from api_players import get_player_game_log
+        logs = get_player_game_log(bet["player_name"], count=1, sport=sport)
+        if not logs:
+            return None, None
+
+        stat_map = {"PTS": "pts", "REB": "reb", "AST": "ast"}
+        stat_key = stat_map.get(bet["stat_type"])
+        if not stat_key:
+            return None, None
+
+        actual = logs[0].get(stat_key)
+        if actual is None:
+            return None, None
+
+        prop_line = bet["prop_line"]
+        direction = (bet["prop_direction"] or "").upper()
+
+        if actual == prop_line:
+            return "PUSH", actual
+        elif direction == "OVER":
+            return ("WIN" if actual > prop_line else "LOSS"), actual
+        elif direction == "UNDER":
+            return ("WIN" if actual < prop_line else "LOSS"), actual
+        else:
+            return None, actual
+    except Exception:
+        return None, None
+
+
+def _update_bet_result(bet_id, user_email, result, actual_value,
+                       home_score, away_score, graded_at):
+    """Update a single bet's result in the database."""
+    if _use_supabase():
+        sb = _get_supabase()
+        update = {
+            "result": result,
+            "home_score": home_score,
+            "away_score": away_score,
+            "graded_at": graded_at,
+        }
+        if actual_value is not None:
+            update["actual_value"] = actual_value
+        sb.table(TABLE).update(update).eq("id", bet_id).eq("user_email", user_email).execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(f"""
+            UPDATE {TABLE}
+            SET result = ?, actual_value = ?, home_score = ?, away_score = ?, graded_at = ?
+            WHERE id = ? AND user_email = ?
+        """, (result, actual_value, home_score, away_score, graded_at, bet_id, user_email))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+
+# ─── get_tracked_dashboard ────────────────────────────────────────────────────
+
+def get_tracked_dashboard(user_email, sport=None):
+    """Aggregates bet tracking stats for the dashboard."""
+    all_bets = get_tracked_bets(user_email, sport=sport)
+
+    decided = [b for b in all_bets if b["result"] in ("WIN", "LOSS", "PUSH")]
+    pending = [b for b in all_bets if b["result"] == "PENDING"]
+
+    w = sum(1 for b in decided if b["result"] == "WIN")
+    l = sum(1 for b in decided if b["result"] == "LOSS")
+    p = sum(1 for b in decided if b["result"] == "PUSH")
+    total = w + l
+    win_rate = round(w / total * 100, 1) if total > 0 else 0
+    ci = wilson_interval(w, total) if total > 0 else (0, 0)
+
+    # ROI at -110 odds: win pays +100/110, loss costs -1
+    roi = 0
+    if total > 0:
+        profit = w * (100 / 110) - l
+        roi = round(profit / (w + l) * 100, 1)
+
+    # Current streak
+    streak = _compute_streak(decided)
+
+    # By bet type
+    by_type = _aggregate_by_field(decided, "bet_type")
+
+    # By sport
+    by_sport = _aggregate_by_field(decided, "sport")
+
+    # By recommendation (spreads only)
+    spread_decided = [b for b in decided if b["bet_type"] == "spread"]
+    by_rec = _aggregate_by_field(spread_decided, "recommendation")
+
+    # By stat type (props only)
+    prop_decided = [b for b in decided if b["bet_type"] == "prop"]
+    by_stat = _aggregate_by_field(prop_decided, "stat_type")
+
+    return {
+        "overall": {
+            "wins": w,
+            "losses": l,
+            "pushes": p,
+            "total": total,
+            "pending": len(pending),
+            "win_rate": win_rate,
+            "win_rate_ci": {"ci_lower": ci[0], "ci_upper": ci[1]},
+            "roi": roi,
+            "streak": streak,
+        },
+        "by_type": by_type,
+        "by_sport": by_sport,
+        "by_recommendation": by_rec,
+        "by_stat_type": by_stat,
+        "recent": [_bet_to_dict(b) for b in all_bets[:50]],
+    }
+
+
+def _compute_streak(decided):
+    """Compute current W/L streak from most recent bets."""
+    if not decided:
+        return {"type": "none", "count": 0}
+    # Sort by created_at descending
+    sorted_bets = sorted(decided, key=lambda b: b.get("created_at", ""), reverse=True)
+    streak_type = sorted_bets[0]["result"]
+    if streak_type == "PUSH":
+        return {"type": "PUSH", "count": 1}
+    count = 0
+    for b in sorted_bets:
+        if b["result"] == streak_type:
+            count += 1
+        else:
+            break
+    return {"type": streak_type, "count": count}
+
+
+def _aggregate_by_field(bets, field):
+    """Group bets by a field and compute W/L/P/rate for each group."""
+    groups = {}
+    for b in bets:
+        key = b.get(field) or "Unknown"
+        if key not in groups:
+            groups[key] = {"wins": 0, "losses": 0, "pushes": 0}
+        if b["result"] == "WIN":
+            groups[key]["wins"] += 1
+        elif b["result"] == "LOSS":
+            groups[key]["losses"] += 1
+        elif b["result"] == "PUSH":
+            groups[key]["pushes"] += 1
+
+    result = []
+    for key, g in groups.items():
+        total = g["wins"] + g["losses"]
+        rate = round(g["wins"] / total * 100, 1) if total > 0 else 0
+        result.append({
+            "label": key,
+            "wins": g["wins"],
+            "losses": g["losses"],
+            "pushes": g["pushes"],
+            "total": total,
+            "win_rate": rate,
+        })
+    return result
+
+
+def _bet_to_dict(b):
+    """Normalize a bet row to a plain dict for JSON serialization."""
+    if isinstance(b, dict):
+        return b
+    return dict(b)
+
+
+# ─── delete_tracked_bet ───────────────────────────────────────────────────────
+
+def delete_tracked_bet(bet_id, user_email):
+    """Delete a PENDING bet. Returns True if deleted, False otherwise."""
+    if _use_supabase():
+        sb = _get_supabase()
+        resp = sb.table(TABLE).delete().eq("id", bet_id).eq(
+            "user_email", user_email
+        ).eq("result", "PENDING").execute()
+        return bool(resp.data)
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(
+            f"DELETE FROM {TABLE} WHERE id = ? AND user_email = ? AND result = 'PENDING'",
+            (bet_id, user_email),
+        )
+        deleted = cur.rowcount > 0
+        conn.commit()
+        cur.close()
+        conn.close()
+        return deleted
