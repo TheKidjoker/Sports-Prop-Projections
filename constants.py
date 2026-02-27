@@ -290,8 +290,20 @@ def get_override(sport, override_name, default):
 
 # ─── NBA EV Model Configuration ──────────────────────────────────────────────
 
+# ─── NBA Unvalidated Factor Caps ─────────────────────────────────────────
+# Walk-forward validation showed NBA rules model at 49% OOS (coin flip).
+# Cap unvalidated factors to reduce noise until Phase 3 isolation testing.
+NBA_UNVALIDATED_CAPS = {
+    "vegas_trap": 2,       # was 5/7
+    "trell": 3,            # was 5
+    "public_betting": 1,   # was 3/5
+    "feedback": 0,         # zero permanently (circular dependency)
+}
+
+
 EV_CONFIG = {
-    "auc_gate": 0.54,               # Minimum AUC-ROC to activate model
+    "auc_gate": 0.58,               # Minimum AUC-ROC to activate model (raised from 0.54)
+    "auc_gate_standalone": 0.60,    # Higher gate when EV is the ONLY model (no rules)
     "implied_prob": 110 / (100 + 110),  # 0.5238 at -110 standard vig
     "edge_tiers": {
         "strong": 0.08,             # 8%+ edge → STRONG PLAY
@@ -302,11 +314,13 @@ EV_CONFIG = {
     "regularization_C": 0.1,        # L2 regularization strength
     "warmup_games": 20,             # Min team games before feature extraction
     "rolling_window": 20,           # Team state rolling window size
-    "regressed_prior_weight": 10,   # Bayesian shrinkage prior weight
+    "regressed_prior_weight": 15,   # Bayesian shrinkage prior weight (was 10)
     "league_avg_score": 105.0,      # NBA league average PPG default
     "feature_names": [
-        "spread_abs", "clv", "line_movement_abs", "rest_diff",
+        "spread_abs", "clv", "rest_diff",
+        "days_rest_dog", "days_rest_fav",
         "dog_off_regressed", "fav_off_regressed", "net_rating_diff",
-        "dog_win_pct_10", "fav_win_pct_10", "total",
+        "dog_win_pct_10", "fav_win_pct_10",
+        "home_away", "spread_squared",
     ],
 }

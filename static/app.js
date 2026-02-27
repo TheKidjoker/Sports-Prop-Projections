@@ -968,6 +968,11 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
+        // EXPERIMENTAL model warning (NBA)
+        if (g.model_status === "EXPERIMENTAL") {
+            html += '<div class="scan-experimental-badge">EXPERIMENTAL MODEL — 49% OOS</div>';
+        }
+
         // Track Spread button (admin only, actionable games)
         if (_isAdmin && g.recommendation && g.recommendation !== "MONITOR" && !g.skip) {
             var spreadKey = g.event_id + ":spread";
@@ -1022,7 +1027,8 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="prism-prop">';
             html += '<div class="prism-prop-info">';
             html += '<span class="prism-player-name">' + p.player_name + '</span>';
-            html += '<span class="prism-stat-line">' + p.stat_type + ': ' + p.projection + ' proj vs ' + p.line + ' line (' + (p.edge > 0 ? '+' : '') + p.edge + ')</span>';
+            var lineLabel = p.line + (p.line_source === "estimated" ? " (Est.)" : "");
+            html += '<span class="prism-stat-line">' + p.stat_type + ': ' + p.projection + ' proj vs ' + lineLabel + ' line (' + (p.edge > 0 ? '+' : '') + p.edge + ')</span>';
             html += '</div>';
             html += '<div class="prism-prop-signal">';
             html += '<span class="prism-signal-badge ' + signalClass + '">' + p.signal + '</span>';
@@ -1641,7 +1647,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function formatCi(ci) {
         if (!ci || ci.ci_lower == null) return '';
-        return '<span class="dash-ci">[' + ci.ci_lower + '-' + ci.ci_upper + '%]</span>';
+        var nLabel = ci.n ? ' (n=' + ci.n + ')' : '';
+        return '<span class="dash-ci">[' + ci.ci_lower + '-' + ci.ci_upper + '%]' + nLabel + '</span>';
     }
 
     function renderDashboardStats(o) {

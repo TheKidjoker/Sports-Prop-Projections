@@ -1281,6 +1281,251 @@ def api_bets_delete(bet_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ─── NBA Rebuild Endpoints ───────────────────────────────────────────────
+
+
+@app.route("/api/tm/nba-rebuild/base-lean", methods=["POST"])
+@require_auth
+def api_tm_nba_rebuild_base_lean():
+    """Start background base lean validation."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.base_lean import start_base_lean_thread
+        started = start_base_lean_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/base-lean/status", methods=["GET"])
+@require_auth
+def api_tm_nba_rebuild_base_lean_status():
+    """Poll base lean validation progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.base_lean import get_base_lean_status
+        progress = get_base_lean_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/factor-isolation", methods=["POST"])
+@require_auth
+def api_tm_nba_rebuild_factor_isolation():
+    """Start background factor isolation testing."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.factor_isolation import start_factor_isolation_thread
+        started = start_factor_isolation_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/factor-isolation/status", methods=["GET"])
+@require_auth
+def api_tm_nba_rebuild_factor_isolation_status():
+    """Poll factor isolation progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.factor_isolation import get_factor_isolation_status
+        progress = get_factor_isolation_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/combined", methods=["POST"])
+@require_auth
+def api_tm_nba_rebuild_combined():
+    """Start combined model rebuild from survivors."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.combined_model import start_combined_thread
+        started = start_combined_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/combined/status", methods=["GET"])
+@require_auth
+def api_tm_nba_rebuild_combined_status():
+    """Poll combined model rebuild progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.combined_model import get_combined_status
+        progress = get_combined_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── NBA Ensemble Test ───────────────────────────────────────────────────
+
+
+@app.route("/api/tm/nba-rebuild/ensemble", methods=["POST"])
+@require_auth
+def api_tm_nba_rebuild_ensemble():
+    """Start ensemble test (EV-only vs rules-only vs combined)."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.ensemble_test import start_ensemble_thread
+        started = start_ensemble_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/ensemble/status", methods=["GET"])
+@require_auth
+def api_tm_nba_rebuild_ensemble_status():
+    """Poll ensemble test progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.ensemble_test import get_ensemble_status
+        progress = get_ensemble_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Data Quality Report ─────────────────────────────────────────────────
+
+
+@app.route("/api/tm/data-quality", methods=["GET"])
+@require_auth
+def api_tm_data_quality():
+    """Get data quality/completeness report for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        from test_model.data_quality import _data_quality_report
+        report = _data_quality_report(sport)
+        return jsonify({"success": True, **report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── PRISM Auto-Tracking Endpoints ───────────────────────────────────────
+
+
+@app.route("/api/prism/grade", methods=["POST"])
+@require_auth
+def api_prism_grade():
+    """Grade PENDING PRISM predictions against actual outcomes."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        result = tracker.grade_prism_predictions(sport)
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/prism/dashboard", methods=["GET"])
+@require_auth
+def api_prism_dashboard():
+    """PRISM prediction accuracy dashboard with Wilson CI."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        stats = tracker.get_prism_dashboard(sport)
+        return jsonify({"success": True, **stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── NBA Calibration Check ────────────────────────────────────────────────
+
+
+@app.route("/api/tm/nba-rebuild/calibration", methods=["POST"])
+@require_auth
+def api_tm_nba_rebuild_calibration():
+    """Start calibration validation for NBA predictions."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.calibration_check import start_calibration_thread
+        started = start_calibration_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-rebuild/calibration/status", methods=["GET"])
+@require_auth
+def api_tm_nba_rebuild_calibration_status():
+    """Poll calibration validation progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.nba_rebuild.calibration_check import get_calibration_status
+        progress = get_calibration_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── PRISM Backtest Endpoints ─────────────────────────────────────────────
+
+
+@app.route("/api/tm/prism-backtest", methods=["POST"])
+@require_auth
+def api_tm_prism_backtest():
+    """Start PRISM accuracy backtest."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        from test_model.prism_backtest import start_prism_backtest_thread
+        started = start_prism_backtest_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/prism-backtest/status", methods=["GET"])
+@require_auth
+def api_tm_prism_backtest_status():
+    """Poll PRISM backtest progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.prism_backtest import get_prism_backtest_status
+        progress = get_prism_backtest_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = "PORT" not in os.environ

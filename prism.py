@@ -8,16 +8,53 @@ high-edge player prop signals.
 
 import math
 
-# League average constants (updated once per season)
+# League average defaults (fallback if dynamic fetch fails)
 LEAGUE_AVG_TOTALS = {"nba": 224.0}
 LEAGUE_AVG_DEF = {"nba": 112.0}
+
+# Dynamic league averages cache
+_dynamic_avgs = {}
+_dynamic_avgs_ts = 0
+
+
+def _get_dynamic_league_avgs(sport="nba"):
+    """Get league averages from historical DB, cached for 24 hours."""
+    import time
+    global _dynamic_avgs, _dynamic_avgs_ts
+    now = time.time()
+    cache_key = sport
+    if cache_key in _dynamic_avgs and now - _dynamic_avgs_ts < 86400:
+        return _dynamic_avgs[cache_key]
+    try:
+        from test_model import db as tm_db
+        games = tm_db.get_historical_games(sport)
+        if not games:
+            return None
+        # Use only current season games (last ~6 months)
+        final_games = [g for g in games
+                       if g.get("game_status") == "STATUS_FINAL"
+                       and g.get("home_score") is not None
+                       and g.get("away_score") is not None]
+        if len(final_games) < 50:
+            return None
+        # Use most recent 500 games (approximately current season)
+        recent = final_games[-500:]
+        total_pts = sum(g["home_score"] + g["away_score"] for g in recent)
+        avg_total = total_pts / len(recent)
+        avg_def = avg_total / 2
+        result = {"avg_total": round(avg_total, 1), "avg_def": round(avg_def, 1)}
+        _dynamic_avgs[cache_key] = result
+        _dynamic_avgs_ts = now
+        return result
+    except Exception:
+        return None
 
 
 def calculate_prism_projection(season_avg, recent_games, stat_type,
                                opponent_def_rating, league_avg_def,
                                game_total, is_b2b, is_home, spread,
                                injured_teammates, posted_line, slot_type,
-                               sport="nba"):
+                               sport="nba", player_rank=0):
     """
     Core PRISM projection for a single player + stat type.
 
@@ -35,17 +72,25 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
         posted_line: float — sportsbook line for this prop (or None)
         slot_type: "public" | "vegas" | "unknown"
         sport: sport key
+        player_rank: int — 0/1/2 rank among team's top-3 scorers (for usage boost)
 
     Returns:
-        dict with projection, edge, signal, confidence, streak, minutes_volatility
-        or None if insufficient data
+        dict with projection, edge, signal, confidence, streak, minutes_volatility,
+        line_source, or None if insufficient data
     """
     if season_avg is None or season_avg <= 0:
         return None
 
-    league_total = LEAGUE_AVG_TOTALS.get(sport, 224.0)
-    if league_avg_def is None or league_avg_def <= 0:
-        league_avg_def = LEAGUE_AVG_DEF.get(sport, 112.0)
+    # Use dynamic league averages if available, fall back to hardcoded
+    dynamic = _get_dynamic_league_avgs(sport)
+    if dynamic:
+        league_total = dynamic["avg_total"]
+        if league_avg_def is None or league_avg_def <= 0:
+            league_avg_def = dynamic["avg_def"]
+    else:
+        league_total = LEAGUE_AVG_TOTALS.get(sport, 224.0)
+        if league_avg_def is None or league_avg_def <= 0:
+            league_avg_def = LEAGUE_AVG_DEF.get(sport, 112.0)
 
     # ── 1. Weighted Average ──
     stat_key = _stat_key(stat_type)
@@ -88,18 +133,22 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     # ── 5. Home/Away Adjustment ──
     home_away_adj = 1.03 if is_home else 0.98
 
-    # ── 6. Blowout Discount (points only — reduced minutes hit scoring most) ──
-    if stat_type == "pts" and spread is not None and abs(spread) > 10:
-        blowout_disc = 0.88
+    # ── 6. Blowout Discount (points only — continuous ramp, not cliff) ──
+    # spread 6=1.0, 7=0.98, 10=0.92, 13.5+=0.85 floor
+    if stat_type == "pts" and spread is not None:
+        blowout_disc = max(0.85, 1.0 - max(0, abs(spread) - 6) * 0.02)
     else:
         blowout_disc = 1.0
 
-    # ── 7. Injury Usage Boost (points only) ──
+    # ── 7. Injury Usage Boost (points only, weighted by player rank) ──
     usage_boost = 0.0
     if stat_type == "pts" and injured_teammates:
         total_lost_ppg = sum(t.get("ppg", 0) for t in injured_teammates)
-        # Redistribute 60% across top remaining players (flat share)
-        usage_boost = (total_lost_ppg * 0.60) / 3.0  # Assume ~3 top players absorb
+        redistributed = total_lost_ppg * 0.60
+        # Top scorer gets 50%, second gets 30%, third gets 20%
+        rank_weights = [0.50, 0.30, 0.20]
+        rank_idx = min(player_rank, len(rank_weights) - 1)
+        usage_boost = redistributed * rank_weights[rank_idx]
 
     projection = (weighted_avg * matchup_mult * pace_factor *
                   rest_factor * home_away_adj * blowout_disc) + usage_boost
@@ -107,6 +156,7 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
 
     # ── Edge calculation ──
     line = posted_line
+    line_source = "odds_api" if posted_line is not None else "estimated"
     if line is None:
         line = estimate_line_from_average(season_avg, stat_type)
     if line is None or line <= 0:
@@ -116,6 +166,10 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
 
     # ── Slot integration ──
     signal = _apply_slot_integration(edge, slot_type)
+
+    # Cap estimated lines at LEAN max (no STRONG signals on estimated lines)
+    if line_source == "estimated" and signal.startswith("STRONG"):
+        signal = signal.replace("STRONG", "LEAN")
 
     # ── Streak detection ──
     streak = detect_streak(recent_games or [], line, stat_type)
@@ -138,6 +192,7 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
         "streak": streak,
         "minutes_stdev": round(min_stdev, 1) if min_stdev else None,
         "minutes_unstable": is_unstable,
+        "line_source": line_source,
     }
 
 

@@ -24,7 +24,7 @@ from prism import calculate_prism_projection, get_league_defensive_average
 from rank_analysis import (
     _get_rank_tier, _detect_rank_scam, _detect_spread_discrepancy,
 )
-from constants import get_max_score, get_recommendation, ML_THRESHOLDS
+from constants import get_max_score, get_recommendation, ML_THRESHOLDS, NBA_UNVALIDATED_CAPS
 from calibration import get_calibrated_cover_pct
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
@@ -150,6 +150,24 @@ def scan_all_games(sport="nba", date_str=None):
         return []
 
     all_injuries = get_all_injuries(sport)
+
+    # Save injury snapshot for historical tracking (prospective collection)
+    try:
+        from test_model.db import upsert_historical_injury
+        from datetime import date as _date_type
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        for team_name, injuries in all_injuries.items():
+            for inj in injuries:
+                if inj.get("status", "").lower() == "out":
+                    upsert_historical_injury(
+                        sport=sport,
+                        game_date=today_str,
+                        team=team_name,
+                        player_name=inj.get("player_name", ""),
+                        status=inj.get("status", ""),
+                    )
+    except Exception:
+        pass
 
     # Fetch odds data once for sharp money factor (graceful if no API key)
     try:
@@ -568,7 +586,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     ou_disc_applies = nfl_overunder.get("applies", False)
     weather_applies = bool(nfl_weather.get("alerts"))
 
-    score, _ = _calculate_score(
+    score, score_breakdown = _calculate_score(
         slot_type, line_confirms, trell_result.get("applies", False),
         line_magnitude=line_magnitude,
         rank_scam_applies=rank_scam_applies, spread_disc_applies=spread_disc_applies,
@@ -594,6 +612,12 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     cover_pct_cal = get_calibrated_cover_pct(score, sport)
 
     recommendation = get_recommendation(score, slot_type, sport)
+
+    # ── NBA: track unvalidated factor usage ────────────────────────────
+    crossed_unvalidated = False
+    if sport == "nba":
+        _unval_keys = ("trell", "vegas_trap", "public_betting")
+        crossed_unvalidated = any(score_breakdown.get(k, 0) != 0 for k in _unval_keys)
 
     # ── EV Model Override (NBA + NHL) ─────────────────────────────────
     ev_model_data = None
@@ -630,6 +654,11 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     if ev_model_data:
         result["ev_model"] = ev_model_data
+
+    # NBA EXPERIMENTAL badge + unvalidated factor flag
+    if sport == "nba":
+        result["model_status"] = "EXPERIMENTAL"
+        result["crossed_unvalidated"] = crossed_unvalidated
 
     return result
 
@@ -715,15 +744,17 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
         if away_b2b_f is not None:
             away_b2b = away_b2b_f.result()
 
-    # Tag each leader with their team info
-    for p in home_leaders:
+    # Tag each leader with their team info and rank (0=top scorer, 1=2nd, 2=3rd)
+    for i, p in enumerate(home_leaders):
         p["_team"] = home_team
         p["_is_home"] = True
         p["_opp_team_id"] = away_team_id
-    for p in away_leaders:
+        p["_rank"] = i
+    for i, p in enumerate(away_leaders):
         p["_team"] = away_team
         p["_is_home"] = False
         p["_opp_team_id"] = home_team_id
+        p["_rank"] = i
 
     all_players = home_leaders + away_leaders
 
@@ -792,6 +823,7 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 continue
 
             posted_line = player_odds.get(odds_key)
+            _line_source = "odds_api" if posted_line is not None else "estimated"
 
             proj = calculate_prism_projection(
                 season_avg=season_avg,
@@ -807,6 +839,7 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 posted_line=posted_line,
                 slot_type=slot_type,
                 sport=sport,
+                player_rank=player.get("_rank", 0),
             )
 
             if proj is None:
@@ -821,15 +854,24 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 "stat_type": label,
                 "projection": proj["projection"],
                 "line": proj["line"],
+                "line_source": _line_source,
                 "edge": proj["edge"],
                 "signal": proj["signal"],
                 "confidence": proj["confidence"],
                 "streak": proj["streak"],
                 "minutes_unstable": proj["minutes_unstable"],
+                "slot_type": slot_type,
             })
 
     # Sort by abs(edge) descending
     results.sort(key=lambda x: abs(x["edge"]), reverse=True)
+
+    # Auto-save PRISM predictions for tracking accuracy
+    try:
+        tracker.save_prism_predictions(results, event_id, sport)
+    except Exception:
+        pass
+
     return results
 
 

@@ -87,6 +87,27 @@ def init_tm_db():
             UNIQUE(sport, date_str)
         )
     """)
+    # Migrate: add venue and pinnacle columns
+    for col_def in ("venue_name TEXT", "venue_city TEXT", "pinnacle_spread REAL"):
+        try:
+            cur.execute(f"ALTER TABLE tm_historical_games ADD COLUMN {col_def}")
+        except Exception:
+            pass
+
+    # Prospective injury collection
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tm_historical_injuries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT,
+            sport TEXT NOT NULL,
+            game_date TEXT NOT NULL,
+            team TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            is_star INTEGER DEFAULT 0,
+            UNIQUE(sport, game_date, team, player_name)
+        )
+    """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tm_model_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +151,9 @@ def upsert_historical_game(game_dict):
         "away_score": game_dict.get("away_score"),
         "home_covered": game_dict.get("home_covered"),
         "game_status": game_dict.get("game_status"),
+        "venue_name": game_dict.get("venue_name"),
+        "venue_city": game_dict.get("venue_city"),
+        "pinnacle_spread": game_dict.get("pinnacle_spread"),
     }
 
     if _use_supabase():
@@ -145,8 +169,9 @@ def upsert_historical_game(game_dict):
                 (event_id, sport, game_date, home_team, away_team,
                  home_team_id, away_team_id, home_rank, away_rank,
                  closing_spread, opening_spread, over_under,
-                 home_score, away_score, home_covered, game_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 home_score, away_score, home_covered, game_status,
+                 venue_name, venue_city, pinnacle_spread)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(event_id, sport) DO UPDATE SET
                 closing_spread = EXCLUDED.closing_spread,
                 opening_spread = EXCLUDED.opening_spread,
@@ -154,7 +179,10 @@ def upsert_historical_game(game_dict):
                 home_score = EXCLUDED.home_score,
                 away_score = EXCLUDED.away_score,
                 home_covered = EXCLUDED.home_covered,
-                game_status = EXCLUDED.game_status
+                game_status = EXCLUDED.game_status,
+                venue_name = COALESCE(EXCLUDED.venue_name, tm_historical_games.venue_name),
+                venue_city = COALESCE(EXCLUDED.venue_city, tm_historical_games.venue_city),
+                pinnacle_spread = COALESCE(EXCLUDED.pinnacle_spread, tm_historical_games.pinnacle_spread)
         """, (
             row["event_id"], row["sport"], row["game_date"],
             row["home_team"], row["away_team"],
@@ -164,6 +192,8 @@ def upsert_historical_game(game_dict):
             row["over_under"],
             row["home_score"], row["away_score"],
             row["home_covered"], row["game_status"],
+            row.get("venue_name"), row.get("venue_city"),
+            row.get("pinnacle_spread"),
         ))
         conn.commit()
         cur.close()
@@ -535,5 +565,132 @@ def get_latest_model_run(sport, run_type="backtest"):
     return row
 
 
+def upsert_historical_injury(sport, game_date, team, player_name, status,
+                             event_id=None, is_star=0):
+    """Insert or ignore an injury snapshot row."""
+    if _use_supabase():
+        sb = _get_supabase()
+        sb.table("tm_historical_injuries").upsert({
+            "event_id": event_id,
+            "sport": sport,
+            "game_date": game_date,
+            "team": team,
+            "player_name": player_name,
+            "status": status,
+            "is_star": is_star,
+        }, on_conflict="sport,game_date,team,player_name").execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO tm_historical_injuries
+                (event_id, sport, game_date, team, player_name, status, is_star)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sport, game_date, team, player_name) DO NOTHING
+        """, (event_id, sport, game_date, team, player_name, status, is_star))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+
 def get_backtest_metrics(sport):
     return get_latest_model_run(sport, "backtest")
+
+
+def get_real_team_ats(team_name, sport, limit=20):
+    """
+    Query tm_historical_games for a team's real ATS record (last N decided games).
+    Returns {wins, losses, total, rate} or None if < 15 games.
+    """
+    if _use_supabase():
+        sb = _get_supabase()
+        # Fetch as home
+        home_rows = (
+            sb.table("tm_historical_games")
+            .select("home_covered")
+            .eq("sport", sport)
+            .eq("home_team", team_name)
+            .eq("game_status", "STATUS_FINAL")
+            .not_.is_("home_covered", "null")
+            .not_.is_("closing_spread", "null")
+            .order("game_date", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+        )
+        # Fetch as away
+        away_rows = (
+            sb.table("tm_historical_games")
+            .select("home_covered")
+            .eq("sport", sport)
+            .eq("away_team", team_name)
+            .eq("game_status", "STATUS_FINAL")
+            .not_.is_("home_covered", "null")
+            .not_.is_("closing_spread", "null")
+            .order("game_date", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+        )
+        # home_covered: 1=home covered, 0=away covered, -1=push
+        wins = 0
+        losses = 0
+        for r in home_rows:
+            hc = r.get("home_covered")
+            if hc == 1:
+                wins += 1
+            elif hc == 0:
+                losses += 1
+        for r in away_rows:
+            hc = r.get("home_covered")
+            if hc == 0:
+                wins += 1  # away covered = team covered as away
+            elif hc == 1:
+                losses += 1
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        # As home
+        cur.execute(
+            "SELECT home_covered FROM tm_historical_games "
+            "WHERE sport = ? AND home_team = ? AND game_status = 'STATUS_FINAL' "
+            "AND home_covered IS NOT NULL AND closing_spread IS NOT NULL "
+            "ORDER BY game_date DESC LIMIT ?",
+            (sport, team_name, limit),
+        )
+        home_rows = [dict(r) for r in cur.fetchall()]
+        # As away
+        cur.execute(
+            "SELECT home_covered FROM tm_historical_games "
+            "WHERE sport = ? AND away_team = ? AND game_status = 'STATUS_FINAL' "
+            "AND home_covered IS NOT NULL AND closing_spread IS NOT NULL "
+            "ORDER BY game_date DESC LIMIT ?",
+            (sport, team_name, limit),
+        )
+        away_rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        wins = 0
+        losses = 0
+        for r in home_rows:
+            hc = r.get("home_covered")
+            if hc == 1:
+                wins += 1
+            elif hc == 0:
+                losses += 1
+        for r in away_rows:
+            hc = r.get("home_covered")
+            if hc == 0:
+                wins += 1
+            elif hc == 1:
+                losses += 1
+
+    total = wins + losses
+    if total < 15:
+        return None
+
+    rate = round((wins / total) * 100, 1) if total > 0 else 0
+    from constants import metric_with_ci, MIN_SAMPLES
+    ci = metric_with_ci(wins, total, min_sample=MIN_SAMPLES["ats"])
+    return {"wins": wins, "losses": losses, "total": total, "rate": rate, "rate_ci": ci}

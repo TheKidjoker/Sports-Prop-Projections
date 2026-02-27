@@ -1022,6 +1022,19 @@ button[type="submit"]:disabled {
     color: var(--text-muted);
 }
 
+.scan-experimental-badge {
+    text-align: center;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.3rem;
+    background: rgba(255, 152, 0, 0.12);
+    color: var(--accent-orange);
+    border: 1px solid rgba(255, 152, 0, 0.25);
+    letter-spacing: 0.4px;
+}
+
 /* =========================================
    Slot Badges
    ========================================= */

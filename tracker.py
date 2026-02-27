@@ -76,6 +76,29 @@ def init_db():
     _migrate_add_column(cur, "closing_line REAL")
     _migrate_add_column(cur, "clv REAL")
     _migrate_add_column(cur, "clv_direction INTEGER")
+
+    # PRISM predictions table for auto-tracking
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS prism_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            sport TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            stat_type TEXT NOT NULL,
+            projection REAL,
+            line REAL,
+            line_source TEXT,
+            edge REAL,
+            signal TEXT,
+            confidence REAL,
+            slot_type TEXT,
+            result TEXT DEFAULT 'PENDING',
+            actual_value REAL,
+            created_at TEXT,
+            graded_at TEXT,
+            UNIQUE(event_id, sport, player_name, stat_type)
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -855,4 +878,227 @@ def _compute_clv_metrics(predictions):
         "clv_total": clv_total,
         "clv_by_tier": clv_by_tier,
         "clv_by_sport": clv_by_sport,
+    }
+
+
+# ─── PRISM Auto-Tracking ──────────────────────────────────────────────────
+
+def save_prism_predictions(props, event_id, sport):
+    """
+    Upsert non-PASS PRISM signals into prism_predictions table.
+    Called automatically after every PRISM analysis run.
+    """
+    if not props:
+        return {"saved": 0}
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    rows = []
+    for p in props:
+        if p.get("signal") in ("PASS", "SKIP", None):
+            continue
+        rows.append({
+            "event_id": str(event_id),
+            "sport": sport,
+            "player_name": p.get("player_name", ""),
+            "stat_type": p.get("stat_type", ""),
+            "projection": p.get("projection"),
+            "line": p.get("line"),
+            "line_source": p.get("line_source", "estimated"),
+            "edge": p.get("edge"),
+            "signal": p.get("signal"),
+            "confidence": p.get("confidence"),
+            "slot_type": p.get("slot_type", ""),
+            "created_at": now,
+        })
+
+    if not rows:
+        return {"saved": 0}
+
+    if _use_supabase():
+        sb = _get_supabase()
+        sb.table("prism_predictions").upsert(
+            rows, on_conflict="event_id,sport,player_name,stat_type"
+        ).execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        for r in rows:
+            cur.execute("""
+                INSERT INTO prism_predictions
+                    (event_id, sport, player_name, stat_type,
+                     projection, line, line_source, edge, signal,
+                     confidence, slot_type, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id, sport, player_name, stat_type)
+                DO UPDATE SET
+                    projection = EXCLUDED.projection,
+                    line = EXCLUDED.line,
+                    line_source = EXCLUDED.line_source,
+                    edge = EXCLUDED.edge,
+                    signal = EXCLUDED.signal,
+                    confidence = EXCLUDED.confidence,
+                    slot_type = EXCLUDED.slot_type
+            """, (
+                r["event_id"], r["sport"], r["player_name"], r["stat_type"],
+                r["projection"], r["line"], r["line_source"], r["edge"],
+                r["signal"], r["confidence"], r["slot_type"], r["created_at"],
+            ))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    return {"saved": len(rows)}
+
+
+def grade_prism_predictions(sport=None):
+    """
+    Grade PENDING PRISM predictions by fetching actual stats.
+    NBA only — uses balldontlie game log via api_players.
+    """
+    graded = 0
+    results = {"win": 0, "loss": 0, "push": 0, "not_final": 0}
+
+    if _use_supabase():
+        sb = _get_supabase()
+        query = sb.table("prism_predictions").select("*").eq("result", "PENDING")
+        if sport:
+            query = query.eq("sport", sport)
+        rows = query.execute().data
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        sql = "SELECT * FROM prism_predictions WHERE result = 'PENDING'"
+        params = []
+        if sport:
+            sql += " AND sport = ?"
+            params.append(sport)
+        cur.execute(sql, params)
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    if not rows:
+        return {"graded": 0, **results}
+
+    try:
+        from api_players import get_player_game_log
+    except ImportError:
+        return {"graded": 0, **results, "error": "api_players not available"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    stat_map = {"PTS": "pts", "REB": "reb", "AST": "ast"}
+
+    for row in rows:
+        if row["sport"] != "nba":
+            continue
+
+        stat_key = stat_map.get(row["stat_type"])
+        if not stat_key:
+            continue
+
+        try:
+            logs = get_player_game_log(row["player_name"], count=1, sport=row["sport"])
+        except Exception:
+            results["not_final"] += 1
+            continue
+
+        if not logs:
+            results["not_final"] += 1
+            continue
+
+        actual = logs[0].get(stat_key)
+        if actual is None:
+            results["not_final"] += 1
+            continue
+
+        line = row["line"]
+        signal = (row["signal"] or "").upper()
+        is_over = "OVER" in signal
+
+        if actual == line:
+            result = "PUSH"
+        elif is_over:
+            result = "WIN" if actual > line else "LOSS"
+        else:
+            result = "WIN" if actual < line else "LOSS"
+
+        if _use_supabase():
+            sb = _get_supabase()
+            sb.table("prism_predictions").update({
+                "result": result,
+                "actual_value": actual,
+                "graded_at": now,
+            }).eq("id", row["id"]).execute()
+        else:
+            conn = _get_sqlite()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE prism_predictions SET result = ?, actual_value = ?, graded_at = ? WHERE id = ?",
+                (result, actual, now, row["id"])
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        graded += 1
+        results[result.lower()] = results.get(result.lower(), 0) + 1
+
+    return {"graded": graded, **results}
+
+
+def get_prism_dashboard(sport=None):
+    """
+    PRISM prediction accuracy dashboard with Wilson CI and sample sizes.
+    Returns breakdowns by stat_type, line_source, and slot_type.
+    """
+    if _use_supabase():
+        sb = _get_supabase()
+        query = sb.table("prism_predictions").select("*").neq("result", "PENDING")
+        if sport:
+            query = query.eq("sport", sport)
+        rows = query.execute().data
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        sql = "SELECT * FROM prism_predictions WHERE result != 'PENDING'"
+        params = []
+        if sport:
+            sql += " AND sport = ?"
+            params.append(sport)
+        cur.execute(sql, params)
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    if not rows:
+        return {"total": 0, "by_stat_type": [], "by_line_source": [], "by_slot_type": []}
+
+    decided = [r for r in rows if r["result"] in ("WIN", "LOSS")]
+    total_wins = sum(1 for r in decided if r["result"] == "WIN")
+    total = len(decided)
+
+    overall = metric_with_ci(total_wins, total, min_sample=30)
+
+    def _breakdown(field):
+        groups = {}
+        for r in decided:
+            key = r.get(field, "unknown") or "unknown"
+            if key not in groups:
+                groups[key] = {"wins": 0, "total": 0}
+            groups[key]["total"] += 1
+            if r["result"] == "WIN":
+                groups[key]["wins"] += 1
+        result = []
+        for key, g in groups.items():
+            ci = metric_with_ci(g["wins"], g["total"], min_sample=20)
+            result.append({"label": key, **ci})
+        return result
+
+    return {
+        "total": total,
+        "overall": overall,
+        "by_stat_type": _breakdown("stat_type"),
+        "by_line_source": _breakdown("line_source"),
+        "by_slot_type": _breakdown("slot_type"),
     }

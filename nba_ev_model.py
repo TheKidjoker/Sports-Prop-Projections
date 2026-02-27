@@ -5,13 +5,14 @@ Replaces the heuristic additive scoring system (49% OOS) with a calibrated
 probability model that feeds an EV-based betting framework:
     Edge = Model_Probability - Implied_Market_Probability
 
-Features (10, respecting 607-game budget):
-    spread_abs, clv, line_movement_abs, rest_diff,
+Features (12):
+    spread_abs, clv, rest_diff, days_rest_dog, days_rest_fav,
     dog_off_regressed, fav_off_regressed, net_rating_diff,
-    dog_win_pct_10, fav_win_pct_10, total
+    dog_win_pct_10, fav_win_pct_10, home_away, spread_squared
 
 Training: strict chronological 70/30 split, no shuffling, StandardScaler
-fitted on train only.  AUC gate: reject if AUC < 0.54.
+fitted on train only.  AUC gate: reject if AUC < 0.58.
+Walk-forward: 500-train/100-test/step-100 with Brier score per fold.
 """
 
 import math
@@ -49,7 +50,12 @@ def get_ev_training_status():
 # ─── Feature Engineering ─────────────────────────────────────────────────────
 
 def _regressed_avg(all_scores, recent_n=5, prior_weight=None):
-    """Blend season average with recent games via Bayesian shrinkage."""
+    """Blend recent games with season average via Bayesian shrinkage.
+
+    Shrinks recent performance toward season average to reduce noise.
+    With prior_weight=15: at 5 recent games, season avg gets 75% weight;
+    at 20 recent games, season avg gets 43% weight.
+    """
     if prior_weight is None:
         prior_weight = EV_CONFIG["regressed_prior_weight"]
     default = EV_CONFIG["league_avg_score"]
@@ -58,8 +64,8 @@ def _regressed_avg(all_scores, recent_n=5, prior_weight=None):
     season_avg = sum(all_scores) / len(all_scores)
     recent = all_scores[-recent_n:] if len(all_scores) >= recent_n else all_scores
     recent_avg = sum(recent) / len(recent)
-    n = len(all_scores)
-    return (n * season_avg + prior_weight * recent_avg) / (n + prior_weight)
+    n_recent = len(recent)
+    return (n_recent * recent_avg + prior_weight * season_avg) / (n_recent + prior_weight)
 
 
 def _extract_features(game, team_state, feature_names):
@@ -108,44 +114,50 @@ def _extract_features(game, team_state, feature_names):
     else:
         clv = 0.0
 
-    # Feature 3: line_movement_abs
-    line_movement_abs = abs(closing - opening) if opening is not None else 0.0
-
-    # Feature 4: rest_diff (dog_rest - fav_rest)
+    # Feature 3: rest_diff (dog_rest - fav_rest)
     game_date_str = game.get("game_date", "")
     dog_rest = _days_since_last(dog_st, game_date_str)
     fav_rest = _days_since_last(fav_st, game_date_str)
     rest_diff = dog_rest - fav_rest
 
-    # Features 5-6: regressed offensive efficiency
+    # Features 4-5: individual rest days (capped at 7)
+    days_rest_dog = dog_rest
+    days_rest_fav = fav_rest
+
+    # Features 6-7: regressed offensive efficiency
     dog_off_regressed = _regressed_avg(dog_st["scores"])
     fav_off_regressed = _regressed_avg(fav_st["scores"])
 
-    # Feature 7: net_rating_diff
+    # Feature 8: net_rating_diff
     dog_def = _regressed_avg(dog_st.get("opp_scores", []))
     fav_def = _regressed_avg(fav_st.get("opp_scores", []))
     dog_net = dog_off_regressed - dog_def
     fav_net = fav_off_regressed - fav_def
     net_rating_diff = dog_net - fav_net
 
-    # Features 8-9: win pct last 10
+    # Features 9-10: win pct last 10
     dog_win_pct_10 = _win_pct_last_n(dog_st, 10)
     fav_win_pct_10 = _win_pct_last_n(fav_st, 10)
 
-    # Feature 10: total (over/under)
-    total = over_under if over_under is not None else 220.0  # NBA default
+    # Feature 11: home_away (1 if underdog is home team, 0 if away)
+    home_away = 1.0 if closing > 0 else 0.0
+
+    # Feature 12: spread_squared (captures non-linear spread effects)
+    spread_squared = spread_abs ** 2
 
     features = {
         "spread_abs": spread_abs,
         "clv": clv,
-        "line_movement_abs": line_movement_abs,
         "rest_diff": rest_diff,
+        "days_rest_dog": days_rest_dog,
+        "days_rest_fav": days_rest_fav,
         "dog_off_regressed": dog_off_regressed,
         "fav_off_regressed": fav_off_regressed,
         "net_rating_diff": net_rating_diff,
         "dog_win_pct_10": dog_win_pct_10,
         "fav_win_pct_10": fav_win_pct_10,
-        "total": total,
+        "home_away": home_away,
+        "spread_squared": spread_squared,
     }
     return features
 
@@ -386,18 +398,19 @@ def _train_split(X, y, feature_names):
 
 
 def _train_rolling(X, y, feature_names):
-    """Rolling window validation: 350-train / 50-test, step 50."""
+    """Rolling window validation: 500-train / 100-test, step 100."""
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import roc_auc_score
+    from sklearn.metrics import roc_auc_score, brier_score_loss
 
-    train_size = 350
-    test_size = 50
-    step = 50
+    train_size = 500
+    test_size = 100
+    step = 100
     C = EV_CONFIG["regularization_C"]
 
     fold_aucs = []
     fold_accuracies = []
+    fold_briers = []
     all_y_prob = []
     all_y_true = []
 
@@ -428,6 +441,10 @@ def _train_rolling(X, y, feature_names):
 
         fold_acc = np.mean(y_pred == y_test) * 100
         fold_accuracies.append(fold_acc)
+
+        fold_brier = brier_score_loss(y_test, y_prob)
+        fold_briers.append(fold_brier)
+
         all_y_prob.extend(y_prob.tolist())
         all_y_true.extend(y_test.tolist())
 
@@ -439,12 +456,33 @@ def _train_rolling(X, y, feature_names):
     mean_auc = np.mean(fold_aucs)
     std_auc = np.std(fold_aucs)
     mean_acc = np.mean(fold_accuracies)
+    mean_brier = np.mean(fold_briers)
 
-    # Edge buckets on all OOS predictions
+    # ROI computation on all OOS predictions
     all_y_prob_arr = np.array(all_y_prob)
     all_y_true_arr = np.array(all_y_true)
+
+    # Edge buckets on all OOS predictions
     edge_buckets = _compute_edge_buckets(all_y_prob_arr, all_y_true_arr)
     monotonic = _check_monotonicity(edge_buckets)
+
+    # Overall OOS ROI (betting on all positive-edge predictions at -110)
+    implied = EV_CONFIG["implied_prob"]
+    edges = all_y_prob_arr - implied
+    positive_mask = edges > 0
+    if np.sum(positive_mask) > 0:
+        pos_wins = int(np.sum(all_y_true_arr[positive_mask]))
+        pos_n = int(np.sum(positive_mask))
+        pos_losses = pos_n - pos_wins
+        oos_roi = round(((pos_wins * (100 / 110) - pos_losses) / pos_n) * 100, 2)
+    else:
+        oos_roi = 0.0
+
+    # Wilson CI on OOS accuracy
+    from constants import wilson_interval
+    total_correct = int(np.sum((all_y_prob_arr >= 0.5) == all_y_true_arr))
+    total_n = len(all_y_true_arr)
+    acc_ci = wilson_interval(total_correct, total_n)
 
     return {
         "mode": "rolling",
@@ -453,8 +491,12 @@ def _train_rolling(X, y, feature_names):
         "std_auc": round(float(std_auc), 4),
         "auc_gate": EV_CONFIG["auc_gate"],
         "mean_accuracy": round(float(mean_acc), 2),
+        "accuracy_ci": {"lower": acc_ci[0], "upper": acc_ci[1]},
+        "mean_brier": round(float(mean_brier), 4),
+        "oos_roi": oos_roi,
         "n_folds": len(fold_aucs),
         "fold_aucs": [round(a, 4) for a in fold_aucs],
+        "fold_briers": [round(b, 4) for b in fold_briers],
         "oos_predictions": len(all_y_prob),
         "edge_buckets": edge_buckets,
         "monotonicity_pass": monotonic,

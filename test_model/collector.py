@@ -129,7 +129,19 @@ def collect_sport(sport):
             _collection_progress[sport]["current_date"] = date_str
 
         try:
-            games = get_todays_games(sport, date_str=date_str)
+            # Retry logic: 3 attempts with exponential backoff
+            games = None
+            for attempt in range(3):
+                try:
+                    games = get_todays_games(sport, date_str=date_str)
+                    break
+                except Exception:
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)
+                    else:
+                        raise
+            if games is None:
+                games = []
             games_found = 0
 
             for game in games:
@@ -164,6 +176,8 @@ def collect_sport(sport):
                     "away_score": away_score,
                     "home_covered": home_covered,
                     "game_status": "STATUS_FINAL" if is_final else "STATUS_IN_PROGRESS",
+                    "venue_name": game.get("venue_name"),
+                    "venue_city": game.get("venue_city"),
                 })
                 games_found += 1
 
@@ -281,6 +295,7 @@ def fetch_odds_api_spreads(sport_key, date_iso):
             # Find FanDuel or DraftKings as primary, fallback to first available
             closing_spread = None
             opening_spread = None
+            pinnacle_spread = None
             for bk in bookmakers:
                 bk_key = bk.get("key", "")
                 markets = bk.get("markets", [])
@@ -297,6 +312,8 @@ def fetch_odds_api_spreads(sport_key, date_iso):
                                     closing_spread = float(spread_val)
                                 if opening_spread is None:
                                     opening_spread = float(spread_val)
+                                if bk_key == "pinnacle":
+                                    pinnacle_spread = float(spread_val)
 
             if closing_spread is not None:
                 results.append({
@@ -304,6 +321,7 @@ def fetch_odds_api_spreads(sport_key, date_iso):
                     "away_team": away,
                     "opening_spread": opening_spread,
                     "closing_spread": closing_spread,
+                    "pinnacle_spread": pinnacle_spread,
                 })
 
         return results
@@ -361,6 +379,7 @@ def backfill_spreads_from_odds_api(sport):
                 if _match_odds_to_game(odds_game, game["home_team"], game["away_team"]):
                     closing = odds_game["closing_spread"]
                     opening = odds_game.get("opening_spread")
+                    pinnacle = odds_game.get("pinnacle_spread")
                     home_covered = _compute_home_covered(
                         game.get("home_score"), game.get("away_score"), closing
                     )
@@ -369,6 +388,7 @@ def backfill_spreads_from_odds_api(sport):
                         "closing_spread": closing,
                         "opening_spread": opening or game.get("opening_spread"),
                         "home_covered": home_covered,
+                        "pinnacle_spread": pinnacle,
                     })
                     updated += 1
                     break

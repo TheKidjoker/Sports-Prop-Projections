@@ -11,7 +11,7 @@ from api_client import (
 )
 from api_odds import _match_odds_to_game
 from line_movement import score_line_movement
-from constants import get_override, UNIVERSAL_DEFAULTS
+from constants import get_override, UNIVERSAL_DEFAULTS, NBA_UNVALIDATED_CAPS
 
 
 # ─── NFL INDOOR STADIUMS ────────────────────────────────────────────────────
@@ -191,6 +191,10 @@ def _get_feedback_adjustment(slot_type, sport):
     Returns a flat score adjustment (-2 to +3) based on historical ledger performance
     for this slot type and sport. Cached at module level with 5-min TTL.
     """
+    # NBA feedback loop zeroed permanently — circular dependency, unvalidated
+    if sport == "nba":
+        return 0
+
     cache_key = f"{sport}:{slot_type}"
     now = time.time()
 
@@ -232,9 +236,10 @@ def _get_feedback_adjustment(slot_type, sport):
 
 def _analyze_ats_record(lean_team, sport):
     """
-    Checks our ledger for the lean team's ATS record.
+    Checks real historical ATS record from tm_historical_games (preferred),
+    falls back to tracker ledger.
 
-    +4 if >60% ATS (min 3 decided games)
+    +4 if >60% ATS (min 15 decided games for real data)
     -3 if <40% ATS
 
     Returns:
@@ -245,10 +250,20 @@ def _analyze_ats_record(lean_team, sport):
     if not lean_team:
         return result
 
+    # Prefer real ATS from historical games DB
+    record = None
     try:
-        record = tracker.get_team_ats_record(lean_team, sport)
+        from test_model.db import get_real_team_ats
+        record = get_real_team_ats(lean_team, sport)
     except Exception:
-        return result
+        pass
+
+    # Fallback to tracker ledger
+    if record is None:
+        try:
+            record = tracker.get_team_ats_record(lean_team, sport)
+        except Exception:
+            return result
 
     if record is None:
         return result
@@ -603,7 +618,7 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if line_confirms:
         breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
-        breakdown["trell"] = 5
+        breakdown["trell"] = NBA_UNVALIDATED_CAPS["trell"] if sport == "nba" else 5
     if rank_scam_applies:
         breakdown["rank_scam"] = 5
     if spread_disc_applies:
@@ -632,7 +647,10 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["home_away_split"] = get_override(sport, "home_away_split",
                                                      defaults["home_away_split"])
 
-    breakdown["public_betting"] = public_betting_bonus
+    if sport == "nba":
+        breakdown["public_betting"] = min(public_betting_bonus, NBA_UNVALIDATED_CAPS["public_betting"])
+    else:
+        breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
 
     # H2H revenge / dominance — override or universal default
@@ -643,7 +661,10 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
         breakdown["head_to_head"] = get_override(sport, "h2h_dominance",
                                                   defaults["h2h_dominance"])
 
-    breakdown["vegas_trap"] = vegas_trap_bonus
+    if sport == "nba":
+        breakdown["vegas_trap"] = min(vegas_trap_bonus, NBA_UNVALIDATED_CAPS["vegas_trap"])
+    else:
+        breakdown["vegas_trap"] = vegas_trap_bonus
 
     # Line direction — override or universal default (0)
     if line_toward_dog:
