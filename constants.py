@@ -286,3 +286,27 @@ def get_override(sport, override_name, default):
     if entry and entry.get("confidence") == "validated":
         return entry["value"]
     return default
+
+
+# ─── NBA EV Model Configuration ──────────────────────────────────────────────
+
+EV_CONFIG = {
+    "auc_gate": 0.54,               # Minimum AUC-ROC to activate model
+    "implied_prob": 110 / (100 + 110),  # 0.5238 at -110 standard vig
+    "edge_tiers": {
+        "strong": 0.08,             # 8%+ edge → STRONG PLAY
+        "confident": 0.05,          # 5-8% edge → CONFIDENT
+        "lean": 0.03,               # 3-5% edge → LEAN
+    },
+    "train_split": 0.70,            # 70/30 chronological split
+    "regularization_C": 0.1,        # L2 regularization strength
+    "warmup_games": 20,             # Min team games before feature extraction
+    "rolling_window": 20,           # Team state rolling window size
+    "regressed_prior_weight": 10,   # Bayesian shrinkage prior weight
+    "league_avg_score": 105.0,      # NBA league average PPG default
+    "feature_names": [
+        "spread_abs", "clv", "line_movement_abs", "rest_diff",
+        "dog_off_regressed", "fav_off_regressed", "net_rating_diff",
+        "dog_win_pct_10", "fav_win_pct_10", "total",
+    ],
+}

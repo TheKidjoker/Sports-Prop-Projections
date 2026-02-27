@@ -632,7 +632,9 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var filtered = games.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
+        var filtered = games.filter(function (g) {
+            return getEffectivePct(g) >= getActionableThreshold(currentSport, g) || g.skip;
+        });
         var nonSkip = games.filter(function (g) { return !g.skip; });
 
         var sportLabel = currentSport.toUpperCase();
@@ -696,7 +698,9 @@ document.addEventListener("DOMContentLoaded", function () {
         var filteredIds = filtered.map(function (g) { return g.home_team + g.away_team; });
         var nearMisses = nonSkip.filter(function (g) {
             var ep = getEffectivePct(g);
-            return ep >= COVER_PCT.nearMiss && ep < COVER_PCT.actionable && filteredIds.indexOf(g.home_team + g.away_team) === -1;
+            var threshold = getActionableThreshold(currentSport, g);
+            var nearMissFloor = isEvModelGame(g) ? 52.4 : COVER_PCT.nearMiss;
+            return ep >= nearMissFloor && ep < threshold && filteredIds.indexOf(g.home_team + g.away_team) === -1;
         }).sort(function (a, b) {
             var aDay = a.date_label === "Today" ? 0 : 1;
             var bDay = b.date_label === "Today" ? 0 : 1;
@@ -733,7 +737,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (aDay !== bDay) return aDay - bDay;
                 return b.confirmation_score - a.confirmation_score;
             });
-            var filtered = games.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
+            var filtered = games.filter(function (g) { return getEffectivePct(g) >= getActionableThreshold(sport, g) || g.skip; });
 
             html += '<div class="all-sport-section">';
             html += '<h3 class="all-sport-header">' + sportNames[sport] + '</h3>';
@@ -868,7 +872,19 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function getEffectivePct(g) {
+        // EV model probability takes precedence for NBA
+        if (g.ev_model && g.ev_model.active) return g.ev_model.probability;
         return g.cover_pct_calibrated != null ? g.cover_pct_calibrated : g.cover_pct;
+    }
+
+    function isEvModelGame(g) {
+        return g.ev_model && g.ev_model.active;
+    }
+
+    function getActionableThreshold(sport, g) {
+        // EV models: probabilities cluster 48-62%, use ~55.4% (3% edge over 52.38%)
+        if ((sport === "nba" || sport === "nhl") && g && isEvModelGame(g)) return 55.4;
+        return COVER_PCT.actionable;
     }
 
     function buildScanCard(g, sport, isAlt) {
@@ -919,6 +935,17 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "CONFIDENT") recClass = "rec-confident";
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
+
+        // EV model edge badge (NBA only)
+        if (isEvModelGame(g)) {
+            var evEdge = g.ev_model.edge;
+            var evEv = g.ev_model.ev_per_unit;
+            var evClass = evEdge > 0 ? "ev-badge-pos" : "ev-badge-neg";
+            html += '<div class="scan-ev-badge ' + evClass + '">';
+            html += '<span class="ev-edge">' + (evEdge > 0 ? '+' : '') + evEdge + '% edge</span>';
+            html += '<span class="ev-value">EV: ' + (evEv > 0 ? '+' : '') + evEv + 'c/$</span>';
+            html += '</div>';
+        }
 
         // Historical accuracy badge
         if (g.historical_accuracy && g.historical_sample_size) {
@@ -1093,7 +1120,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Rebuild parlays section
         var parlaysEl = document.querySelector(".parlays-section");
         if (parlaysEl) {
-            var filtered = gamesWithProps.filter(function (g) { return getEffectivePct(g) >= COVER_PCT.actionable || g.skip; });
+            var filtered = gamesWithProps.filter(function (g) { return getEffectivePct(g) >= getActionableThreshold(currentSport, g) || g.skip; });
             if (filtered.length < 2) filtered = gamesWithProps;
             var newParlayHtml = buildParlaySection(filtered);
             if (newParlayHtml) {

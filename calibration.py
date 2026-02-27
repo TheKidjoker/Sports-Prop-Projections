@@ -258,6 +258,7 @@ def load_calibration(sport, calibration_data):
     Prefers logistic_params (smoother, no extreme overfitting at sparse bins).
     Falls back to isotonic_breakpoints only if sample size >= 200 (isotonic
     overfits badly on small datasets).
+    Supports Platt scaling (coef + intercept on log-odds) for EV model output.
     """
     if calibration_data is None:
         return
@@ -267,12 +268,18 @@ def load_calibration(sport, calibration_data):
     # Check if this is the full calibration dict or a sub-dict
     logistic = calibration_data.get("logistic_params")
     iso = calibration_data.get("isotonic_breakpoints")
+    platt = calibration_data.get("platt_params")
 
     # If it's just breakpoints (legacy format), treat as isotonic
-    if not logistic and not iso and "x" in calibration_data and "y" in calibration_data:
+    if not logistic and not iso and not platt and "x" in calibration_data and "y" in calibration_data:
         iso = calibration_data
 
-    if logistic:
+    if platt and isinstance(platt, dict) and "coef" in platt and "intercept" in platt:
+        _calibration_cache[sport] = {
+            "type": "platt",
+            "params": platt,
+        }
+    elif logistic:
         _calibration_cache[sport] = {
             "type": "logistic",
             "params": logistic,
@@ -297,6 +304,11 @@ def get_calibrated_cover_pct(score, sport):
 
     if entry["type"] == "logistic":
         return _apply_logistic(score, entry["params"])
+    elif entry["type"] == "platt":
+        # Platt scaling operates on raw probability, not score
+        # Caller should use apply_platt_to_prob() instead for EV model output
+        raw_pct = compute_raw_cover_pct(score, sport)
+        return apply_platt_to_prob(raw_pct / 100.0, entry["params"])
     elif entry["type"] == "isotonic":
         raw_pct = compute_raw_cover_pct(score, sport)
         bp = entry["params"]
@@ -304,6 +316,26 @@ def get_calibrated_cover_pct(score, sport):
         return round(float(calibrated), 1)
 
     return None
+
+
+def apply_platt_to_prob(prob, platt_params):
+    """
+    Apply Platt scaling to a raw probability.
+
+    Args:
+        prob: raw probability (0-1 scale)
+        platt_params: dict with "coef" and "intercept"
+
+    Returns:
+        calibrated probability as percentage (0-100 scale)
+    """
+    import math
+    eps = 1e-7
+    p = max(eps, min(1 - eps, prob))
+    log_odds = math.log(p / (1 - p))
+    z = platt_params["coef"] * log_odds + platt_params["intercept"]
+    calibrated = 1 / (1 + math.exp(-z))
+    return round(calibrated * 100, 1)
 
 
 def is_loaded(sport):

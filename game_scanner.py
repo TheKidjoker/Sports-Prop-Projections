@@ -595,9 +595,29 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     recommendation = get_recommendation(score, slot_type, sport)
 
+    # ── EV Model Override (NBA + NHL) ─────────────────────────────────
+    ev_model_data = None
+    if sport in ("nba", "nhl") and not lightweight:
+        ev_result = _try_ev_prediction(
+            sport, current, opening, game.get("game_date", ""),
+            home_team, away_team,
+        )
+        if ev_result:
+            score = ev_result["confirmation_score"]
+            cover_pct = ev_result["model_probability"]
+            cover_pct_cal = ev_result["model_probability"]
+            recommendation = ev_result["recommendation"]
+            ev_model_data = {
+                "probability": ev_result["model_probability"],
+                "edge": ev_result["edge"],
+                "ev_per_unit": ev_result["ev_per_unit"],
+                "auc": ev_result["auc"],
+                "active": True,
+            }
+
     action = _build_action_string(lean_team, current_spread, home_team, moneyline_recommend)
 
-    return _build_game_result(
+    result = _build_game_result(
         game, sport, score, cover_pct, recommendation, lean_team,
         action, slot_type, game_time_est, current_spread,
         rank_scam, spread_discrepancy,
@@ -607,6 +627,43 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         cover_pct_calibrated=cover_pct_cal,
         opening_spread=opening,
     )
+
+    if ev_model_data:
+        result["ev_model"] = ev_model_data
+
+    return result
+
+
+def _try_ev_prediction(sport, current_spread, opening_spread, game_date_str,
+                       home_team, away_team):
+    """
+    Attempt EV model prediction for NBA or NHL.
+    Returns ev_result dict or None if model not active.
+    """
+    try:
+        if current_spread is None:
+            return None
+
+        if sport == "nba":
+            from nba_ev_model import is_ev_model_active, extract_live_features, predict_single
+        elif sport == "nhl":
+            from nhl_ev_model import is_ev_model_active, extract_live_features, predict_single
+        else:
+            return None
+
+        if not is_ev_model_active():
+            return None
+
+        features = extract_live_features(
+            current_spread, opening_spread, None,
+            home_team, away_team, game_date_str,
+        )
+        if features is None:
+            return None
+
+        return predict_single(features)
+    except Exception:
+        return None
 
 
 def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,

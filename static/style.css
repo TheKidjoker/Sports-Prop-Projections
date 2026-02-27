@@ -3032,6 +3032,39 @@ button[type="submit"]:disabled {
     font-size: 0.7rem;
 }
 
+/* ─── EV Model Badge ──── */
+.scan-ev-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+.ev-badge-pos {
+    background: rgba(63, 185, 80, 0.12);
+    border: 1px solid rgba(63, 185, 80, 0.35);
+    color: #3fb950;
+}
+
+.ev-badge-neg {
+    background: rgba(248, 81, 73, 0.12);
+    border: 1px solid rgba(248, 81, 73, 0.35);
+    color: #f85149;
+}
+
+.ev-edge {
+    font-weight: 700;
+}
+
+.ev-value {
+    font-weight: 500;
+    opacity: 0.85;
+}
+
 /* =========================================
    Auth Gate (Login Screen)
    ========================================= */

@@ -52,6 +52,32 @@ if HAS_TEST_MODEL:
                         print(f"[calibration] Loaded {get_calibration_type(_cal_sport)} model for {_cal_sport}", flush=True)
         except Exception:
             pass
+
+    # Load NBA EV model if available and validated
+    try:
+        from nba_ev_model import load_nba_ev_model, load_live_team_state as nba_load_state
+        from constants import EV_CONFIG
+        _ev_run = tm_db.get_latest_model_run("nba", "ev_logistic")
+        if _ev_run and _ev_run.get("model_params"):
+            _ev_params = _ev_run["model_params"]
+            if _ev_params.get("auc", 0) >= EV_CONFIG["auc_gate"]:
+                load_nba_ev_model(_ev_params)
+                nba_load_state()
+    except Exception as _ev_err:
+        print(f"[nba_ev] Startup load skipped: {_ev_err}", flush=True)
+
+    # Load NHL EV model if available and validated
+    try:
+        from nhl_ev_model import load_nhl_ev_model, load_live_team_state as nhl_load_state, NHL_EV_CONFIG
+        _nhl_ev_run = tm_db.get_latest_model_run("nhl", "ev_logistic")
+        if _nhl_ev_run and _nhl_ev_run.get("model_params"):
+            _nhl_ev_params = _nhl_ev_run["model_params"]
+            _nhl_auc = _nhl_ev_params.get("mean_auc") or _nhl_ev_params.get("auc", 0)
+            if _nhl_auc >= NHL_EV_CONFIG["auc_gate"]:
+                load_nhl_ev_model(_nhl_ev_params)
+                nhl_load_state()
+    except Exception as _nhl_ev_err:
+        print(f"[nhl_ev] Startup load skipped: {_nhl_ev_err}", flush=True)
 scan_cache.init()
 
 # ─── Supabase Auth ──────────────────────────────────────────────────────
@@ -997,6 +1023,108 @@ def api_tm_walkforward_metrics():
             "success": True,
             "walkforward_metrics": wf_metrics,
             "rules_metrics": rules_metrics,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── NBA EV Model Endpoints ───────────────────────────────────────────────
+
+@app.route("/api/tm/nba-ev/train", methods=["POST"])
+@require_auth
+def api_tm_nba_ev_train():
+    """Start background NBA EV model training."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from nba_ev_model import start_ev_training_thread
+        started = start_ev_training_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-ev/status", methods=["GET"])
+@require_auth
+def api_tm_nba_ev_status():
+    """Poll NBA EV model training progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from nba_ev_model import get_ev_training_status
+        progress = get_ev_training_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nba-ev/metrics", methods=["GET"])
+@require_auth
+def api_tm_nba_ev_metrics():
+    """Get latest NBA EV model metrics."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        ev_run = tm_db.get_latest_model_run("nba", "ev_logistic")
+        from nba_ev_model import is_ev_model_active
+        return jsonify({
+            "success": True,
+            "ev_metrics": ev_run,
+            "model_active": is_ev_model_active(),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── NHL EV Model Endpoints ───────────────────────────────────────────────
+
+@app.route("/api/tm/nhl-ev/train", methods=["POST"])
+@require_auth
+def api_tm_nhl_ev_train():
+    """Start background NHL EV model training."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from nhl_ev_model import start_ev_training_thread
+        started = start_ev_training_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nhl-ev/status", methods=["GET"])
+@require_auth
+def api_tm_nhl_ev_status():
+    """Poll NHL EV model training progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from nhl_ev_model import get_ev_training_status
+        progress = get_ev_training_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/nhl-ev/metrics", methods=["GET"])
+@require_auth
+def api_tm_nhl_ev_metrics():
+    """Get latest NHL EV model metrics."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        ev_run = tm_db.get_latest_model_run("nhl", "ev_logistic")
+        from nhl_ev_model import is_ev_model_active
+        return jsonify({
+            "success": True,
+            "ev_metrics": ev_run,
+            "model_active": is_ev_model_active(),
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
