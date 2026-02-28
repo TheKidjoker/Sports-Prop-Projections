@@ -147,6 +147,20 @@ const Index = () => {
     }
   };
 
+  const handleHome = () => {
+    setSelectedSport(null);
+    setScanning(false);
+    setActiveSection("picks");
+  };
+
+  const handleSelectSection = (id: string) => {
+    if (id === "home") {
+      handleHome();
+    } else {
+      setActiveSection(id);
+    }
+  };
+
   const renderContent = () => {
     switch (activeSection) {
       case "props":
@@ -190,6 +204,7 @@ const Index = () => {
         selectedSport={selectedSport}
         onSelectSport={handleSelectSport}
         onAdminClick={() => setActiveSection("admin")}
+        onHomeClick={handleHome}
       />
       <GameTicker />
 
@@ -201,7 +216,7 @@ const Index = () => {
       <div className="flex w-full">
         <AppSidebar
           activeSection={activeSection}
-          onSelectSection={setActiveSection}
+          onSelectSection={handleSelectSection}
           isAdmin={isAdmin}
         />
 
@@ -210,7 +225,7 @@ const Index = () => {
         </main>
       </div>
 
-      <MobileNav activeSection={activeSection} onSelectSection={setActiveSection} />
+      <MobileNav activeSection={activeSection} onSelectSection={handleSelectSection} />
 
       <BetSlip bets={selectedBets} onRemove={removeBet} onClear={clearBets} />
     </div>

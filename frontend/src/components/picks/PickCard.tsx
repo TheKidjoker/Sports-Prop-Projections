@@ -124,15 +124,19 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Action string */}
-      {pick.actionString ? (
-        <div className="px-4 py-2 border-t border-b border-border/50 bg-muted/20">
+      <div className="px-4 py-2 border-t border-b border-border/50 bg-muted/20">
+        {pick.actionString ? (
           <p className="text-sm text-foreground font-medium">&ldquo;{pick.actionString}&rdquo;</p>
-        </div>
-      ) : (
-        <div className="px-4 py-2 border-t border-b border-border/50 bg-muted/20">
-          <p className="text-xs text-muted-foreground italic">No spread available yet</p>
-        </div>
-      )}
+        ) : pick.spreadLine ? (
+          <p className="text-sm text-foreground font-medium">
+            {pick.tier !== "MONITOR" ? `${pick.tier}: ` : ""}Lean {pick.spreadLine} — {pick.coverPct.toFixed(1)}% confidence
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            Spread not yet available — {pick.coverPct.toFixed(1)}% model confidence
+          </p>
+        )}
+      </div>
 
       {/* Factor pills */}
       <div className="px-4 py-3 flex flex-wrap gap-2">

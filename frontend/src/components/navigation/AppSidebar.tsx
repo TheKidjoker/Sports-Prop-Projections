@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
+  Home,
   Zap,
   User,
   BookOpen,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 
 const sidebarItems = [
+  { icon: Home, label: "Home", id: "home" },
   { icon: Zap, label: "Quick Picks", id: "picks" },
   { icon: User, label: "Player Props", id: "props" },
   { icon: BookOpen, label: "The Ledger", id: "ledger" },

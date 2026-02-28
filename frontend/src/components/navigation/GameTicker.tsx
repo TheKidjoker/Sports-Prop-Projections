@@ -63,8 +63,8 @@ export function GameTicker() {
 
   // Duplicate for seamless loop
   const doubled = [...allGames, ...allGames];
-  // Dynamic duration: ~4s per game, minimum 50s (matches old version)
-  const duration = Math.max(50, allGames.length * 4);
+  // Dynamic duration: ~8s per game, minimum 80s
+  const duration = Math.max(80, allGames.length * 8);
 
   return (
     <div

@@ -21,8 +21,12 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
     scan();
   }, [sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const topPicks = picks.filter((p) => p.coverPct >= 68.5);
-  const watchPicks = picks.filter((p) => p.coverPct >= 58 && p.coverPct < 68.5);
+  // Sort all picks by confidence descending
+  const sorted = [...picks].sort((a, b) => b.coverPct - a.coverPct);
+
+  const topPicks = sorted.filter((p) => p.coverPct >= 68.5);
+  const watchPicks = sorted.filter((p) => p.coverPct >= 55 && p.coverPct < 68.5);
+  const otherGames = sorted.filter((p) => p.coverPct < 55);
 
   return (
     <div className="py-6 px-6 max-w-5xl mx-auto">
@@ -82,9 +86,9 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
             )}
 
             {watchPicks.length > 0 && (
-              <div>
+              <div className="mb-8">
                 <h3 className="font-heading text-xs tracking-[0.2em] text-secondary mb-3">
-                  OTHER GAMES TO WATCH
+                  GAMES TO WATCH
                 </h3>
                 <div className="space-y-3">
                   {watchPicks.map((pick, i) => (
@@ -94,11 +98,22 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
               </div>
             )}
 
-            {picks.length > 0 && topPicks.length === 0 && watchPicks.length === 0 && (
-              <div className="text-center py-10">
-                <p className="text-muted-foreground text-sm font-heading tracking-wider">
-                  No actionable picks found in this scan
-                </p>
+            {otherGames.length > 0 && (
+              <div>
+                <h3 className="font-heading text-xs tracking-[0.2em] text-muted-foreground mb-3">
+                  ALL OTHER GAMES
+                </h3>
+                <div className="space-y-3">
+                  {otherGames.map((pick, i) => (
+                    <PickCard
+                      key={pick.id}
+                      pick={pick}
+                      index={i + topPicks.length + watchPicks.length}
+                      isAdmin={isAdmin}
+                      onTrackBet={onTrackBet}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
