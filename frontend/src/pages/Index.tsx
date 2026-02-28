@@ -10,6 +10,7 @@ import { PropsPage } from "./PropsPage";
 import { LedgerPage } from "./LedgerPage";
 import { MyBetsPage } from "./MyBetsPage";
 import { AdminPage } from "./AdminPage";
+import { TestModelPage } from "./TestModelPage";
 import { BetSlip, type BetSlipItem } from "@/components/bets/BetSlip";
 import { useAuth } from "@/lib/auth";
 import type { Sport } from "@/lib/types";
@@ -154,6 +155,8 @@ const Index = () => {
         return <LedgerPage sport={selectedSport} />;
       case "bets":
         return <MyBetsPage sport={selectedSport} />;
+      case "test":
+        return <TestModelPage sport={selectedSport} />;
       case "admin":
         if (isAdmin) return <AdminPage sport={selectedSport} />;
         return null;

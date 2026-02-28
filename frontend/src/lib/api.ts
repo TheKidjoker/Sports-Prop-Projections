@@ -11,6 +11,14 @@ import type {
   PendingPick,
   ModelHealthResponse,
   SportLower,
+  TmCollectStatusResponse,
+  TmBacktestStatusResponse,
+  TmFeaturesResponse,
+  TmScanResponse,
+  TmMetricsResponse,
+  TmRulesMetricsResponse,
+  TmCalibrationResponse,
+  TmEvMetricsResponse,
 } from "./types";
 
 let _accessToken: string | null = null;
@@ -191,4 +199,61 @@ export function fetchPicksStatus(sport: SportLower) {
 // ─── Model Health ──────────────────────────────────────
 export function fetchModelHealth() {
   return get<ModelHealthResponse>("/api/model-health");
+}
+
+// ─── Test Model ────────────────────────────────────────
+export function tmStartCollect(sport: SportLower) {
+  return post<{ success: boolean; started: boolean }>("/api/tm/collect", { sport });
+}
+
+export function tmCollectStatus(sport: SportLower) {
+  return get<TmCollectStatusResponse>(`/api/tm/collect/status?sport=${sport}`);
+}
+
+export function tmComputeFeatures(sport: SportLower) {
+  return post<TmFeaturesResponse>("/api/tm/features", { sport });
+}
+
+export function tmStartBacktest(sport: SportLower) {
+  return post<{ success: boolean; started: boolean }>("/api/tm/backtest", { sport });
+}
+
+export function tmBacktestStatus(sport: SportLower) {
+  return get<TmBacktestStatusResponse>(`/api/tm/backtest/status?sport=${sport}`);
+}
+
+export function tmScanToday(sport: SportLower) {
+  return post<TmScanResponse>("/api/tm/scan", { sport });
+}
+
+export function tmFetchMetrics(sport: SportLower) {
+  return get<TmMetricsResponse>(`/api/tm/metrics?sport=${sport}`);
+}
+
+export function tmStartRulesBacktest(sport: SportLower) {
+  return post<{ success: boolean; started: boolean }>("/api/tm/rules-backtest", { sport });
+}
+
+export function tmRulesBacktestStatus(sport: SportLower) {
+  return get<TmBacktestStatusResponse>(`/api/tm/rules-backtest/status?sport=${sport}`);
+}
+
+export function tmFetchRulesMetrics(sport: SportLower) {
+  return get<TmRulesMetricsResponse>(`/api/tm/rules-backtest/metrics?sport=${sport}`);
+}
+
+export function tmFetchCalibration(sport: SportLower) {
+  return get<TmCalibrationResponse>(`/api/tm/calibration?sport=${sport}`);
+}
+
+export function tmStartEvTrain(sport: SportLower) {
+  return post<{ success: boolean; started: boolean }>(`/api/tm/${sport}-ev/train`);
+}
+
+export function tmEvStatus(sport: SportLower) {
+  return get<TmBacktestStatusResponse>(`/api/tm/${sport}-ev/status`);
+}
+
+export function tmEvMetrics(sport: SportLower) {
+  return get<TmEvMetricsResponse>(`/api/tm/${sport}-ev/metrics`);
 }

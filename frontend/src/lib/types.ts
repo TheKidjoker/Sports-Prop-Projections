@@ -281,6 +281,154 @@ export interface ModelHealthResponse {
   sports: Record<string, ModelHealthSport>;
 }
 
+// ─── Test Model Types ─────────────────────────────────
+export interface TmJobProgress {
+  status: string; // "idle" | "running" | "complete" | "error"
+  pct?: number;
+  message?: string;
+  error?: string;
+  metrics?: Record<string, unknown>;
+}
+
+export interface TmCollectStatusResponse {
+  success: boolean;
+  progress: TmJobProgress;
+  db_progress: Record<string, unknown>;
+  total_games: number;
+  games_with_spreads: number;
+}
+
+export interface TmBacktestStatusResponse {
+  success: boolean;
+  progress: TmJobProgress;
+}
+
+export interface TmThresholdEntry {
+  threshold: number;
+  count: number;
+  accuracy: number;
+  roi: number;
+  ci_lower?: number;
+  ci_upper?: number;
+}
+
+export interface TmFactorEntry {
+  factor: string;
+  fired: number;
+  acc_fired: number;
+  acc_not_fired: number;
+  lift: number;
+}
+
+export interface TmFactorHealth {
+  standalone_lift: { factor: string; standalone_acc: number; marginal_lift: number; n: number }[];
+  vif: { factor: string; vif: number }[];
+  marginal_lift: { factor: string; marginal_lift: number }[];
+  correlations: { pair: string; corr: number }[];
+  clusters: { cluster: string; factors: string[] }[];
+  recommendations: string[];
+}
+
+export interface TmRulesMetrics {
+  total_games: number;
+  total_qualified: number;
+  accuracy: number;
+  roi: number;
+  clv_avg?: number;
+  by_threshold: TmThresholdEntry[];
+  by_factor: TmFactorEntry[];
+  by_slot: { slot: string; count: number; accuracy: number; roi: number }[];
+  by_recommendation: { recommendation: string; count: number; accuracy: number; roi: number }[];
+  factor_health?: TmFactorHealth;
+  comparison?: {
+    rules_accuracy: number;
+    rules_roi: number;
+    ml_accuracy?: number;
+    ml_roi?: number;
+    ml_clv?: number;
+  };
+  calibration?: TmCalibration;
+}
+
+export interface TmRulesMetricsResponse {
+  success: boolean;
+  rules_metrics: { model_params: TmRulesMetrics } | null;
+  ml_metrics: { model_params: Record<string, unknown> } | null;
+}
+
+export interface TmCalibration {
+  type: string;
+  bins: { bin: number; predicted: number; actual: number; count: number }[];
+  brier: number;
+  ece: number;
+  logistic?: { L: number; k: number; x0: number; b: number };
+}
+
+export interface TmCalibrationResponse {
+  success: boolean;
+  calibration: TmCalibration | null;
+}
+
+export interface TmScanGame {
+  home_team: string;
+  away_team: string;
+  event_id: string;
+  game_time_est: string;
+  lean_team: string;
+  confirmation_score: number;
+  cover_pct: number;
+  recommendation: string;
+  current_spread?: number | null;
+  slot_type?: string;
+  ml_overlay?: {
+    model_prob?: number;
+    edge?: number;
+    ev?: number;
+    cluster?: string;
+    sentiment?: string;
+  };
+}
+
+export interface TmScanResponse {
+  success: boolean;
+  games: TmScanGame[];
+}
+
+export interface TmFeaturesResponse {
+  success: boolean;
+  features_computed: number;
+}
+
+export interface TmMetricsResponse {
+  success: boolean;
+  metrics: Record<string, unknown> | null;
+  total_games: number;
+  total_features: number;
+}
+
+export interface TmEvMetricsResponse {
+  success: boolean;
+  ev_metrics: {
+    model_params: {
+      auc?: number;
+      accuracy?: number;
+      roi?: number;
+      n_games?: number;
+      feature_importances?: { feature: string; importance: number }[];
+      walk_forward?: {
+        oos_accuracy: number;
+        oos_roi: number;
+        oos_n: number;
+        ci_lower: number;
+        ci_upper: number;
+        folds: Record<string, unknown>[];
+      };
+      [key: string]: unknown;
+    };
+  } | null;
+  model_active: boolean;
+}
+
 /** Transform a ScanGame from the API into PickData for the UI */
 export function scanGameToPickData(game: ScanGame, sport: SportLower): PickData {
   const factors: Factor[] = [];
