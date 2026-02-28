@@ -384,20 +384,29 @@ export function scanGameToPickData(game: ScanGame, sport: SportLower): PickData 
   const hasUnvalidated = factors.some((f) => f.unvalidated);
   const coverPct = game.cover_pct_calibrated ?? game.cover_pct;
 
-  const spreadStr = game.current_spread != null
-    ? `${game.lean_team} ${game.current_spread > 0 ? "+" : ""}${game.current_spread}`
-    : game.lean_team;
+  let spreadStr = "";
+  if (game.lean_team && game.current_spread != null) {
+    spreadStr = `${game.lean_team} ${game.current_spread > 0 ? "+" : ""}${game.current_spread}`;
+  } else if (game.lean_team) {
+    spreadStr = game.lean_team;
+  }
+
+  // Map recommendation to valid tier (backend can return SKIP, MONITOR, etc.)
+  const validTiers: Tier[] = ["STRONG PLAY", "CONFIDENT", "LEAN", "MONITOR"];
+  const tier: Tier = validTiers.includes(game.recommendation as Tier)
+    ? (game.recommendation as Tier)
+    : "MONITOR";
 
   return {
     id: game.event_id,
-    tier: game.recommendation as Tier,
+    tier,
     coverPct,
     compositeScore: game.confirmation_score,
     awayTeam: game.away_team,
     homeTeam: game.home_team,
     gameTime: game.game_time_est,
     slotType: game.slot_type ?? "",
-    actionString: game.action,
+    actionString: game.action ?? "",
     spreadLine: spreadStr,
     factors,
     hasUnvalidated,
