@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#0a0a0f"/>
+  <rect x="16" y="16" width="480" height="480" rx="48" fill="none" stroke="#dc2626" stroke-width="4" opacity="0.4"/>
+  <text x="256" y="200" text-anchor="middle" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="120" fill="#dc2626" letter-spacing="8">JE</text>
+  <line x1="128" y1="230" x2="384" y2="230" stroke="#dc2626" stroke-width="3" opacity="0.6"/>
+  <text x="256" y="310" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="42" fill="#b8960f" letter-spacing="12">JOKER'S</text>
+  <text x="256" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="52" fill="#f5f5f5" letter-spacing="16">EDGE</text>
+</svg>

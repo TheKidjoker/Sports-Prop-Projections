@@ -8,6 +8,11 @@
     <title>Joker's Edge</title>
     <meta name="description" content="Joker's Edge — Sports Prop Projections" />
     <meta name="author" content="Joker's Edge" />
+    <meta name="theme-color" content="#dc2626" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
     <meta property="og:title" content="Joker's Edge" />
     <meta property="og:description" content="Joker's Edge — Sports Prop Projections" />
@@ -19,5 +24,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
