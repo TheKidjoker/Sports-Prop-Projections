@@ -89,7 +89,7 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       className={`card-surface rounded-sm ${config.borderClass} transition-all duration-200 group hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_hsla(0,72%,51%,0.15)]`}
     >
       {/* Header row */}
-      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+      <div className="flex items-center justify-between px-3 sm:px-4 pt-3 pb-2">
         <span className={`text-[10px] font-heading tracking-wider px-2 py-0.5 border rounded-sm ${config.className}`}>
           {pick.tier}
         </span>
@@ -104,17 +104,17 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Matchup */}
-      <div className="px-4 pb-2">
-        <div className="flex items-center justify-between">
-          <span className="font-heading text-lg tracking-wider text-foreground">
+      <div className="px-3 sm:px-4 pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5">
+          <span className="font-heading text-base sm:text-lg tracking-wider text-foreground">
             {pick.awayTeam}{" "}
             <span className="text-muted-foreground text-sm">@</span>{" "}
             {pick.homeTeam}
           </span>
-          <div className="text-right">
+          <div className="flex items-center gap-2 text-right">
             <span className="text-xs text-muted-foreground">{pick.gameTime}</span>
             {pick.slotType && (
-              <span className="text-[10px] text-muted-foreground ml-2">{pick.slotType}</span>
+              <span className="text-[10px] text-muted-foreground">{pick.slotType}</span>
             )}
           </div>
         </div>
@@ -124,11 +124,11 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Action string */}
-      <div className="px-4 py-2 border-t border-b border-border/50 bg-muted/20">
+      <div className="px-3 sm:px-4 py-2 border-t border-b border-border/50 bg-muted/20">
         {pick.actionString ? (
-          <p className="text-sm text-foreground font-medium">&ldquo;{pick.actionString}&rdquo;</p>
+          <p className="text-xs sm:text-sm text-foreground font-medium leading-snug">&ldquo;{pick.actionString}&rdquo;</p>
         ) : pick.spreadLine ? (
-          <p className="text-sm text-foreground font-medium">
+          <p className="text-xs sm:text-sm text-foreground font-medium leading-snug">
             {pick.tier !== "MONITOR" ? `${pick.tier}: ` : ""}Lean {pick.spreadLine} — {pick.coverPct.toFixed(1)}% confidence
           </p>
         ) : (
@@ -139,7 +139,7 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Factor pills */}
-      <div className="px-4 py-3 flex flex-wrap gap-2">
+      <div className="px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap gap-1.5 sm:gap-2">
         {pick.factors.map((factor, i) => {
           const IconComponent = iconMap[factor.icon];
           return (
@@ -170,7 +170,7 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Footer */}
-      <div className="px-4 pb-3 flex items-center justify-between">
+      <div className="px-3 sm:px-4 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {pick.moneyline && (
             <span className="text-[10px] font-mono text-muted-foreground">

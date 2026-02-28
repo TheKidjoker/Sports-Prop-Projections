@@ -220,7 +220,7 @@ const Index = () => {
           isAdmin={isAdmin}
         />
 
-        <main className="flex-1 pb-20 lg:pb-0">
+        <main className="flex-1 pb-24 lg:pb-0">
           {renderContent()}
         </main>
       </div>

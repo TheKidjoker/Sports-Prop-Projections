@@ -20,15 +20,15 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
   const lowerSport = tmSport.toLowerCase() as SportLower;
 
   return (
-    <div className="py-6 px-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="font-heading text-xl tracking-wider text-foreground">
+    <div className="py-4 sm:py-6 px-3 sm:px-6 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <h2 className="font-heading text-lg sm:text-xl tracking-wider text-foreground">
           TEST <span className="text-primary">MODEL</span>
         </h2>
       </div>
 
       {/* Sport switcher pills */}
-      <div className="flex items-center gap-1.5 mb-6">
+      <div className="flex items-center gap-1 sm:gap-1.5 mb-4 sm:mb-6 overflow-x-auto">
         {SPORTS.map((s) => (
           <button
             key={s}
@@ -45,43 +45,23 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
       </div>
 
       <Tabs defaultValue="scan" className="space-y-4">
-        <TabsList className="bg-muted/50 border border-border rounded-sm h-auto flex-wrap">
-          <TabsTrigger
-            value="scan"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            TODAY'S MODEL
-          </TabsTrigger>
-          <TabsTrigger
-            value="backtest"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            BACKTEST
-          </TabsTrigger>
-          <TabsTrigger
-            value="rules"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            RULES REPLAY
-          </TabsTrigger>
-          <TabsTrigger
-            value="calibration"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            CALIBRATION
-          </TabsTrigger>
-          <TabsTrigger
-            value="collection"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            DATA COLLECTION
-          </TabsTrigger>
-          <TabsTrigger
-            value="metrics"
-            className="text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm"
-          >
-            METRICS
-          </TabsTrigger>
+        <TabsList className="bg-muted/50 border border-border rounded-sm h-auto flex-wrap gap-0.5 p-1">
+          {([
+            ["scan", "TODAY'S MODEL"],
+            ["backtest", "BACKTEST"],
+            ["rules", "RULES REPLAY"],
+            ["calibration", "CALIBRATION"],
+            ["collection", "DATA"],
+            ["metrics", "METRICS"],
+          ] as const).map(([val, label]) => (
+            <TabsTrigger
+              key={val}
+              value={val}
+              className="text-[10px] sm:text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm px-2 sm:px-3 py-1 sm:py-1.5"
+            >
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="scan">

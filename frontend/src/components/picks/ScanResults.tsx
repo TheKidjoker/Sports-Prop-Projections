@@ -29,13 +29,13 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
   const otherGames = sorted.filter((p) => p.coverPct < 55);
 
   return (
-    <div className="py-6 px-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <h2 className="font-heading text-xl tracking-wider text-foreground">
+    <div className="py-4 sm:py-6 px-3 sm:px-6 max-w-5xl mx-auto">
+      <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+        <h2 className="font-heading text-lg sm:text-xl tracking-wider text-foreground">
           {sport} <span className="text-primary">SCAN RESULTS</span>
         </h2>
-        <span className="font-mono text-xs text-muted-foreground">
-          {picks.length} games analyzed
+        <span className="font-mono text-[10px] sm:text-xs text-muted-foreground">
+          {picks.length} games
         </span>
       </div>
 

@@ -42,7 +42,7 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
   };
 
   return (
-    <div className="fixed bottom-20 right-4 lg:bottom-4 z-50 w-80 card-surface rounded-sm shadow-lg border border-border">
+    <div className="fixed bottom-20 right-2 left-2 sm:left-auto sm:right-4 lg:bottom-4 z-50 sm:w-80 card-surface rounded-sm shadow-lg border border-border">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
         <span className="font-heading text-xs tracking-wider text-foreground">
           MY PICKS ({bets.length})

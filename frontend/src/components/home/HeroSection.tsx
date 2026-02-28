@@ -20,24 +20,24 @@ export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectio
   const gameCounts = useAllGameCounts();
 
   return (
-    <div className="py-16 px-6">
+    <div className="py-8 sm:py-16 px-3 sm:px-6">
       {/* Tagline */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="text-center mb-12"
+        className="text-center mb-8 sm:mb-12"
       >
-        <h2 className="text-5xl md:text-7xl font-heading tracking-[0.1em] text-foreground mb-3">
+        <h2 className="text-3xl sm:text-5xl md:text-7xl font-heading tracking-[0.1em] text-foreground mb-2 sm:mb-3">
           WHY SO <span className="text-primary">SERIOUS</span>?
         </h2>
-        <p className="text-muted-foreground text-sm tracking-wider font-heading">
+        <p className="text-muted-foreground text-xs sm:text-sm tracking-wider font-heading">
           THE EDGE THEY DON'T WANT YOU TO HAVE
         </p>
       </motion.div>
 
       {/* Sport Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-5xl mx-auto mb-10">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 sm:gap-3 max-w-5xl mx-auto mb-8 sm:mb-10">
         {SPORTS.map((sport, i) => {
           const badge = confidenceBadge[sport.confidence];
           const isSelected = selectedSport === sport.id;
@@ -49,24 +49,24 @@ export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectio
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.08, duration: 0.4 }}
               onClick={() => onSelectSport(sport.id)}
-              className={`card-surface p-4 text-left transition-all duration-200 rounded-sm group hover:glow-crimson ${
+              className={`card-surface p-3 sm:p-4 text-left transition-all duration-200 rounded-sm group hover:glow-crimson ${
                 isSelected ? "border-primary glow-crimson" : ""
               }`}
             >
-              <div className="flex items-start justify-between mb-3">
-                <span className="font-heading text-2xl tracking-wider text-foreground">
+              <div className="flex items-start justify-between mb-2 sm:mb-3">
+                <span className="font-heading text-xl sm:text-2xl tracking-wider text-foreground">
                   {sport.label}
                 </span>
                 <span
-                  className={`text-[9px] font-heading px-1.5 py-0.5 border rounded-sm ${badge.className}`}
+                  className={`text-[8px] sm:text-[9px] font-heading px-1 sm:px-1.5 py-0.5 border rounded-sm ${badge.className}`}
                 >
                   {badge.label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mb-2 font-heading tracking-wider">
+              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1.5 sm:mb-2 font-heading tracking-wider">
                 {sport.subtitle}
               </p>
-              <p className="font-mono text-xs text-foreground">
+              <p className="font-mono text-[10px] sm:text-xs text-foreground">
                 {count > 0 ? (
                   <>
                     <span className="text-primary font-semibold">{count}</span> games today
