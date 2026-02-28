@@ -111,7 +111,7 @@ export default {
         "accordion-up": "accordion-up 0.2s ease-out",
         "red-pulse": "red-pulse 2s ease-in-out infinite",
         "fade-up": "fade-up 0.4s ease-out forwards",
-        "ticker-scroll": "ticker-scroll 30s linear infinite",
+        "ticker-scroll": "ticker-scroll 50s linear infinite",
         "pulse-dot": "pulse-dot 2s ease-in-out infinite",
       },
     },

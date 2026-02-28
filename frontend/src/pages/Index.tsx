@@ -15,18 +15,25 @@ import { useAuth } from "@/lib/auth";
 import type { Sport } from "@/lib/types";
 
 function LoginForm() {
-  const { signIn } = useAuth();
+  const { signIn, signUp } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await signIn(email, password);
+      if (isSignUp) {
+        await signUp(email, password);
+        setError("Check your email to confirm your account.");
+        setIsSignUp(false);
+      } else {
+        await signIn(email, password);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -42,7 +49,7 @@ function LoginForm() {
           <span className="text-secondary">EDGE</span>
         </h1>
         <p className="text-xs text-muted-foreground text-center mb-6 font-heading tracking-wider">
-          SIGN IN TO CONTINUE
+          {isSignUp ? "CREATE AN ACCOUNT" : "SIGN IN TO CONTINUE"}
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
@@ -67,9 +74,21 @@ function LoginForm() {
             disabled={loading}
             className="w-full py-2 bg-primary text-primary-foreground font-heading tracking-[0.15em] text-sm rounded-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
-            {loading ? "SIGNING IN..." : "SIGN IN"}
+            {loading
+              ? isSignUp ? "CREATING ACCOUNT..." : "SIGNING IN..."
+              : isSignUp ? "SIGN UP" : "SIGN IN"}
           </button>
         </form>
+        <p className="text-xs text-muted-foreground text-center mt-4">
+          {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
+          <button
+            type="button"
+            onClick={() => { setIsSignUp(!isSignUp); setError(""); }}
+            className="text-primary hover:underline font-heading tracking-wider"
+          >
+            {isSignUp ? "Sign In" : "Sign Up"}
+          </button>
+        </p>
       </div>
     </div>
   );

@@ -45,10 +45,17 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
       )}
 
       {error && (
-        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm">
+        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm flex items-center justify-between">
           <span className="text-xs text-primary font-mono">
             Scan error: {(error as Error).message}
           </span>
+          <button
+            type="button"
+            onClick={() => scan()}
+            className="text-xs text-primary font-heading tracking-wider hover:underline ml-4"
+          >
+            RETRY
+          </button>
         </div>
       )}
 

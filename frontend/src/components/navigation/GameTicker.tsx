@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { useState } from "react";
 import { useGames } from "@/hooks/use-games";
 import type { GameListEntry, SportLower } from "@/lib/types";
 
@@ -6,9 +6,8 @@ interface TickerGame {
   id: string;
   away: string;
   home: string;
-  spread: string;
-  status: "upcoming";
   time: string;
+  dateLabel: string;
 }
 
 function mapToTicker(games: GameListEntry[]): TickerGame[] {
@@ -16,26 +15,27 @@ function mapToTicker(games: GameListEntry[]): TickerGame[] {
     id: g.event_id,
     away: g.away_team,
     home: g.home_team,
-    spread: "",
-    status: "upcoming" as const,
     time: g.game_time_est,
+    dateLabel: g.date_label || "",
   }));
 }
 
 function GameItem({ game }: { game: TickerGame }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-1 border-r border-border whitespace-nowrap">
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-xs text-foreground">{game.away}</span>
-        <span className="text-muted-foreground text-xs">@</span>
-        <span className="font-mono text-xs text-foreground">{game.home}</span>
-      </div>
-      <span className="text-[10px] text-muted-foreground font-mono">{game.time}</span>
-    </div>
+    <span className="inline-flex items-center gap-2 px-5 whitespace-nowrap">
+      <span className="font-mono text-xs text-foreground">
+        {game.away} <span className="text-muted-foreground">@</span> {game.home}
+      </span>
+      <span className="text-[10px] text-muted-foreground font-mono">
+        {game.dateLabel ? `${game.dateLabel} — ` : ""}{game.time} EST
+      </span>
+    </span>
   );
 }
 
 export function GameTicker() {
+  const [paused, setPaused] = useState(false);
+
   // Fetch games for active sports
   const nhl = useGames("nhl" as SportLower);
   const nba = useGames("nba" as SportLower);
@@ -47,31 +47,43 @@ export function GameTicker() {
     ...mapToTicker(cbb.data?.games ?? []),
   ];
 
-  // Need at least a few items for the scroll to look right
   if (allGames.length === 0) {
     return (
       <div className="h-8 border-b border-border bg-muted/30 overflow-hidden relative">
         <div className="flex items-center h-full px-4">
           <span className="text-[10px] text-muted-foreground font-mono">
-            Loading games...
+            {nhl.isLoading || nba.isLoading || cbb.isLoading
+              ? "Loading games..."
+              : "No games scheduled"}
           </span>
         </div>
       </div>
     );
   }
 
+  // Duplicate for seamless loop
   const doubled = [...allGames, ...allGames];
+  // Dynamic duration: ~4s per game, minimum 50s (matches old version)
+  const duration = Math.max(50, allGames.length * 4);
 
   return (
-    <div className="h-8 border-b border-border bg-muted/30 overflow-hidden relative">
-      <motion.div
+    <div
+      className="h-8 border-b border-border bg-muted/30 overflow-hidden relative"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <div
         className="flex items-center h-full animate-ticker-scroll"
-        style={{ width: "fit-content" }}
+        style={{
+          width: "fit-content",
+          animationDuration: `${duration}s`,
+          animationPlayState: paused ? "paused" : "running",
+        }}
       >
         {doubled.map((game, i) => (
           <GameItem key={`${game.id}-${i}`} game={game} />
         ))}
-      </motion.div>
+      </div>
     </div>
   );
 }

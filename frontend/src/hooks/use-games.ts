@@ -6,8 +6,7 @@ export function useGames(sport: SportLower) {
   return useQuery({
     queryKey: ["games", sport],
     queryFn: () => fetchGames(sport),
-    refetchInterval: 2 * 60 * 1000, // 2 min
-    retry: false,
+    refetchInterval: 3 * 60 * 1000, // 3 min (matches old version)
   });
 }
 
@@ -19,7 +18,6 @@ export function useAllGameCounts() {
       queryKey: ["games", sport],
       queryFn: () => fetchGames(sport),
       refetchInterval: 5 * 60 * 1000,
-      retry: false,
     })),
   });
 
