@@ -34,21 +34,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const client = createClient(cfg.supabase_url, cfg.supabase_anon_key);
             setSupabase(client);
           } else {
-            // No Supabase configured → local dev bypass
-            setDevMode(true);
-            setIsAuthenticated(true);
-            setIsAdmin(true);
-            setEmail("dev@local");
+            // No Supabase configured — only bypass on localhost
+            const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+            if (isLocal) {
+              setDevMode(true);
+              setIsAuthenticated(true);
+              setIsAdmin(true);
+              setEmail("dev@local");
+            }
+            // In production with no config, stay unauthenticated (login screen)
             setIsLoading(false);
           }
         }
       } catch {
-        // Config endpoint unavailable → dev mode
         if (!cancelled) {
-          setDevMode(true);
-          setIsAuthenticated(true);
-          setIsAdmin(true);
-          setEmail("dev@local");
+          // Config fetch failed — only bypass on localhost
+          const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+          if (isLocal) {
+            setDevMode(true);
+            setIsAuthenticated(true);
+            setIsAdmin(true);
+            setEmail("dev@local");
+          }
           setIsLoading(false);
         }
       }
