@@ -15,10 +15,12 @@ import logging
 import sys
 import os
 from logging.handlers import RotatingFileHandler
+from dotenv import load_dotenv
 
 # Ensure project root is on path so imports work from Task Scheduler
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_DIR)
+load_dotenv(os.path.join(PROJECT_DIR, ".env"))
 
 from game_scanner import scan_all_games
 import tracker

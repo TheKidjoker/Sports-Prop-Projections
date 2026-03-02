@@ -3,6 +3,7 @@ Background scan cache — keeps game analysis pre-computed for instant page load
 
 - On demand: scans a sport when first requested by a visitor
 - Every hour: refreshes all cached sports
+- Daily at 6 AM EST: pre-scans all sports so data is ready for the day
 - On visitor arrival (/api/games): triggers immediate refresh for that sport
 - /api/scan returns cached results instantly, queues background refresh
 """
@@ -10,6 +11,7 @@ Background scan cache — keeps game analysis pre-computed for instant page load
 import threading
 import time
 import logging
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,9 @@ _started = False
 
 BG_INTERVAL = 3600     # 1 hour between periodic full refreshes
 ALL_SPORTS = ("nba", "nhl", "cbb", "cfb", "nfl")
+
+DAILY_REFRESH_HOUR = 6  # 6 AM EST
+EST = timezone(timedelta(hours=-5))
 
 
 def init():
@@ -77,10 +82,22 @@ def _scan(sport):
         return None
 
 
+def _seconds_until_next_daily():
+    """Return seconds until the next 6 AM EST."""
+    now = datetime.now(EST)
+    target = now.replace(hour=DAILY_REFRESH_HOUR, minute=0, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
 def _loop():
-    """Background: refresh on demand or periodically (no startup warm-up)."""
+    """Background: refresh on demand, periodically, and daily at 6 AM EST."""
+    next_daily = time.monotonic() + _seconds_until_next_daily()
+
     while True:
-        _wake.wait(timeout=BG_INTERVAL)
+        wait_time = min(BG_INTERVAL, max(0, next_daily - time.monotonic()))
+        _wake.wait(timeout=wait_time)
         _wake.clear()
 
         # Drain priority queue first
@@ -90,6 +107,14 @@ def _loop():
                     break
                 sport = _queue.pop(0)
             _scan(sport)
+
+        # Daily 6 AM EST: pre-scan all sports for the day
+        if time.monotonic() >= next_daily:
+            logger.info("[scan_cache] Daily 6 AM EST refresh — scanning all sports")
+            for sport in ALL_SPORTS:
+                _scan(sport)
+            next_daily = time.monotonic() + _seconds_until_next_daily()
+            continue  # skip hourly refresh since we just did everything
 
         # Periodic: refresh everything that has been cached
         with _cache_lock:

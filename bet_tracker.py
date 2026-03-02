@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from constants import wilson_interval
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions.db")
 
 TABLE = "tm_tracked_bets"
