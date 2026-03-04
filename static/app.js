@@ -1117,8 +1117,9 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="prism-prop">';
             html += '<div class="prism-prop-info">';
             html += '<span class="prism-player-name">' + p.player_name + '</span>';
+            html += '<span class="prism-stat-category">' + p.stat_type + '</span>';
             var lineLabel = p.line + (p.line_source === "estimated" ? " (Est.)" : "");
-            html += '<span class="prism-stat-line">' + p.stat_type + ': ' + p.projection + ' proj vs ' + lineLabel + ' line (' + (p.edge > 0 ? '+' : '') + p.edge + ')</span>';
+            html += '<span class="prism-stat-line">' + p.projection + ' proj vs ' + lineLabel + ' line (' + (p.edge > 0 ? '+' : '') + p.edge + ')</span>';
             html += '</div>';
             html += '<div class="prism-prop-signal">';
             html += '<span class="prism-signal-badge ' + signalClass + '">' + p.signal + '</span>';
@@ -1343,7 +1344,8 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<div class="top-prop-card">';
             html += '<div class="prism-prop-info">';
             html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + timeStr + (prop.matchup || prop.team || '') + ')</span></span>';
-            html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
+            html += '<span class="prism-stat-category">' + prop.stat_type + '</span>';
+            html += '<span class="prism-stat-line">' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
             html += '</div>';
             html += '<div class="prism-prop-signal">';
             html += '<span class="prism-signal-badge ' + signalClass + '">' + prop.signal + '</span>';
