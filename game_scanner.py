@@ -1293,4 +1293,9 @@ def get_game_props(event_id, sport="nba"):
                 del _props_cache[old_key]
 
     print(f"[get_game_props] Total time: {time.time()-start:.2f}s for {len(results)} props", flush=True)
+
+    # Force garbage collection to free memory from API responses
+    import gc
+    gc.collect()
+
     return results
