@@ -1316,9 +1316,25 @@ document.addEventListener("DOMContentLoaded", function () {
         topProps.forEach(function (prop) {
             var signalClass = getSignalClass(prop.signal);
 
+            // Format game time
+            var timeStr = '';
+            if (prop.game_date) {
+                try {
+                    var dt = new Date(prop.game_date);
+                    var hours = dt.getHours();
+                    var mins = dt.getMinutes();
+                    var ampm = hours >= 12 ? 'PM' : 'AM';
+                    hours = hours % 12 || 12;
+                    mins = mins < 10 ? '0' + mins : mins;
+                    timeStr = hours + ':' + mins + ' ' + ampm + ' • ';
+                } catch (e) {
+                    timeStr = '';
+                }
+            }
+
             html += '<div class="top-prop-card">';
             html += '<div class="prism-prop-info">';
-            html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + (prop.matchup || prop.team || '') + ')</span></span>';
+            html += '<span class="prism-player-name">' + prop.player_name + ' <span class="top-prop-team">(' + timeStr + (prop.matchup || prop.team || '') + ')</span></span>';
             html += '<span class="prism-stat-line">' + prop.stat_type + ': ' + prop.projection + ' proj vs ' + prop.line + ' line (' + (prop.edge > 0 ? '+' : '') + prop.edge + ')</span>';
             html += '</div>';
             html += '<div class="prism-prop-signal">';
@@ -1373,7 +1389,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     edge: p.edge,
                     signal: p.signal,
                     confidence: p.confidence,
-                    streak: p.streak
+                    streak: p.streak,
+                    game_date: p.game_date || g.game_date
                 });
             });
         });
@@ -3855,6 +3872,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var html = '<div class="ev-props-table-container">';
         html += '<table class="ev-props-table">';
         html += '<thead><tr>';
+        html += '<th>Time</th>';
         html += '<th>Player</th>';
         html += '<th>Team</th>';
         html += '<th>Matchup</th>';
@@ -3876,7 +3894,24 @@ document.addEventListener("DOMContentLoaded", function () {
             var evPctStr = p.ev_pct != null ? (p.ev_pct > 0 ? '+' : '') + p.ev_pct.toFixed(1) + '%' : '—';
             var evUnitsStr = p.ev_units != null ? (p.ev_units > 0 ? '+' : '') + p.ev_units.toFixed(2) : '—';
 
+            // Format game time
+            var timeStr = '—';
+            if (p.game_date) {
+                try {
+                    var dt = new Date(p.game_date);
+                    var hours = dt.getHours();
+                    var mins = dt.getMinutes();
+                    var ampm = hours >= 12 ? 'PM' : 'AM';
+                    hours = hours % 12 || 12;
+                    mins = mins < 10 ? '0' + mins : mins;
+                    timeStr = hours + ':' + mins + ' ' + ampm;
+                } catch (e) {
+                    timeStr = '—';
+                }
+            }
+
             html += '<tr>';
+            html += '<td style="white-space:nowrap;font-size:0.85rem;">' + timeStr + '</td>';
             html += '<td class="ev-props-player">' + (p.player_name || '—') + '</td>';
             html += '<td>' + (p.team || '—') + '</td>';
             html += '<td class="ev-props-matchup">' + (p.matchup || '—') + '</td>';

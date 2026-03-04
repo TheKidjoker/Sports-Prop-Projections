@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
@@ -7,6 +9,13 @@ from datetime import datetime, timedelta, timezone
 # Defaults are fast for local dev. For Render free tier, set lower values.
 _GAME_WORKERS = int(os.environ.get("SCAN_GAME_WORKERS", 4))
 _API_WORKERS = int(os.environ.get("SCAN_API_WORKERS", 4))
+
+# ─── Props Cache ────────────────────────────────────────────────────────────
+# Cache processed props results to avoid redundant API calls and PRISM analysis
+# when multiple users request the same game within a short time window.
+_PROPS_CACHE_TTL = 300  # 5 minutes
+_props_cache = {}
+_props_cache_lock = threading.Lock()
 from api_client import (
     get_todays_games, get_all_injuries, get_game_spread,
     get_player_season_averages, get_game_overunder,
@@ -1036,6 +1045,7 @@ def get_top_props(sport="nba"):
     def _fetch_props(game):
         eid = str(game["event_id"])
         matchup = game["away_team"] + " @ " + game["home_team"]
+        game_date = game.get("game_date", "")
         try:
             props = get_game_props(eid, sport)
         except Exception:
@@ -1043,14 +1053,26 @@ def get_top_props(sport="nba"):
         for p in props:
             p["matchup"] = matchup
             p["event_id"] = eid
+            p["game_date"] = game_date
         return props
 
     all_props = []
+    max_total_time = 45  # Max 45 seconds total to avoid web server timeout
+    start_time = time.time()
+
     with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
         futures = {pool.submit(_fetch_props, g): g for g in games}
         for future in as_completed(futures):
+            # Check if we've exceeded total time budget
+            elapsed = time.time() - start_time
+            if elapsed > max_total_time:
+                print(f"[get_top_props] Hit {max_total_time}s timeout, skipping remaining games", flush=True)
+                break
+
             try:
-                result = future.result(timeout=30)  # 30 second timeout per game
+                # Reduce per-game timeout to fit within total budget
+                remaining = max(5, max_total_time - elapsed)
+                result = future.result(timeout=min(30, remaining))
                 all_props.extend(result)
             except Exception as e:
                 # Log but continue - don't let one game failure break all props
@@ -1059,6 +1081,7 @@ def get_top_props(sport="nba"):
 
     # Sort by confidence descending
     all_props.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    print(f"[get_top_props] Completed in {time.time() - start_time:.1f}s, found {len(all_props)} props", flush=True)
     return all_props
 
 
@@ -1169,6 +1192,15 @@ def get_game_props(event_id, sport="nba"):
     if sport not in ("nba", "cbb"):
         return []
 
+    # Check cache first
+    cache_key = f"{sport}:{event_id}"
+    now = time.time()
+    with _props_cache_lock:
+        entry = _props_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _PROPS_CACHE_TTL:
+            print(f"[get_game_props] Cache hit for {cache_key}", flush=True)
+            return entry["data"]
+
     # Find the game across today + tomorrow
     now_utc = datetime.now(timezone.utc)
     tomorrow_str = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
@@ -1253,10 +1285,22 @@ def get_game_props(event_id, sport="nba"):
                     "ppg": player_stats.get("ppg", 0) if player_stats else 0,
                 })
 
-    return _run_prism_analysis(
+    # Run PRISM analysis
+    results = _run_prism_analysis(
         home_team_id, away_team_id, home_team, away_team,
         event_id, game_date_str, current, slot_type,
         injured_stars, player_props_lines or {},
         sport,
         home_b2b=home_b2b, away_b2b=away_b2b, game_total=game_total,
     )
+
+    # Cache the results
+    with _props_cache_lock:
+        _props_cache[cache_key] = {"data": results, "ts": time.time()}
+        # Limit cache size to prevent memory bloat (evict oldest if > 50 games)
+        if len(_props_cache) > 50:
+            oldest = sorted(_props_cache, key=lambda k: _props_cache[k]["ts"])
+            for old_key in oldest[:len(_props_cache) - 50]:
+                del _props_cache[old_key]
+
+    return results
