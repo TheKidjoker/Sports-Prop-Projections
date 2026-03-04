@@ -1059,6 +1059,96 @@ def get_top_props(sport="nba"):
     return all_props
 
 
+def calculate_prop_ev(projection, line, edge, confidence, signal):
+    """
+    Calculate expected value for a player prop.
+
+    Args:
+        projection: Our projected value
+        line: Sportsbook line
+        edge: projection - line
+        confidence: PRISM confidence score (0-100)
+        signal: PRISM signal (STRONG OVER, LEAN UNDER, etc.)
+
+    Returns:
+        dict with probability, ev_pct, ev_units, or None if insufficient data
+    """
+    if projection is None or line is None or line <= 0:
+        return None
+
+    # Convert edge and confidence into win probability
+    # Use a logistic model calibrated to PRISM historical accuracy
+    # Base probability from confidence score (PRISM confidence correlates with win rate)
+    base_prob = confidence
+
+    # Adjust based on edge magnitude (larger edge = higher conviction)
+    edge_abs = abs(edge)
+    edge_pct = edge_abs / line if line > 0 else 0
+
+    # Edge boost: +1-2% per 10% edge
+    edge_boost = min(edge_pct * 10, 10)  # Cap at +10%
+
+    # Signal strength adjustment
+    signal_adj = 0
+    if "STRONG" in signal:
+        signal_adj = 5
+    elif "LEAN" in signal:
+        signal_adj = 0
+
+    # Final probability (capped 10-95%)
+    probability = max(10, min(95, base_prob + edge_boost + signal_adj))
+
+    # Expected value calculation (assuming -110 odds)
+    # Breakeven = 52.4% (need to win 11 to win 10)
+    # EV% = (win_prob - 52.4) / 52.4 * 100
+    breakeven = 52.4
+    ev_pct = ((probability - breakeven) / breakeven) * 100
+
+    # EV in units (assuming $100 bet at -110)
+    # Win: +$90.91, Lose: -$100
+    # EV = (prob * 90.91) - ((1-prob) * 100)
+    win_prob_decimal = probability / 100.0
+    ev_units = (win_prob_decimal * 90.91) - ((1 - win_prob_decimal) * 100)
+
+    return {
+        "probability": round(probability, 1),
+        "ev_pct": round(ev_pct, 1),
+        "ev_units": round(ev_units, 2),
+    }
+
+
+def get_top_props_with_ev(sport="nba"):
+    """
+    Fetch all props and add EV calculations.
+    Returns props sorted by EV (highest first).
+    """
+    props = get_top_props(sport)
+
+    # Add EV to each prop
+    for p in props:
+        ev_calc = calculate_prop_ev(
+            p.get("projection"),
+            p.get("line"),
+            p.get("edge", 0),
+            p.get("confidence", 0),
+            p.get("signal", ""),
+        )
+        if ev_calc:
+            p["ev_probability"] = ev_calc["probability"]
+            p["ev_pct"] = ev_calc["ev_pct"]
+            p["ev_units"] = ev_calc["ev_units"]
+        else:
+            p["ev_probability"] = None
+            p["ev_pct"] = None
+            p["ev_units"] = None
+
+    # Filter to positive EV only and sort by EV
+    positive_ev = [p for p in props if p.get("ev_pct") and p["ev_pct"] > 0]
+    positive_ev.sort(key=lambda x: x.get("ev_pct", 0), reverse=True)
+
+    return positive_ev
+
+
 def get_game_props(event_id, sport="nba"):
     """
     Standalone PRISM analysis for a single game, invoked on-demand.

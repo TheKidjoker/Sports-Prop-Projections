@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260303a">
+    <link rel="stylesheet" href="/static/style.css?v=20260303c">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
     <!-- Auth Gate -->
     <div id="auth-gate" class="auth-gate">
         <div class="auth-card">
-            <img src="/static/logo.png" alt="Joker's Edge" class="auth-logo">
+            <img src="/static/logo.png?v=20260303b" alt="Joker's Edge" class="auth-logo">
             <h1 class="auth-title">Joker's Edge</h1>
             <p class="auth-subtitle">Why so serious about logging in?</p>
             <form id="auth-form" class="auth-form">
@@ -55,13 +55,15 @@
 
             <button type="button" id="scan-btn">Quick Picks</button>
 
+            <button type="button" id="featured-btn">Featured Picks</button>
+
             <div id="scan-loading" class="sonar-loading hidden">
                 <div class="sonar-container">
                     <div class="sonar-ring ring-1"></div>
                     <div class="sonar-ring ring-2"></div>
                     <div class="sonar-ring ring-3"></div>
                     <div class="sonar-sweep"></div>
-                    <img src="/static/logo.png" alt="" class="sonar-logo">
+                    <img src="/static/logo.png?v=20260303b" alt="" class="sonar-logo">
                 </div>
                 <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
             </div>
@@ -119,7 +121,7 @@
             <span></span>
             <span></span>
         </button>
-        <img src="/static/logo.png" alt="Joker's Edge" class="nav-logo">
+        <img src="/static/logo.png?v=20260303b" alt="Joker's Edge" class="nav-logo">
         <span class="nav-title">Joker's Edge</span>
         <button type="button" class="nav-home-btn" id="nav-home-btn" aria-label="Go home">&#8962;</button>
         <button type="button" class="nav-logout-btn" id="nav-logout-btn" aria-label="Log out">Logout</button>
@@ -129,7 +131,7 @@
     <!-- Main content -->
     <main class="main-content">
         <section id="welcome-hero" class="welcome-hero">
-            <img src="/static/logo.png" alt="Joker's Edge" class="hero-logo">
+            <img src="/static/logo.png?v=20260303b" alt="Joker's Edge" class="hero-logo">
             <h1 class="hero-tagline">Why so serious?</h1>
             <p class="hero-sub">Pick your poison. Get the last laugh.</p>
             <div class="hero-sport-grid">
@@ -373,6 +375,7 @@
             <div class="ev-tabs">
                 <button type="button" class="ev-tab active" data-ev-tab="dashboard">Dashboard</button>
                 <button type="button" class="ev-tab" data-ev-tab="predictions">Predictions</button>
+                <button type="button" class="ev-tab" data-ev-tab="player-props">Player Props</button>
             </div>
 
             <div id="ev-panel-dashboard" class="ev-panel">
@@ -395,6 +398,18 @@
                     <p>Scanning for EV predictions...</p>
                 </div>
                 <div id="ev-predictions-results"></div>
+            </div>
+
+            <div id="ev-panel-player-props" class="ev-panel hidden">
+                <div class="ev-props-toolbar">
+                    <button type="button" class="ev-refresh-btn" id="ev-props-refresh-btn">Refresh</button>
+                </div>
+                <div id="ev-props-summary"></div>
+                <div id="ev-props-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Scanning for player props...</p>
+                </div>
+                <div id="ev-props-results"></div>
             </div>
         </section>
 
@@ -485,6 +500,6 @@
 
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260303a"></script>
+    <script src="/static/app.js?v=20260303c"></script>
 </body>
 </html>

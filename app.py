@@ -17,7 +17,7 @@ from line_movement import detect_movement, confirms_slot
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from constants import ML_THRESHOLDS, DATA_CONFIDENCE_LEVELS, wilson_interval
 from game_scanner import (
-    scan_all_games, get_game_props, get_top_props,
+    scan_all_games, get_game_props, get_top_props, get_top_props_with_ev,
     classify_game_slot, _build_action_string,
 )
 import tracker
@@ -316,11 +316,12 @@ def api_games():
 def api_scan():
     """Scans all today's games, returns ranked results.
     Returns cached results instantly when available, queues background refresh.
-    Admin sees all picks with approval controls; non-admin sees only approved picks.
+    Admin sees all picks with approval controls; non-admin sees all picks.
     """
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
+        featured_only = data.get("featured_only", False)
         is_admin = _is_admin()
 
         if sport == "all":
@@ -352,7 +353,7 @@ def api_scan():
             # Apply approval filtering per sport
             filtered_results = {}
             for s, games in all_results.items():
-                filtered_results[s] = _apply_approval_filter(games, s, is_admin)
+                filtered_results[s] = _apply_approval_filter(games, s, is_admin, featured_only)
 
             return jsonify({"success": True, "all_sports": filtered_results,
                             "cached": not missing})
@@ -366,7 +367,7 @@ def api_scan():
             scan_cache.request_refresh(sport)
             cache_age_min = round(age / 60) if age else 0
             freshness = "fresh" if cache_age_min < 30 else ("aging" if cache_age_min < 120 else "stale")
-            games = _apply_approval_filter(cached, sport, is_admin)
+            games = _apply_approval_filter(cached, sport, is_admin, featured_only)
             if games is None:
                 return jsonify({"success": True, "games": [],
                                 "picks_pending_review": True})
@@ -375,6 +376,7 @@ def api_scan():
                 "cached": True, "cache_age": round(age),
                 "signal_freshness": freshness,
                 "scan_age_minutes": cache_age_min,
+                "featured_mode": featured_only,
             })
 
         # No cache — blocking scan
@@ -384,11 +386,11 @@ def api_scan():
             pick_curation.sync_picks_from_scan(results, sport)
         except Exception:
             pass
-        games = _apply_approval_filter(results, sport, is_admin)
+        games = _apply_approval_filter(results, sport, is_admin, featured_only)
         if games is None:
             return jsonify({"success": True, "games": [],
                             "picks_pending_review": True})
-        return jsonify({"success": True, "games": games})
+        return jsonify({"success": True, "games": games, "featured_mode": featured_only})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -399,11 +401,11 @@ def _today_est():
     return (datetime.now(timezone.utc) - timedelta(hours=5)).strftime("%Y-%m-%d")
 
 
-def _apply_approval_filter(games, sport, is_admin):
+def _apply_approval_filter(games, sport, is_admin, featured_only=False):
     """
     Filter scan results based on admin approval status.
     Admin: annotate games with approval_status.
-    Non-admin: return None if no picks reviewed, or only approved games.
+    Non-admin: see all games, or only approved if featured_only=True.
     """
     if not games:
         return games
@@ -422,25 +424,36 @@ def _apply_approval_filter(games, sport, is_admin):
                 g["admin_lean_override"] = ap["admin_lean_override"]
             if ap.get("admin_confidence_override") is not None:
                 g["admin_confidence_override"] = ap["admin_confidence_override"]
+        # Admin sees all games (with annotations) unless featured_only is True
+        if featured_only:
+            approved_ids = pick_curation.get_approved_event_ids(sport, game_date)
+            games = [g for g in games if str(g.get("event_id", "")) in approved_ids]
         return games
 
-    # Non-admin: check if admin has reviewed
-    if not pick_curation.has_admin_reviewed(sport, game_date):
-        return None  # Signal "picks pending review"
-
-    # Filter to approved only, apply overrides
-    approved_ids = pick_curation.get_approved_event_ids(sport, game_date)
-    filtered = []
-    for g in games:
-        eid = str(g.get("event_id", ""))
-        if eid in approved_ids:
+    # Non-admin: return all games or only approved if featured_only
+    if featured_only:
+        approved_ids = pick_curation.get_approved_event_ids(sport, game_date)
+        filtered = []
+        for g in games:
+            eid = str(g.get("event_id", ""))
+            if eid in approved_ids:
+                ap = approval_map.get(eid, {})
+                if ap.get("admin_lean_override"):
+                    g["lean_team"] = ap["admin_lean_override"]
+                if ap.get("admin_confidence_override") is not None:
+                    g["cover_pct"] = ap["admin_confidence_override"]
+                filtered.append(g)
+        return filtered
+    else:
+        # Apply admin overrides if they exist
+        for g in games:
+            eid = str(g.get("event_id", ""))
             ap = approval_map.get(eid, {})
             if ap.get("admin_lean_override"):
                 g["lean_team"] = ap["admin_lean_override"]
             if ap.get("admin_confidence_override") is not None:
                 g["cover_pct"] = ap["admin_confidence_override"]
-            filtered.append(g)
-    return filtered
+        return games
 
 
 @app.route("/api/props", methods=["GET"])
@@ -484,6 +497,20 @@ def api_top_props():
         if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
         props = get_top_props(sport)
+        return jsonify({"success": True, "props": props})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/ev/player-props", methods=["GET"])
+@require_auth
+def api_ev_player_props():
+    """Get player props with EV calculations for EV Engine."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "cbb"):
+            return jsonify({"success": True, "props": []})
+        props = get_top_props_with_ev(sport)
         return jsonify({"success": True, "props": props})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

@@ -214,6 +214,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var errorBanner = document.getElementById("error-banner");
     var results = document.getElementById("results");
     var scanBtn = document.getElementById("scan-btn");
+    var featuredBtn = document.getElementById("featured-btn");
     var scanLoading = document.getElementById("scan-loading");
     var scanResults = document.getElementById("scan-results");
     var teamInput = document.getElementById("team_name");
@@ -426,8 +427,9 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     // Quick Generate (Scan All Games)
-    function runScan() {
+    function runScan(featuredOnly) {
         scanBtn.disabled = true;
+        if (featuredBtn) featuredBtn.disabled = true;
         scanLoading.classList.remove("hidden");
         scanSonar.classList.remove("hidden");
         scanResults.classList.add("hidden");
@@ -447,13 +449,14 @@ document.addEventListener("DOMContentLoaded", function () {
         authFetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: currentSport })
+            body: JSON.stringify({ sport: currentSport, featured_only: featuredOnly || false })
         })
         .then(function (res) { return res.json(); })
         .then(function (data) {
             scanLoading.classList.add("hidden");
             scanSonar.classList.add("hidden");
             scanBtn.disabled = false;
+            if (featuredBtn) featuredBtn.disabled = false;
 
             if (!data.success) {
                 showError(data.error || "Scan failed.");
@@ -469,11 +472,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     '</div>';
                 scanResults.classList.remove("hidden");
             } else if (currentSport === "all" && data.all_sports) {
-                renderAllSportsResults(data.all_sports);
+                renderAllSportsResults(data.all_sports, data.featured_mode);
             } else {
                 var gList = data.games || [];
                 if (data.signal_freshness) gList.forEach(function (g) { g._freshness = data.signal_freshness; });
-                renderScanResults(gList);
+                renderScanResults(gList, data.featured_mode);
             }
 
             // Show cache indicator if results came from cache
@@ -498,11 +501,15 @@ document.addEventListener("DOMContentLoaded", function () {
             scanLoading.classList.add("hidden");
             scanSonar.classList.add("hidden");
             scanBtn.disabled = false;
+            if (featuredBtn) featuredBtn.disabled = false;
             showError("Gotham's signal went dark.");
         });
     }
 
-    scanBtn.addEventListener("click", runScan);
+    scanBtn.addEventListener("click", function () { runScan(false); });
+    if (featuredBtn) {
+        featuredBtn.addEventListener("click", function () { runScan(true); });
+    }
 
     // Player Search sidebar button
     playerSearchBtn.addEventListener("click", function () {
@@ -660,10 +667,17 @@ document.addEventListener("DOMContentLoaded", function () {
         results.classList.remove("hidden");
     }
 
-    function renderScanResults(games) {
+    function renderScanResults(games, featuredMode) {
         welcomeHero.classList.add("hidden");
         loadedProps = {};  // Reset loaded props on new scan
         lastScanGames = games;  // Store for parlay rebuilding
+
+        // Detect if we have today/tomorrow games
+        var currentSlate = { has_today: false, has_tomorrow: false };
+        games.forEach(function (g) {
+            if (g.date_label === "Today") currentSlate.has_today = true;
+            if (g.date_label === "Tomorrow") currentSlate.has_tomorrow = true;
+        });
 
         // Sort: Today's games first, then Tomorrow's, by score within each group
         games.sort(function (a, b) {
@@ -674,10 +688,10 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         if (games.length === 0) {
-            scanResults.innerHTML = '<div class="scan-empty-state">' +
-                '<div class="scan-empty-headline">Gotham\'s quiet tonight.</div>' +
-                '<div class="scan-empty-sub">No ' + currentSport.toUpperCase() + ' games on the board right now. Check back closer to game time or try another sport.</div>' +
-                '</div>';
+            var emptyMsg = featuredMode
+                ? '<div class="scan-empty-state"><div class="scan-empty-headline">No featured picks yet.</div><div class="scan-empty-sub">Admin hasn\'t approved any ' + currentSport.toUpperCase() + ' picks yet. Check back soon or try Quick Picks for all games.</div></div>'
+                : '<div class="scan-empty-state"><div class="scan-empty-headline">Gotham\'s quiet tonight.</div><div class="scan-empty-sub">No ' + currentSport.toUpperCase() + ' games on the board right now. Check back closer to game time or try another sport.</div></div>';
+            scanResults.innerHTML = emptyMsg;
             scanResults.classList.remove("hidden");
             return;
         }
@@ -690,6 +704,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var sportLabel = currentSport.toUpperCase();
         var dayLabel = (currentSlate.has_today && currentSlate.has_tomorrow) ? "Today & Tomorrow's"
             : currentSlate.has_tomorrow ? "Tomorrow's" : "Today's";
+        var titlePrefix = featuredMode ? "🌟 Featured: " : "";
 
         if (filtered.length === 0) {
             // No strong plays — show top alternatives
@@ -709,7 +724,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
+            var html = '<h2 class="scan-title">' + titlePrefix + dayLabel + ' ' + sportLabel + ' Games</h2>';
             html += '<div class="alt-picks-header">No strong plays today — here are the closest calls</div>';
             html += '<div class="scan-grid">';
             alternatives.forEach(function (g) {
@@ -726,7 +741,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        var html = '<h2 class="scan-title">' + dayLabel + ' ' + sportLabel + ' Games</h2>';
+        var html = '<h2 class="scan-title">' + titlePrefix + dayLabel + ' ' + sportLabel + ' Games</h2>';
 
         // "Generate Top Props" button (NBA only, when today's games exist)
         if (currentSport === "nba" && currentSlate.has_today) {
@@ -3378,6 +3393,8 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("ev-metrics-display").innerHTML = "";
             document.getElementById("ev-predictions-summary").innerHTML = "";
             document.getElementById("ev-predictions-results").innerHTML = "";
+            document.getElementById("ev-props-summary").innerHTML = "";
+            document.getElementById("ev-props-results").innerHTML = "";
             evLastGames = [];
             evClearTrainPoll();
             // Reload active tab
@@ -3385,6 +3402,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var target = activeTab ? activeTab.getAttribute("data-ev-tab") : "dashboard";
             if (target === "dashboard") evLoadDashboard();
             if (target === "predictions") evLoadPredictions();
+            if (target === "player-props") evLoadPlayerProps();
         });
     });
 
@@ -3398,6 +3416,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("ev-panel-" + target).classList.remove("hidden");
             if (target === "dashboard") evLoadDashboard();
             if (target === "predictions") evLoadPredictions();
+            if (target === "player-props") evLoadPlayerProps();
         });
     });
 
@@ -3416,6 +3435,11 @@ document.addEventListener("DOMContentLoaded", function () {
     // Refresh button
     document.getElementById("ev-refresh-btn").addEventListener("click", function () {
         evLoadPredictions();
+    });
+
+    // Props refresh button
+    document.getElementById("ev-props-refresh-btn").addEventListener("click", function () {
+        evLoadPlayerProps();
     });
 
     // Show EV Engine section
@@ -3776,6 +3800,90 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<span class="ev-detail-rec ' + recClass + '">' + rec + '</span>';
         html += '</div>';
         return html;
+    }
+
+    // ── Player Props ──
+
+    function evLoadPlayerProps() {
+        var loadEl = document.getElementById("ev-props-loading");
+        var resultsEl = document.getElementById("ev-props-results");
+        var summaryEl = document.getElementById("ev-props-summary");
+        loadEl.classList.remove("hidden");
+        resultsEl.innerHTML = "";
+        summaryEl.innerHTML = "";
+
+        authFetch("/api/ev/player-props?sport=" + evSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                loadEl.classList.add("hidden");
+                if (!data.success) {
+                    resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">' + (data.error || 'Load failed') + '</div>';
+                    return;
+                }
+                var props = data.props || [];
+                evRenderPlayerProps(props);
+            })
+            .catch(function () {
+                loadEl.classList.add("hidden");
+                resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">Network error</div>';
+            });
+    }
+
+    function evRenderPlayerProps(props) {
+        var resultsEl = document.getElementById("ev-props-results");
+        var summaryEl = document.getElementById("ev-props-summary");
+
+        summaryEl.innerHTML = '<div class="ev-prediction-summary">' +
+            '<span>' + props.length + ' positive EV props</span>' +
+            '</div>';
+
+        if (props.length === 0) {
+            resultsEl.innerHTML = '<div style="color:var(--text-secondary);padding:2rem;text-align:center;">No positive EV props found for today.</div>';
+            return;
+        }
+
+        var html = '<div class="ev-props-table-container">';
+        html += '<table class="ev-props-table">';
+        html += '<thead><tr>';
+        html += '<th>Player</th>';
+        html += '<th>Team</th>';
+        html += '<th>Matchup</th>';
+        html += '<th>Stat</th>';
+        html += '<th>Line</th>';
+        html += '<th>Proj</th>';
+        html += '<th>Edge</th>';
+        html += '<th>Prob</th>';
+        html += '<th>EV%</th>';
+        html += '<th>EV Units</th>';
+        html += '<th>Signal</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+
+        props.forEach(function (p) {
+            var signalClass = getSignalClass(p.signal || "");
+            var edgeStr = p.edge != null ? (p.edge > 0 ? '+' : '') + p.edge.toFixed(1) : '—';
+            var probStr = p.ev_probability != null ? p.ev_probability.toFixed(1) + '%' : '—';
+            var evPctStr = p.ev_pct != null ? (p.ev_pct > 0 ? '+' : '') + p.ev_pct.toFixed(1) + '%' : '—';
+            var evUnitsStr = p.ev_units != null ? (p.ev_units > 0 ? '+' : '') + p.ev_units.toFixed(2) : '—';
+
+            html += '<tr>';
+            html += '<td class="ev-props-player">' + (p.player_name || '—') + '</td>';
+            html += '<td>' + (p.team || '—') + '</td>';
+            html += '<td class="ev-props-matchup">' + (p.matchup || '—') + '</td>';
+            html += '<td>' + (p.stat_type || '—').toUpperCase() + '</td>';
+            html += '<td>' + (p.line != null ? p.line.toFixed(1) : '—') + '</td>';
+            html += '<td>' + (p.projection != null ? p.projection.toFixed(1) : '—') + '</td>';
+            html += '<td class="' + (p.edge > 0 ? 'ev-positive' : '') + '">' + edgeStr + '</td>';
+            html += '<td>' + probStr + '</td>';
+            html += '<td class="ev-positive">' + evPctStr + '</td>';
+            html += '<td class="ev-positive">' + evUnitsStr + '</td>';
+            html += '<td><span class="' + signalClass + '">' + (p.signal || '—') + '</span></td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        html += '</div>';
+        resultsEl.innerHTML = html;
     }
 
     // ─── Bet Tracker (My Picks + My Bets) ──────────────────────────────────────

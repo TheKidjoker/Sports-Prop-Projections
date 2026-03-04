@@ -4720,6 +4720,65 @@ button[type="submit"]:disabled {
     border: 1px solid var(--border-primary);
 }
 
+/* ── Player Props Table ── */
+.ev-props-table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 1rem;
+}
+
+.ev-props-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.ev-props-table thead {
+    background: rgba(139, 0, 0, 0.2);
+    border-bottom: 2px solid var(--accent-red);
+}
+
+.ev-props-table th {
+    padding: 0.75rem 0.5rem;
+    text-align: left;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    color: var(--text-primary);
+}
+
+.ev-props-table td {
+    padding: 0.75rem 0.5rem;
+    border-bottom: 1px solid var(--border-primary);
+    color: var(--text-primary);
+}
+
+.ev-props-table tbody tr:hover {
+    background: rgba(139, 0, 0, 0.1);
+}
+
+.ev-props-player {
+    font-weight: 700;
+    color: var(--accent-yellow);
+}
+
+.ev-props-matchup {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.ev-positive {
+    color: var(--accent-green) !important;
+    font-weight: 700;
+}
+
+.ev-props-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
     .evengine-section {
