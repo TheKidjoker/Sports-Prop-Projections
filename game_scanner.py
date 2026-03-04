@@ -1050,8 +1050,11 @@ def get_top_props(sport="nba"):
         futures = {pool.submit(_fetch_props, g): g for g in games}
         for future in as_completed(futures):
             try:
-                all_props.extend(future.result())
-            except Exception:
+                result = future.result(timeout=30)  # 30 second timeout per game
+                all_props.extend(result)
+            except Exception as e:
+                # Log but continue - don't let one game failure break all props
+                print(f"[get_top_props] Failed to fetch props: {e}", flush=True)
                 pass
 
     # Sort by confidence descending
@@ -1076,27 +1079,29 @@ def calculate_prop_ev(projection, line, edge, confidence, signal):
     if projection is None or line is None or line <= 0:
         return None
 
-    # Convert edge and confidence into win probability
-    # Use a logistic model calibrated to PRISM historical accuracy
-    # Base probability from confidence score (PRISM confidence correlates with win rate)
-    base_prob = confidence
+    # Determine direction - we're betting OVER or UNDER based on edge
+    is_over = edge > 0
 
-    # Adjust based on edge magnitude (larger edge = higher conviction)
+    # Base probability from confidence (50-95% range, scaled from PRISM confidence)
+    # Confidence 50 = 50% win prob, Confidence 95 = 75% win prob
+    base_prob = 50 + (confidence - 50) * 0.5
+
+    # Only apply edge boost if edge is in the direction we're betting
     edge_abs = abs(edge)
     edge_pct = edge_abs / line if line > 0 else 0
 
-    # Edge boost: +1-2% per 10% edge
-    edge_boost = min(edge_pct * 10, 10)  # Cap at +10%
+    # Edge boost: larger edge = more confidence (0-10% boost)
+    edge_boost = min(edge_pct * 20, 10) if edge_abs >= 1.0 else 0
 
     # Signal strength adjustment
     signal_adj = 0
     if "STRONG" in signal:
         signal_adj = 5
     elif "LEAN" in signal:
-        signal_adj = 0
+        signal_adj = 2
 
-    # Final probability (capped 10-95%)
-    probability = max(10, min(95, base_prob + edge_boost + signal_adj))
+    # Final probability (capped 45-90% for safety)
+    probability = max(45, min(90, base_prob + edge_boost + signal_adj))
 
     # Expected value calculation (assuming -110 odds)
     # Breakeven = 52.4% (need to win 11 to win 10)
@@ -1122,7 +1127,11 @@ def get_top_props_with_ev(sport="nba"):
     Fetch all props and add EV calculations.
     Returns props sorted by EV (highest first).
     """
-    props = get_top_props(sport)
+    try:
+        props = get_top_props(sport)
+    except Exception as e:
+        print(f"[get_top_props_with_ev] Failed to fetch props: {e}", flush=True)
+        return []
 
     # Add EV to each prop
     for p in props:

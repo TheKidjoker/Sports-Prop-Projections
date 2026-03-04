@@ -168,6 +168,14 @@ document.addEventListener("DOMContentLoaded", function () {
                     authSubmit.disabled = true;
                     authError.classList.add("hidden");
 
+                    // Check if auth client is initialized
+                    if (!_supabaseClient) {
+                        authSubmit.disabled = false;
+                        authError.textContent = "Auth not initialized. Please refresh the page.";
+                        authError.classList.remove("hidden");
+                        return;
+                    }
+
                     var authPromise;
                     if (isSignUp) {
                         authPromise = _supabaseClient.auth.signUp({ email: email, password: password });
@@ -198,7 +206,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
                 // Logout button
                 document.getElementById("nav-logout-btn").addEventListener("click", function () {
-                    _supabaseClient.auth.signOut();
+                    if (_supabaseClient) {
+                        _supabaseClient.auth.signOut();
+                    }
                 });
             })
             .catch(function () {

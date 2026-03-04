@@ -28,6 +28,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Skip non-http(s) schemes (chrome-extension, etc.)
+  if (!url.protocol.startsWith("http")) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)

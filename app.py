@@ -241,6 +241,23 @@ def legacy_static(filename):
     return send_from_directory(legacy_dir, filename)
 
 
+# PWA assets
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory(REACT_DIST, "manifest.json")
+
+
+@app.route("/sw.js")
+def service_worker():
+    return send_from_directory(REACT_DIST, "sw.js")
+
+
+@app.route("/icons/<path:filename>")
+def icons(filename):
+    icons_dir = os.path.join(REACT_DIST, "icons")
+    return send_from_directory(icons_dir, filename)
+
+
 @app.route("/api/auth/config", methods=["GET"])
 def auth_config():
     return jsonify({
