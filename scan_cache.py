@@ -6,12 +6,14 @@ Background scan cache — keeps game analysis pre-computed for instant page load
 - Daily at 6 AM EST: pre-scans all sports so data is ready for the day
 - On visitor arrival (/api/games): triggers immediate refresh for that sport
 - /api/scan returns cached results instantly, queues background refresh
+- Two-tier cache: in-memory for speed + Supabase for persistence across deploys
 """
 
 import threading
 import time
 import logging
 from datetime import datetime, timedelta, timezone
+import cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +43,41 @@ def init():
 
 
 def get(sport):
-    """Return (results, age_seconds) or (None, None)."""
+    """
+    Return (results, age_seconds) or (None, None).
+    Checks in-memory cache first, then Supabase persistent cache.
+    """
+    # Check in-memory first (fastest)
     with _cache_lock:
         e = _cache.get(sport)
-        if e is None:
-            return None, None
-        return e["results"], time.time() - e["ts"]
+        if e is not None:
+            return e["results"], time.time() - e["ts"]
+
+    # Check persistent Supabase cache
+    db_results = cache_manager.get_cached_scan(sport, cache_minutes=60)
+    if db_results:
+        # Warm in-memory cache with DB data
+        with _cache_lock:
+            _cache[sport] = {"results": db_results, "ts": time.time()}
+        logger.info("[scan_cache] Warmed memory from DB: %s", sport)
+        return db_results, 0  # Treat as fresh since we just loaded it
+
+    return None, None
 
 
 def put(sport, results):
-    """Store results in cache."""
+    """
+    Store results in cache (both memory and persistent DB).
+    """
+    # Write to in-memory cache
     with _cache_lock:
         _cache[sport] = {"results": results, "ts": time.time()}
+
+    # Write to persistent Supabase cache (async, don't block on errors)
+    try:
+        cache_manager.cache_scan(sport, results)
+    except Exception as e:
+        logger.warning("[scan_cache] Failed to persist to DB: %s", e)
 
 
 def request_refresh(*sports):
@@ -146,5 +171,10 @@ def _loop():
         try:
             import bet_tracker
             bet_tracker.grade_all_tracked_bets()
+        except Exception:
+            pass
+        # Cleanup old DB cache entries (keep last 24 hours)
+        try:
+            cache_manager.clear_old_cache_entries(hours=24)
         except Exception:
             pass

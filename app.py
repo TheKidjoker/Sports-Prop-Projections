@@ -513,8 +513,20 @@ def api_top_props():
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
+
+        # Check persistent cache first
+        import cache_manager
+        cached_props = cache_manager.get_cached_props(sport, cache_minutes=10)
+        if cached_props is not None:
+            return jsonify({"success": True, "props": cached_props, "cached": True})
+
+        # Cache miss - compute fresh
         props = get_top_props(sport)
-        return jsonify({"success": True, "props": props})
+
+        # Store in cache for next request
+        cache_manager.cache_props(sport, props)
+
+        return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -527,8 +539,46 @@ def api_ev_player_props():
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
+
+        # Check persistent cache first (use separate cache key for EV props)
+        import cache_manager
+        supabase = cache_manager._get_supabase()
+        if supabase:
+            try:
+                from datetime import datetime, timedelta, timezone
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+                result = (
+                    supabase.table("props_cache")
+                    .select("*")
+                    .eq("sport", f"{sport}_ev")
+                    .gte("created_at", cutoff.isoformat())
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    import json
+                    cached = json.loads(result.data[0]["results"])
+                    return jsonify({"success": True, "props": cached, "cached": True})
+            except Exception:
+                pass
+
+        # Cache miss - compute fresh
         props = get_top_props_with_ev(sport)
-        return jsonify({"success": True, "props": props})
+
+        # Store in cache with _ev suffix
+        if supabase:
+            try:
+                import json
+                supabase.table("props_cache").insert({
+                    "sport": f"{sport}_ev",
+                    "results": json.dumps(props),
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }).execute()
+            except Exception:
+                pass
+
+        return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

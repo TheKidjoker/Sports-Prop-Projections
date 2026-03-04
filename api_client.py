@@ -248,6 +248,7 @@ def get_all_injuries(sport="nba"):
 def get_player_season_averages(athlete_id, sport="nba"):
     """
     Fetches a player's season averages from ESPN.
+    Checks Supabase DB cache first, falls back to ESPN API.
 
     Handles two API response formats:
     - Legacy: categories[].stats[] = [{name, value}, ...]
@@ -263,6 +264,47 @@ def get_player_season_averages(athlete_id, sport="nba"):
         NHL: {ptspg, gpg, apg, toi}
         NFL: {pass_ypg, qbr, rush_ypg, rec_ypg, total_td}
     """
+    # Check Supabase cache first (24-hour TTL for season stats)
+    import cache_manager
+    supabase = cache_manager._get_supabase()
+    if supabase:
+        try:
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            season = "2024-25"  # Current season - update annually
+            result = (
+                supabase.table("player_season_stats")
+                .select("*")
+                .eq("player_id", str(athlete_id))
+                .eq("sport", sport)
+                .eq("season", season)
+                .gte("last_updated", cutoff.isoformat())
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                row = result.data[0]
+                # Map DB columns back to expected format
+                cached = {}
+                if sport in ("nba", "cbb"):
+                    cached = {k: row[k] for k in ["ppg", "rpg", "apg", "mpg"] if row.get(k) is not None}
+                elif sport == "nhl":
+                    # Map DB columns to NHL keys
+                    if row.get("points"):
+                        cached["ptspg"] = row["points"]
+                    if row.get("goals"):
+                        cached["gpg"] = row["goals"]
+                    if row.get("assists"):
+                        cached["apg"] = row["assists"]
+                elif sport == "nfl":
+                    cached = {k: row[k] for k in ["pass_ypg", "qbr", "rush_ypg", "rec_ypg", "total_td"] if row.get(k) is not None}
+                if cached:
+                    return cached
+        except Exception as e:
+            # Silently fall through to ESPN API on DB errors
+            pass
+
+    # Fallback to ESPN API
     try:
         url = _espn_player_stats_url(sport, athlete_id)
         data = _cached_request(url, timeout=10)
@@ -309,7 +351,37 @@ def get_player_season_averages(athlete_id, sport="nba"):
                     stats[name] = float(value)
 
         if stats:
-            return _map_espn_stat_names(stats, sport)
+            result = _map_espn_stat_names(stats, sport)
+            # Cache in Supabase for future requests
+            if result and supabase:
+                try:
+                    from datetime import datetime, timezone
+                    season = "2024-25"
+                    # Prepare row data
+                    row_data = {
+                        "player_id": str(athlete_id),
+                        "sport": sport,
+                        "season": season,
+                        "last_updated": datetime.now(timezone.utc).isoformat()
+                    }
+                    # Add sport-specific stats
+                    if sport in ("nba", "cbb"):
+                        row_data.update({k: result[k] for k in ["ppg", "rpg", "apg", "mpg"] if k in result})
+                    elif sport == "nhl":
+                        if "ptspg" in result:
+                            row_data["points"] = result["ptspg"]
+                        if "gpg" in result:
+                            row_data["goals"] = result["gpg"]
+                        if "apg" in result:
+                            row_data["assists"] = result["apg"]
+                    elif sport == "nfl":
+                        row_data.update({k: result[k] for k in ["pass_ypg", "qbr", "rush_ypg", "rec_ypg", "total_td"] if k in result})
+
+                    # Upsert (insert or update)
+                    supabase.table("player_season_stats").upsert(row_data).execute()
+                except Exception:
+                    pass  # Don't fail on cache write errors
+            return result
 
         return None
 
