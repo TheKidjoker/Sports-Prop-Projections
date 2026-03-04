@@ -99,6 +99,16 @@ def init_db():
             UNIQUE(event_id, sport, player_name, stat_type)
         )
     """)
+    # Prop EV columns on prism_predictions
+    for col_def in (
+        "std_dev REAL", "z_score REAL", "model_probability REAL",
+        "over_odds INTEGER", "under_odds INTEGER",
+        "implied_probability REAL", "expected_value REAL", "edge_pct REAL",
+    ):
+        try:
+            cur.execute(f"ALTER TABLE prism_predictions ADD COLUMN {col_def}")
+        except Exception:
+            pass
     conn.commit()
     cur.close()
     conn.close()

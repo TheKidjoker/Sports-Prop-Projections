@@ -25,6 +25,7 @@ from api_client import (
     get_team_roster_leaders, get_team_defensive_stats, get_team_stats,
     get_player_game_log, get_player_props_odds,
 )
+from api_odds import get_player_props_odds_full
 import tracker
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
@@ -1009,6 +1010,10 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 "streak": proj["streak"],
                 "minutes_unstable": proj["minutes_unstable"],
                 "slot_type": slot_type,
+                "recent_games": recent_games or [],
+                "is_b2b": is_b2b or False,
+                "has_injury_boost": bool(injured_teammates) and stat_key == "pts",
+                "stat_key": stat_key,
             })
 
     # Sort by abs(edge) descending
@@ -1180,6 +1185,129 @@ def get_top_props_with_ev(sport="nba"):
     positive_ev.sort(key=lambda x: x.get("ev_pct", 0), reverse=True)
 
     return positive_ev
+
+
+def get_prop_ev_analysis(sport="nba"):
+    """
+    Full Prop EV pipeline: PRISM projections + actual odds → variance-based EV.
+
+    1. Fetches PRISM props via get_top_props()
+    2. Fetches actual market odds via get_player_props_odds_full()
+    3. Runs prop_ev_engine.analyze_prop() for each prop
+    4. Filters to positive EV, sorts by EV descending
+
+    Returns:
+        List of enriched prop dicts with variance, probability, and EV data.
+    """
+    from prop_ev_engine import analyze_prop
+
+    if sport not in ("nba",):
+        return []
+
+    # Fetch PRISM projections and market odds in parallel
+    prism_props = []
+    odds_data = {}
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        prism_f = pool.submit(get_top_props, sport)
+        odds_f = pool.submit(get_player_props_odds_full, sport)
+
+        try:
+            prism_props = prism_f.result(timeout=55)
+        except Exception as e:
+            print(f"[get_prop_ev_analysis] PRISM fetch failed: {e}", flush=True)
+            prism_props = []
+
+        try:
+            odds_data = odds_f.result(timeout=15)
+        except Exception:
+            odds_data = {}
+
+    if not prism_props:
+        return []
+
+    # Map stat_type labels back to odds keys
+    label_to_odds_key = {"PTS": "points", "REB": "rebounds", "AST": "assists"}
+
+    results = []
+    for p in prism_props:
+        player_name = p.get("player_name", "")
+        stat_type = p.get("stat_type", "")
+        projection = p.get("projection")
+        line = p.get("line")
+        recent_games = p.get("recent_games", [])
+        stat_key = p.get("stat_key", stat_type.lower()[:3])
+        is_b2b = p.get("is_b2b", False)
+        minutes_unstable = p.get("minutes_unstable", False)
+        has_injury_boost = p.get("has_injury_boost", False)
+
+        # Look up market odds for this player/stat
+        norm_name = player_name.strip().lower()
+        odds_key = label_to_odds_key.get(stat_type, stat_type.lower())
+        player_odds = odds_data.get(norm_name, {}).get(odds_key, {})
+        over_odds = player_odds.get("over_odds")
+        under_odds = player_odds.get("under_odds")
+
+        ev_analysis = analyze_prop(
+            projection=projection,
+            line=line,
+            recent_games=recent_games,
+            stat_key=stat_key,
+            is_b2b=is_b2b,
+            minutes_unstable=minutes_unstable,
+            has_injury_boost=has_injury_boost,
+            over_odds=over_odds,
+            under_odds=under_odds,
+        )
+
+        if ev_analysis is None:
+            continue
+
+        # Skip PASS tier and negative EV
+        if ev_analysis["tier"] == "PASS":
+            continue
+        if ev_analysis.get("ev_pct") is not None and ev_analysis["ev_pct"] <= 0:
+            continue
+
+        # Merge PRISM fields with EV analysis
+        enriched = {
+            "player_name": player_name,
+            "team": p.get("team", ""),
+            "matchup": p.get("matchup", ""),
+            "event_id": p.get("event_id", ""),
+            "game_date": p.get("game_date", ""),
+            "stat_type": stat_type,
+            "projection": projection,
+            "line": line,
+            "line_source": p.get("line_source", "estimated"),
+            "edge": p.get("edge", 0),
+            "signal": p.get("signal", ""),
+            "confidence": p.get("confidence", 0),
+            "slot_type": p.get("slot_type", ""),
+            # EV engine fields
+            "direction": ev_analysis["direction"],
+            "std_dev": ev_analysis["std_dev"],
+            "adjusted_std": ev_analysis["adjusted_std"],
+            "n_games": ev_analysis["n_games"],
+            "z_score": ev_analysis["z_score"],
+            "model_probability": ev_analysis["model_probability"],
+            "implied_probability": ev_analysis["implied_probability"],
+            "edge_pct": ev_analysis["edge_pct"],
+            "over_odds": ev_analysis["over_odds"],
+            "under_odds": ev_analysis["under_odds"],
+            "market_odds": ev_analysis["market_odds"],
+            "ev_dollars": ev_analysis["ev_dollars"],
+            "ev_pct": ev_analysis["ev_pct"],
+            "tier": ev_analysis["tier"],
+            "has_real_odds": ev_analysis["has_real_odds"],
+            "vig_pct": ev_analysis.get("vig_pct"),
+        }
+        results.append(enriched)
+
+    # Sort by EV$ descending
+    results.sort(key=lambda x: x.get("ev_dollars") or 0, reverse=True)
+    print(f"[get_prop_ev_analysis] Found {len(results)} positive EV props", flush=True)
+    return results
 
 
 def get_game_props(event_id, sport="nba"):

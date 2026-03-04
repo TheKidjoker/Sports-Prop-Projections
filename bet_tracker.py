@@ -88,7 +88,11 @@ def init_tracked_bets_db():
     """)
     # Migrate existing tables: add new columns if they don't exist yet
     for col_def in ("closing_line REAL", "clv REAL", "clv_direction INTEGER",
-                    "kelly_fraction REAL", "suggested_units REAL"):
+                    "kelly_fraction REAL", "suggested_units REAL",
+                    "model_probability REAL", "implied_probability REAL",
+                    "over_odds INTEGER", "under_odds INTEGER",
+                    "expected_value REAL", "closing_odds INTEGER",
+                    "clv_prob_delta REAL"):
         try:
             cur.execute(f"ALTER TABLE {TABLE} ADD COLUMN {col_def}")
         except Exception:
@@ -132,6 +136,11 @@ def save_tracked_bets(bets, user_email):
             "signal": b.get("signal"),
             "kelly_fraction": b.get("kelly_fraction"),
             "suggested_units": b.get("suggested_units"),
+            "model_probability": b.get("model_probability"),
+            "implied_probability": b.get("implied_probability"),
+            "over_odds": b.get("over_odds"),
+            "under_odds": b.get("under_odds"),
+            "expected_value": b.get("expected_value"),
             "result": "PENDING",
             "created_at": now,
         })
@@ -153,8 +162,11 @@ def save_tracked_bets(bets, user_email):
                      action, recommendation, cover_pct, slot_type,
                      player_name, stat_type, prop_line, prop_direction,
                      projection, edge, confidence, signal,
-                     kelly_fraction, suggested_units, result, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     kelly_fraction, suggested_units,
+                     model_probability, implied_probability,
+                     over_odds, under_odds, expected_value,
+                     result, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_email, event_id, bet_type, player_name, stat_type)
                 DO UPDATE SET
                     spread_at_pick = excluded.spread_at_pick,
@@ -169,7 +181,12 @@ def save_tracked_bets(bets, user_email):
                     confidence = excluded.confidence,
                     signal = excluded.signal,
                     kelly_fraction = excluded.kelly_fraction,
-                    suggested_units = excluded.suggested_units
+                    suggested_units = excluded.suggested_units,
+                    model_probability = excluded.model_probability,
+                    implied_probability = excluded.implied_probability,
+                    over_odds = excluded.over_odds,
+                    under_odds = excluded.under_odds,
+                    expected_value = excluded.expected_value
             """, (
                 r["user_email"], r["bet_type"], r["sport"], r["event_id"],
                 r["game_date"], r["home_team"], r["away_team"], r["lean_team"],
@@ -178,6 +195,8 @@ def save_tracked_bets(bets, user_email):
                 r["stat_type"], r["prop_line"], r["prop_direction"],
                 r["projection"], r["edge"], r["confidence"], r["signal"],
                 r["kelly_fraction"], r["suggested_units"],
+                r["model_probability"], r["implied_probability"],
+                r["over_odds"], r["under_odds"], r["expected_value"],
                 r["result"], r["created_at"],
             ))
         conn.commit()
@@ -637,3 +656,104 @@ def _update_bet_clv(bet_id, closing_line, clv, clv_direction):
         conn.commit()
         cur.close()
         conn.close()
+
+
+def fetch_closing_props_for_bets(sport="nba"):
+    """
+    Fetch closing prop odds and compute CLV for PENDING prop bets.
+    Re-fetches current odds from get_player_props_odds_full() and compares
+    to odds at time of bet placement.
+    """
+    import logging
+    from api_odds import get_player_props_odds_full
+    from prop_ev_engine import american_to_implied_prob
+
+    logger = logging.getLogger(__name__)
+
+    # Fetch current odds
+    try:
+        current_odds = get_player_props_odds_full(sport)
+    except Exception:
+        current_odds = {}
+
+    if not current_odds:
+        return {"updated": 0}
+
+    stat_label_to_key = {"PTS": "points", "REB": "rebounds", "AST": "assists"}
+
+    # Get PENDING prop bets without closing_odds
+    if _use_supabase():
+        sb = _get_supabase()
+        q = (sb.table(TABLE).select("*")
+             .eq("result", "PENDING")
+             .eq("bet_type", "prop")
+             .is_("closing_odds", "null")
+             .eq("sport", sport))
+        rows = q.execute().data or []
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'prop' "
+            f"AND closing_odds IS NULL AND sport = ?",
+            (sport,)
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    updated = 0
+    for row in rows:
+        player_name = (row.get("player_name") or "").strip().lower()
+        stat_type = row.get("stat_type", "")
+        odds_key = stat_label_to_key.get(stat_type, stat_type.lower())
+        direction = (row.get("prop_direction") or "").upper()
+
+        player_odds = current_odds.get(player_name, {}).get(odds_key, {})
+        if not player_odds:
+            continue
+
+        # Determine closing odds for the side we bet on
+        if direction == "OVER":
+            closing = player_odds.get("over_odds")
+        elif direction == "UNDER":
+            closing = player_odds.get("under_odds")
+        else:
+            continue
+
+        if closing is None:
+            continue
+
+        # CLV: compare bet implied prob to closing implied prob
+        bet_odds = row.get("over_odds") if direction == "OVER" else row.get("under_odds")
+        clv_prob_delta = None
+        if bet_odds is not None:
+            bet_implied = american_to_implied_prob(bet_odds)
+            closing_implied = american_to_implied_prob(closing)
+            if bet_implied and closing_implied:
+                clv_prob_delta = round((closing_implied - bet_implied) * 100, 2)
+
+        # Update in DB
+        update_data = {"closing_odds": closing}
+        if clv_prob_delta is not None:
+            update_data["clv_prob_delta"] = clv_prob_delta
+
+        if _use_supabase():
+            sb = _get_supabase()
+            sb.table(TABLE).update(update_data).eq("id", row["id"]).execute()
+        else:
+            conn = _get_sqlite()
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {TABLE} SET closing_odds = ?, clv_prob_delta = ? WHERE id = ?",
+                (closing, clv_prob_delta, row["id"])
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        updated += 1
+
+    if updated > 0:
+        logger.info("[bet_tracker] Prop CLV updated for %d tracked bets", updated)
+    return {"updated": updated}

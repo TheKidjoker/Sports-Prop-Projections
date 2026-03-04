@@ -3432,6 +3432,8 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("ev-predictions-results").innerHTML = "";
             document.getElementById("ev-props-summary").innerHTML = "";
             document.getElementById("ev-props-results").innerHTML = "";
+            document.getElementById("prop-ev-summary").innerHTML = "";
+            document.getElementById("prop-ev-results").innerHTML = "";
             evLastGames = [];
             evClearTrainPoll();
             // Reload active tab
@@ -3440,6 +3442,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (target === "dashboard") evLoadDashboard();
             if (target === "predictions") evLoadPredictions();
             if (target === "player-props") evLoadPlayerProps();
+            if (target === "prop-ev") evLoadPropEV();
         });
     });
 
@@ -3454,6 +3457,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (target === "dashboard") evLoadDashboard();
             if (target === "predictions") evLoadPredictions();
             if (target === "player-props") evLoadPlayerProps();
+            if (target === "prop-ev") evLoadPropEV();
         });
     });
 
@@ -3933,6 +3937,136 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '<td class="ev-positive">' + evPctStr + '</td>';
             html += '<td class="ev-positive">' + evUnitsStr + '</td>';
             html += '<td><span class="' + signalClass + '">' + (p.signal || '—') + '</span></td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        html += '</div>';
+        resultsEl.innerHTML = html;
+    }
+
+    // ─── Prop EV Tab ──────────────────────────────────────────────────────────
+
+    var propEvFilter = "all";
+    var propEvLastProps = [];
+
+    document.getElementById("prop-ev-refresh-btn").addEventListener("click", function () {
+        evLoadPropEV();
+    });
+
+    document.querySelectorAll(".prop-ev-filter-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var mode = btn.getAttribute("data-prop-ev-filter");
+            if (mode === propEvFilter) return;
+            propEvFilter = mode;
+            document.querySelectorAll(".prop-ev-filter-btn").forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            evRenderPropEV(propEvLastProps);
+        });
+    });
+
+    function evLoadPropEV() {
+        var loadEl = document.getElementById("prop-ev-loading");
+        var resultsEl = document.getElementById("prop-ev-results");
+        var summaryEl = document.getElementById("prop-ev-summary");
+        loadEl.classList.remove("hidden");
+        resultsEl.innerHTML = "";
+        summaryEl.innerHTML = "";
+
+        authFetch("/api/prop-ev?sport=" + evSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                loadEl.classList.add("hidden");
+                if (!data.success) {
+                    resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">' + (data.error || 'Load failed') + '</div>';
+                    return;
+                }
+                propEvLastProps = data.props || [];
+                evRenderPropEV(propEvLastProps);
+            })
+            .catch(function () {
+                loadEl.classList.add("hidden");
+                resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">Network error</div>';
+            });
+    }
+
+    function evRenderPropEV(props) {
+        var resultsEl = document.getElementById("prop-ev-results");
+        var summaryEl = document.getElementById("prop-ev-summary");
+
+        // Apply filter
+        var filtered = props;
+        if (propEvFilter === "strong") {
+            filtered = props.filter(function (p) { return p.tier === "STRONG"; });
+        }
+
+        // Summary stats
+        var strongCount = props.filter(function (p) { return p.tier === "STRONG"; }).length;
+        var confidentCount = props.filter(function (p) { return p.tier === "CONFIDENT"; }).length;
+        var realOddsCount = props.filter(function (p) { return p.has_real_odds; }).length;
+        summaryEl.innerHTML = '<div class="ev-prediction-summary">' +
+            '<span>' + filtered.length + ' positive EV props</span>' +
+            (strongCount > 0 ? '<span class="prop-ev-badge-strong">' + strongCount + ' STRONG</span>' : '') +
+            (confidentCount > 0 ? '<span class="prop-ev-badge-confident">' + confidentCount + ' CONFIDENT</span>' : '') +
+            (realOddsCount > 0 ? '<span style="color:var(--text-secondary);font-size:0.8rem;margin-left:0.5rem;">' + realOddsCount + ' with live odds</span>' : '') +
+            '</div>';
+
+        if (filtered.length === 0) {
+            resultsEl.innerHTML = '<div style="color:var(--text-secondary);padding:2rem;text-align:center;">No ' + (propEvFilter === "strong" ? "STRONG " : "") + 'positive EV props found.</div>';
+            return;
+        }
+
+        var html = '<div class="ev-props-table-container">';
+        html += '<table class="ev-props-table prop-ev-table">';
+        html += '<thead><tr>';
+        html += '<th>Player</th>';
+        html += '<th>Team</th>';
+        html += '<th>Matchup</th>';
+        html += '<th>Stat</th>';
+        html += '<th>Line</th>';
+        html += '<th>Odds</th>';
+        html += '<th>Proj</th>';
+        html += '<th>StdDev</th>';
+        html += '<th>Model%</th>';
+        html += '<th>Market%</th>';
+        html += '<th>Edge%</th>';
+        html += '<th>EV$</th>';
+        html += '<th>Tier</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+
+        filtered.forEach(function (p) {
+            var tierClass = "prop-ev-tier-lean";
+            if (p.tier === "STRONG") tierClass = "prop-ev-tier-strong";
+            else if (p.tier === "CONFIDENT") tierClass = "prop-ev-tier-confident";
+
+            var oddsStr = '—';
+            if (p.market_odds != null) {
+                oddsStr = (p.market_odds > 0 ? '+' : '') + p.market_odds;
+            }
+            var edgeStr = p.edge_pct != null ? (p.edge_pct > 0 ? '+' : '') + p.edge_pct.toFixed(1) + '%' : '—';
+            var evStr = p.ev_dollars != null ? (p.ev_dollars > 0 ? '+' : '') + '$' + p.ev_dollars.toFixed(2) : '—';
+            var modelStr = p.model_probability != null ? p.model_probability.toFixed(1) + '%' : '—';
+            var marketStr = p.implied_probability != null ? p.implied_probability.toFixed(1) + '%' : '—';
+            var stdStr = p.std_dev != null ? p.std_dev.toFixed(1) : '—';
+            var dirBadge = p.direction === 'OVER'
+                ? '<span class="prop-ev-dir-over">O</span>'
+                : '<span class="prop-ev-dir-under">U</span>';
+
+            html += '<tr>';
+            html += '<td class="ev-props-player">' + (p.player_name || '—') + '</td>';
+            html += '<td>' + (p.team || '—') + '</td>';
+            html += '<td class="ev-props-matchup">' + (p.matchup || '—') + '</td>';
+            html += '<td>' + dirBadge + ' ' + (p.stat_type || '—') + '</td>';
+            html += '<td>' + (p.line != null ? p.line.toFixed(1) : '—') + '</td>';
+            html += '<td>' + oddsStr + (p.has_real_odds ? '' : '<span style="color:var(--text-tertiary);font-size:0.7rem;"> est</span>') + '</td>';
+            html += '<td>' + (p.projection != null ? p.projection.toFixed(1) : '—') + '</td>';
+            html += '<td>' + stdStr + '</td>';
+            html += '<td class="ev-positive">' + modelStr + '</td>';
+            html += '<td>' + marketStr + '</td>';
+            html += '<td class="' + (p.edge_pct > 0 ? 'ev-positive' : '') + '">' + edgeStr + '</td>';
+            html += '<td class="' + (p.ev_dollars > 0 ? 'ev-positive' : '') + '">' + evStr + '</td>';
+            html += '<td><span class="' + tierClass + '">' + (p.tier || '—') + '</span></td>';
             html += '</tr>';
         });
 

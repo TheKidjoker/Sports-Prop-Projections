@@ -185,6 +185,106 @@ def get_player_props_odds(sport="nba"):
         return {}
 
 
+def get_player_props_odds_full(sport="nba"):
+    """
+    Fetches player prop lines WITH odds (over_odds, under_odds) from The-Odds-API.
+    Same API call as get_player_props_odds() but captures price fields.
+
+    Returns:
+        dict: {normalized_name: {stat: {line, over_odds, under_odds, bookmaker}}}
+        Empty dict if no API key.
+    """
+    api_key = os.environ.get("THE_ODDS_API_KEY")
+    if not api_key:
+        return {}
+
+    odds_sport = ODDS_API_SPORT_MAP.get(sport)
+    if not odds_sport:
+        return {}
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "player_points,player_rebounds,player_assists",
+            "oddsFormat": "american",
+        }
+        data = _cached_request(url, params=params, timeout=15)
+        if data is None:
+            return {}
+
+        market_to_stat = {
+            "player_points": "points",
+            "player_rebounds": "rebounds",
+            "player_assists": "assists",
+        }
+
+        # Collect all odds per player/stat, keep best odds per side
+        props = {}
+        for game in data:
+            for bookmaker in game.get("bookmakers", []):
+                book_key = bookmaker.get("key", "")
+                for market in bookmaker.get("markets", []):
+                    stat_name = market_to_stat.get(market.get("key"))
+                    if not stat_name:
+                        continue
+
+                    # Group outcomes by player (description)
+                    player_outcomes = {}
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("description", "")
+                        if not name:
+                            continue
+                        norm = name.strip().lower()
+                        if norm not in player_outcomes:
+                            player_outcomes[norm] = {}
+                        side = outcome.get("name", "").lower()  # "over" or "under"
+                        player_outcomes[norm][side] = {
+                            "point": outcome.get("point"),
+                            "price": outcome.get("price"),
+                        }
+
+                    for norm, sides in player_outcomes.items():
+                        over_data = sides.get("over", {})
+                        under_data = sides.get("under", {})
+
+                        line = over_data.get("point") or under_data.get("point")
+                        over_price = over_data.get("price")
+                        under_price = under_data.get("price")
+
+                        if line is None:
+                            continue
+
+                        if norm not in props:
+                            props[norm] = {}
+
+                        existing = props[norm].get(stat_name)
+                        if existing is None:
+                            props[norm][stat_name] = {
+                                "line": float(line),
+                                "over_odds": over_price,
+                                "under_odds": under_price,
+                                "bookmaker": book_key,
+                            }
+                        else:
+                            # Keep best over odds (highest/least negative)
+                            if over_price is not None:
+                                cur_over = existing.get("over_odds")
+                                if cur_over is None or over_price > cur_over:
+                                    existing["over_odds"] = over_price
+                            # Keep best under odds (highest/least negative)
+                            if under_price is not None:
+                                cur_under = existing.get("under_odds")
+                                if cur_under is None or under_price > cur_under:
+                                    existing["under_odds"] = under_price
+
+        return props
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return {}
+
+
 def get_game_weather_espn(event_id, sport="nfl"):
     """
     Fetches weather data from ESPN game summary (gameInfo.weather).

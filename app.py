@@ -18,7 +18,7 @@ from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from constants import ML_THRESHOLDS, DATA_CONFIDENCE_LEVELS, wilson_interval
 from game_scanner import (
     scan_all_games, get_game_props, get_top_props, get_top_props_with_ev,
-    classify_game_slot, _build_action_string,
+    get_prop_ev_analysis, classify_game_slot, _build_action_string,
 )
 import tracker
 import bet_tracker
@@ -627,6 +627,143 @@ def api_ev_player_props():
         print(f"[api_ev_player_props] Error: {traceback.format_exc()}", flush=True)
         # Return empty props instead of 500 error (graceful degradation)
         return jsonify({"success": True, "props": [], "error": str(e)})
+
+
+@app.route("/api/prop-ev", methods=["GET"])
+@require_auth
+def api_prop_ev():
+    """Prop EV Engine — variance-based probability + actual market odds → true EV."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba",):
+            return jsonify({"success": True, "props": []})
+
+        # Check persistent cache (10 min TTL)
+        import cache_manager
+        supabase = cache_manager._get_supabase()
+        if supabase:
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+                result = (
+                    supabase.table("props_cache")
+                    .select("*")
+                    .eq("sport", f"{sport}_prop_ev")
+                    .gte("created_at", cutoff.isoformat())
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    import json
+                    cached = json.loads(result.data[0]["results"])
+                    return jsonify({"success": True, "props": cached, "cached": True})
+            except Exception:
+                pass
+
+        # Cache miss — compute fresh
+        props = get_prop_ev_analysis(sport)
+
+        # Strip recent_games from response (too large for JSON)
+        for p in props:
+            p.pop("recent_games", None)
+
+        # Store in cache
+        if supabase:
+            try:
+                import json
+                supabase.table("props_cache").insert({
+                    "sport": f"{sport}_prop_ev",
+                    "results": json.dumps(props),
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }).execute()
+            except Exception:
+                pass
+
+        return jsonify({"success": True, "props": props, "cached": False})
+    except Exception as e:
+        import traceback
+        print(f"[api_prop_ev] Error: {traceback.format_exc()}", flush=True)
+        return jsonify({"success": True, "props": [], "error": str(e)})
+
+
+@app.route("/api/prop-ev/metrics", methods=["GET"])
+@require_auth
+def api_prop_ev_metrics():
+    """Prop EV metrics — hit rate, avg EV, CLV, by stat type and tier."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+
+        # Get all graded prop bets with EV data
+        all_bets = bet_tracker.get_tracked_bets("", sport=sport)
+        # Filter: prop bets with model_probability set
+        prop_bets = [b for b in all_bets if b.get("bet_type") == "prop"
+                     and b.get("model_probability") is not None]
+        graded = [b for b in prop_bets if b.get("result") in ("WIN", "LOSS", "PUSH")]
+
+        total = len(graded)
+        wins = sum(1 for b in graded if b["result"] == "WIN")
+        losses = sum(1 for b in graded if b["result"] == "LOSS")
+        pushes = sum(1 for b in graded if b["result"] == "PUSH")
+        hit_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
+
+        # Average EV at bet time
+        ev_vals = [b.get("expected_value", 0) for b in graded if b.get("expected_value") is not None]
+        avg_ev = round(sum(ev_vals) / len(ev_vals), 2) if ev_vals else None
+
+        # Average edge
+        edge_vals = [(b.get("model_probability", 0) - b.get("implied_probability", 52.4))
+                     for b in graded
+                     if b.get("model_probability") is not None and b.get("implied_probability") is not None]
+        avg_edge = round(sum(edge_vals) / len(edge_vals), 1) if edge_vals else None
+
+        # Average CLV
+        clv_vals = [b.get("clv_prob_delta") for b in graded if b.get("clv_prob_delta") is not None]
+        avg_clv = round(sum(clv_vals) / len(clv_vals), 2) if clv_vals else None
+
+        # By stat type
+        by_stat = {}
+        for b in graded:
+            st = b.get("stat_type", "Unknown")
+            if st not in by_stat:
+                by_stat[st] = {"wins": 0, "losses": 0, "pushes": 0}
+            if b["result"] == "WIN":
+                by_stat[st]["wins"] += 1
+            elif b["result"] == "LOSS":
+                by_stat[st]["losses"] += 1
+            elif b["result"] == "PUSH":
+                by_stat[st]["pushes"] += 1
+
+        by_stat_list = []
+        for st, g in by_stat.items():
+            t = g["wins"] + g["losses"]
+            by_stat_list.append({
+                "stat_type": st,
+                "wins": g["wins"],
+                "losses": g["losses"],
+                "pushes": g["pushes"],
+                "total": t,
+                "hit_rate": round(g["wins"] / t * 100, 1) if t > 0 else 0,
+            })
+
+        return jsonify({
+            "success": True,
+            "metrics": {
+                "total_graded": total,
+                "wins": wins,
+                "losses": losses,
+                "pushes": pushes,
+                "hit_rate": hit_rate,
+                "avg_ev": avg_ev,
+                "avg_edge": avg_edge,
+                "avg_clv": avg_clv,
+                "pending": len([b for b in prop_bets if b.get("result") == "PENDING"]),
+                "by_stat_type": by_stat_list,
+            },
+        })
+    except Exception as e:
+        import traceback
+        print(f"[api_prop_ev_metrics] Error: {traceback.format_exc()}", flush=True)
+        return jsonify({"success": False, "error": str(e)})
 
 
 @app.route("/api/predict", methods=["POST"])

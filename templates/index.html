@@ -386,6 +386,7 @@
                 <button type="button" class="ev-tab active" data-ev-tab="dashboard">Dashboard</button>
                 <button type="button" class="ev-tab" data-ev-tab="predictions">Predictions</button>
                 <button type="button" class="ev-tab" data-ev-tab="player-props">Player Props</button>
+                <button type="button" class="ev-tab" data-ev-tab="prop-ev">Prop EV</button>
             </div>
 
             <div id="ev-panel-dashboard" class="ev-panel">
@@ -420,6 +421,22 @@
                     <p>Scanning for player props...</p>
                 </div>
                 <div id="ev-props-results"></div>
+            </div>
+
+            <div id="ev-panel-prop-ev" class="ev-panel hidden">
+                <div class="prop-ev-toolbar">
+                    <div class="prop-ev-filter-toggle">
+                        <button type="button" class="prop-ev-filter-btn active" data-prop-ev-filter="all">All +EV</button>
+                        <button type="button" class="prop-ev-filter-btn" data-prop-ev-filter="strong">Strong Only</button>
+                    </div>
+                    <button type="button" class="ev-refresh-btn" id="prop-ev-refresh-btn">Refresh</button>
+                </div>
+                <div id="prop-ev-summary"></div>
+                <div id="prop-ev-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Running Prop EV analysis...</p>
+                </div>
+                <div id="prop-ev-results"></div>
             </div>
         </section>
 
