@@ -13,7 +13,7 @@ from api_client import (
     get_team_recent_results, is_game_stale,
     check_back_to_back, get_previous_matchup,
     get_odds_comparison,
-    get_team_roster_leaders, get_team_defensive_stats,
+    get_team_roster_leaders, get_team_defensive_stats, get_team_stats,
     get_player_game_log, get_player_props_odds,
 )
 import tracker
@@ -24,16 +24,48 @@ from prism import calculate_prism_projection, get_league_defensive_average
 from rank_analysis import (
     _get_rank_tier, _detect_rank_scam, _detect_spread_discrepancy,
 )
-from constants import get_max_score, get_recommendation, ML_THRESHOLDS, NBA_UNVALIDATED_CAPS
+from constants import get_max_score, get_recommendation, ML_THRESHOLDS, NBA_UNVALIDATED_CAPS, UNVALIDATED_SPORTS
 from calibration import get_calibrated_cover_pct
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
+    _analyze_overunder,
     _get_feedback_adjustment, _analyze_ats_record, _analyze_public_betting,
     _analyze_back_to_back, _analyze_head_to_head, _analyze_home_away_split,
     _detect_vegas_trap,
     _calculate_score, _determine_lean, _fmt_spread,
 )
+
+
+def compute_kelly_sizing(cover_pct, recommendation, sport="nba", ev_model=None):
+    """Half-Kelly bet sizing. Returns {kelly_fraction, kelly_pct, suggested_units} or None."""
+    if recommendation == "MONITOR" or cover_pct is None:
+        return None
+    # No Kelly without EV model for unvalidated sports (coin flip OOS)
+    if sport in UNVALIDATED_SPORTS and not (ev_model and ev_model.get("active")):
+        return None
+    # Use EV probability if available, else calibrated cover_pct
+    p = (ev_model["probability"] / 100.0) if (ev_model and ev_model.get("active") and ev_model.get("probability")) else (cover_pct / 100.0)
+    b = 100.0 / 110.0  # -110 payout
+    q = 1.0 - p
+    full_kelly = (p * b - q) / b
+    if full_kelly <= 0:
+        return None
+    half_kelly = full_kelly / 2.0
+    # Map to units: 1.5% bankroll = 1 unit, round to 0.5u, cap 0.5-3u
+    raw = half_kelly * 100 / 1.5
+    units = round(raw * 2) / 2
+    units = max(0.5, min(3.0, units))
+    # Cap by recommendation tier
+    if recommendation == "LEAN":
+        units = min(units, 1.0)
+    elif recommendation == "CONFIDENT":
+        units = min(units, 2.0)
+    return {
+        "kelly_fraction": round(half_kelly, 4),
+        "kelly_pct": round(half_kelly * 100, 2),
+        "suggested_units": units,
+    }
 
 
 def classify_game_slot(game_date_str, day_of_week, sport, is_first_game=False,
@@ -302,15 +334,6 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         "opening_spread": opening_spread,
     }
 
-    # Historical accuracy from backtesting (NBA V4 tuned data)
-    if sport == "nba" and recommendation != "MONITOR":
-        if score >= 10:
-            result["historical_accuracy"] = 68.9
-            result["historical_sample_size"] = 29
-        elif score >= 5:
-            result["historical_accuracy"] = 62.7
-            result["historical_sample_size"] = 51
-
     # Venue for NHL, CFB, CBB, and NFL
     if sport in ("nhl", "cfb", "cbb", "nfl"):
         result["venue_name"] = game.get("venue_name", "")
@@ -327,6 +350,10 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         if spread_discrepancy["is_discrepancy"]:
             result["spread_discrepancy"] = spread_discrepancy
 
+    # O/U data (all sports)
+    if nfl_overunder.get("applies"):
+        result["overunder"] = nfl_overunder
+
     # NFL-specific data
     if sport == "nfl":
         result["slot_type"] = slot_type
@@ -337,8 +364,6 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
             result["weather_alerts"] = nfl_weather.get("alerts", [])
         if nfl_trend.get("applies"):
             result["trend_discrepancy"] = nfl_trend
-        if nfl_overunder.get("applies"):
-            result["overunder"] = nfl_overunder
 
     # Factor badges
     if b2b_result["b2b_bonus"] or b2b_result["b2b_penalty"]:
@@ -351,6 +376,62 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         result["head_to_head"] = h2h_result
     if vegas_trap_result["is_vegas_trap"]:
         result["vegas_trap"] = vegas_trap_result
+
+    return result
+
+
+def _detect_pace_mismatch(home_stats, away_stats, home_team, away_team, sport="nba"):
+    """
+    Detect extreme pace gap between two teams.
+    Pace proxy = (avgPoints + avgPointsAgainst) / 2, or avgPoints only as fallback.
+    """
+    result = {"is_mismatch": False}
+    if not home_stats and not away_stats:
+        return result
+
+    def _pace(stats):
+        if not stats:
+            return None
+        # Prefer real possessions estimate: FGA - OREB + TOV + 0.44 * FTA
+        fga = stats.get("avgFieldGoalsAttempted")
+        fta = stats.get("avgFreeThrowsAttempted")
+        oreb = stats.get("avgOffensiveRebounds")
+        tov = stats.get("avgTurnovers")
+        if fga and fta and oreb is not None and tov is not None:
+            return round(fga - oreb + tov + 0.44 * fta, 1)
+        # Fallback: points-based proxy
+        pts_for = stats.get("avgPoints") or stats.get("avgPointsFor")
+        pts_against = stats.get("avgPointsAgainst")
+        if pts_for and pts_against:
+            return round((pts_for + pts_against) / 2, 1)
+        if pts_for:
+            return round(pts_for, 1)
+        return None
+
+    home_pace = _pace(home_stats)
+    away_pace = _pace(away_stats)
+    if home_pace is None or away_pace is None:
+        return result
+
+    gap = round(abs(home_pace - away_pace), 1)
+    threshold = 3.0 if sport == "nhl" else 5.0
+
+    if gap >= threshold:
+        if home_pace > away_pace:
+            fast_team, slow_team = home_team, away_team
+            fast_pace, slow_pace = home_pace, away_pace
+        else:
+            fast_team, slow_team = away_team, home_team
+            fast_pace, slow_pace = away_pace, home_pace
+        return {
+            "is_mismatch": True,
+            "fast_team": fast_team,
+            "slow_team": slow_team,
+            "fast_pace": fast_pace,
+            "slow_pace": slow_pace,
+            "gap": gap,
+            "combined_pace": round((home_pace + away_pace) / 2, 1),
+        }
 
     return result
 
@@ -431,8 +512,10 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         b2b_away_future = None
         h2h_future = None
         nfl_trend_future = None
-        nfl_ou_future = None
         nfl_weather_future = None
+        ou_future = None
+        home_stats_future = None
+        away_stats_future = None
 
         if not lightweight:
             if sport in ("nba", "nhl") and home_team_id and away_team_id:
@@ -445,8 +528,18 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             if sport == "nfl":
                 if slot_type == "vegas" and home_team_id and away_team_id:
                     nfl_trend_future = api_pool.submit(_analyze_nfl_trend_discrepancy, home_team_id, away_team_id)
-                    nfl_ou_future = api_pool.submit(_analyze_nfl_overunder, event_id, home_team_id, away_team_id)
                 nfl_weather_future = api_pool.submit(_analyze_nfl_weather, game, event_id)
+
+            # O/U analysis — validated sports always, unvalidated only on vegas slots
+            if home_team_id and away_team_id:
+                _run_ou = sport not in UNVALIDATED_SPORTS or slot_type in ("vegas", "trap")
+                if _run_ou:
+                    ou_future = api_pool.submit(_analyze_overunder, event_id, home_team_id, away_team_id, sport)
+
+            # Team stats for pace mismatch detection
+            if home_team_id and away_team_id:
+                home_stats_future = api_pool.submit(get_team_stats, home_team_id, sport)
+                away_stats_future = api_pool.submit(get_team_stats, away_team_id, sport)
 
         # ── Collect spread result ──
         opening, current = spread_future.result()
@@ -564,10 +657,12 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         # NFL parallel results
         if nfl_trend_future:
             nfl_trend = nfl_trend_future.result()
-        if nfl_ou_future:
-            nfl_overunder = nfl_ou_future.result()
         if nfl_weather_future:
             nfl_weather = nfl_weather_future.result()
+
+        # O/U result (all sports)
+        if ou_future:
+            nfl_overunder = ou_future.result()
 
         # ATS + public betting + feedback — cheap (local DB / pre-fetched data)
         ats_result = _analyze_ats_record(lean_team, sport)
@@ -578,6 +673,13 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
         # PRISM Player Props — now loaded on-demand via /api/props
         # (removed from scan loop to speed up Quick Picks)
+
+    # Pace mismatch detection (uses team stats from parallel fetch)
+    pace_mismatch = {"is_mismatch": False}
+    if not lightweight:
+        home_stats = home_stats_future.result() if home_stats_future else None
+        away_stats = away_stats_future.result() if away_stats_future else None
+        pace_mismatch = _detect_pace_mismatch(home_stats, away_stats, home_team, away_team, sport)
 
     # Calculate score and cover percentage
     rank_scam_applies = rank_scam.get("is_rank_scam", False)
@@ -655,12 +757,44 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     if ev_model_data:
         result["ev_model"] = ev_model_data
 
-    # Per-sport validation badge
-    from constants import SPORT_VALIDATION_STATUS
-    _vs = SPORT_VALIDATION_STATUS.get(sport, {})
-    result["model_status"] = _vs.get("badge", "UNKNOWN")
-    result["model_status_text"] = _vs.get("text", "")
-    result["model_status_class"] = _vs.get("css_class", "")
+    if pace_mismatch.get("is_mismatch"):
+        result["pace_mismatch"] = pace_mismatch
+
+    # ── Kelly Criterion bet sizing ────────────────────────────────────
+    kelly_data = compute_kelly_sizing(cover_pct_cal or cover_pct, recommendation, sport=sport, ev_model=ev_model_data)
+    if kelly_data:
+        result["kelly"] = kelly_data
+
+    # ── Dynamic validation gate ──────────────────────────────────────
+    # Cap recommendations from models that don't beat breakeven OOS.
+    try:
+        from model_selection import get_validation_tier
+        tier, best_oos, best_model = get_validation_tier(sport)
+        if tier == "degraded" and recommendation == "STRONG PLAY":
+            recommendation = "LEAN"
+            result["recommendation"] = recommendation
+            # Recompute Kelly with capped recommendation
+            kelly_data = compute_kelly_sizing(cover_pct_cal or cover_pct, "LEAN", sport=sport, ev_model=ev_model_data)
+            result["kelly"] = kelly_data if kelly_data else result.pop("kelly", None)
+    except Exception:
+        tier, best_oos, best_model = "degraded", None, None
+
+    # Per-sport validation badge (dynamic from model comparison, static fallback)
+    from constants import SPORT_VALIDATION_STATUS, VALIDATION_TIERS
+    tier_cfg = VALIDATION_TIERS.get(tier, {})
+    if best_oos is not None:
+        result["model_status"] = tier_cfg.get("label", "UNKNOWN")
+        result["model_status_text"] = f"{tier_cfg.get('label', '?')} \u2014 {best_oos:.0f}% OOS ({best_model or '?'})"
+        result["model_status_class"] = tier_cfg.get("css_class", "")
+    else:
+        _vs = SPORT_VALIDATION_STATUS.get(sport, {})
+        result["model_status"] = _vs.get("badge", "UNKNOWN")
+        result["model_status_text"] = _vs.get("text", "")
+        result["model_status_class"] = _vs.get("css_class", "")
+
+    result["validation_tier"] = tier
+    result["best_model_type"] = best_model
+    result["best_oos_accuracy"] = best_oos
     if sport == "nba":
         result["crossed_unvalidated"] = crossed_unvalidated
 
@@ -723,8 +857,8 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as prism_pool:
         home_leaders_f = prism_pool.submit(get_team_roster_leaders, home_team_id, sport=sport, limit=3)
         away_leaders_f = prism_pool.submit(get_team_roster_leaders, away_team_id, sport=sport, limit=3)
-        home_def_f = prism_pool.submit(get_team_defensive_stats, home_team_id, sport=sport)
-        away_def_f = prism_pool.submit(get_team_defensive_stats, away_team_id, sport=sport)
+        home_stats_f = prism_pool.submit(get_team_stats, home_team_id, sport=sport)
+        away_stats_f = prism_pool.submit(get_team_stats, away_team_id, sport=sport)
 
         # Only fetch if not pre-supplied
         game_total_f = None
@@ -739,8 +873,8 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
 
         home_leaders = home_leaders_f.result()
         away_leaders = away_leaders_f.result()
-        home_def = home_def_f.result()
-        away_def = away_def_f.result()
+        home_team_stats = home_stats_f.result()
+        away_team_stats = away_stats_f.result()
         if game_total_f is not None:
             game_total = game_total_f.result()
         if home_b2b_f is not None:
@@ -772,8 +906,8 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
 
     league_avg_def = get_league_defensive_average(sport)
 
-    # Pre-map defensive stats by team_id
-    def_by_team = {home_team_id: home_def, away_team_id: away_def}
+    # Pre-map full team stats by team_id (used for matchup multipliers)
+    stats_by_team = {home_team_id: home_team_stats, away_team_id: away_team_stats}
 
     # ── Fetch all game logs in parallel ──
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as log_pool:
@@ -797,9 +931,9 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
         if player.get("ppg", 0) <= 0:
             continue
 
-        # Get opponent defensive stats (already fetched)
-        opp_def = def_by_team.get(player["_opp_team_id"])
-        opp_def_rating = opp_def.get("pts_allowed_per_game") if opp_def else None
+        # Get opponent stats (full team stats, already fetched)
+        opp_stats = stats_by_team.get(player["_opp_team_id"]) or {}
+        opp_def_rating = opp_stats.get("avgPointsAgainst") or opp_stats.get("pts_allowed_per_game")
 
         # Get game log (already fetched in parallel)
         recent_games = game_log_futures[player_name].result() if player_name in game_log_futures else None
@@ -844,6 +978,7 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 slot_type=slot_type,
                 sport=sport,
                 player_rank=player.get("_rank", 0),
+                opponent_stats=opp_stats,
             )
 
             if proj is None:
@@ -884,7 +1019,7 @@ def get_top_props(sport="nba"):
     Fetch today's games and run PRISM analysis for ALL games in parallel.
     Returns a flat list of prop dicts sorted by confidence, each tagged with matchup info.
     """
-    if sport != "nba":
+    if sport not in ("nba", "cbb"):
         return []
 
     games = get_todays_games(sport)
@@ -932,7 +1067,7 @@ def get_game_props(event_id, sport="nba"):
     Returns:
         List of prop signal dicts, or empty list on failure.
     """
-    if sport != "nba":
+    if sport not in ("nba", "cbb"):
         return []
 
     # Find the game across today + tomorrow
@@ -967,10 +1102,13 @@ def get_game_props(event_id, sport="nba"):
     if game_date_str:
         try:
             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-            classify_dt = game_dt - timedelta(hours=8)  # PST for NBA
+            if sport == "cbb":
+                classify_dt = game_dt - timedelta(hours=5)  # EST for CBB
+            else:
+                classify_dt = game_dt - timedelta(hours=8)  # PST for NBA
             hour, minute = classify_dt.hour, classify_dt.minute
             day_of_week = classify_dt.strftime("%A")
-            slot_type = classify_slot(day_of_week, hour, minute)
+            slot_type = classify_slot(day_of_week, hour, minute, sport=sport)
         except (ValueError, TypeError):
             pass
 

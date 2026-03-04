@@ -78,9 +78,21 @@ def init_tracked_bets_db():
             created_at TEXT NOT NULL,
             graded_at TEXT,
             notes TEXT,
+            closing_line REAL,
+            clv REAL,
+            clv_direction INTEGER,
+            kelly_fraction REAL,
+            suggested_units REAL,
             UNIQUE(user_email, event_id, bet_type, player_name, stat_type)
         )
     """)
+    # Migrate existing tables: add new columns if they don't exist yet
+    for col_def in ("closing_line REAL", "clv REAL", "clv_direction INTEGER",
+                    "kelly_fraction REAL", "suggested_units REAL"):
+        try:
+            cur.execute(f"ALTER TABLE {TABLE} ADD COLUMN {col_def}")
+        except Exception:
+            pass  # Column already exists
     conn.commit()
     cur.close()
     conn.close()
@@ -118,6 +130,8 @@ def save_tracked_bets(bets, user_email):
             "edge": b.get("edge"),
             "confidence": b.get("confidence"),
             "signal": b.get("signal"),
+            "kelly_fraction": b.get("kelly_fraction"),
+            "suggested_units": b.get("suggested_units"),
             "result": "PENDING",
             "created_at": now,
         })
@@ -138,8 +152,9 @@ def save_tracked_bets(bets, user_email):
                      home_team, away_team, lean_team, spread_at_pick,
                      action, recommendation, cover_pct, slot_type,
                      player_name, stat_type, prop_line, prop_direction,
-                     projection, edge, confidence, signal, result, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     projection, edge, confidence, signal,
+                     kelly_fraction, suggested_units, result, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_email, event_id, bet_type, player_name, stat_type)
                 DO UPDATE SET
                     spread_at_pick = excluded.spread_at_pick,
@@ -152,7 +167,9 @@ def save_tracked_bets(bets, user_email):
                     projection = excluded.projection,
                     edge = excluded.edge,
                     confidence = excluded.confidence,
-                    signal = excluded.signal
+                    signal = excluded.signal,
+                    kelly_fraction = excluded.kelly_fraction,
+                    suggested_units = excluded.suggested_units
             """, (
                 r["user_email"], r["bet_type"], r["sport"], r["event_id"],
                 r["game_date"], r["home_team"], r["away_team"], r["lean_team"],
@@ -160,6 +177,7 @@ def save_tracked_bets(bets, user_email):
                 r["cover_pct"], r["slot_type"], r["player_name"],
                 r["stat_type"], r["prop_line"], r["prop_direction"],
                 r["projection"], r["edge"], r["confidence"], r["signal"],
+                r["kelly_fraction"], r["suggested_units"],
                 r["result"], r["created_at"],
             ))
         conn.commit()
@@ -373,6 +391,13 @@ def get_tracked_dashboard(user_email, sport=None):
     prop_decided = [b for b in decided if b["bet_type"] == "prop"]
     by_stat = _aggregate_by_field(prop_decided, "stat_type")
 
+    # CLV metrics (spread bets with CLV data)
+    clv_bets = [b for b in all_bets if b.get("bet_type") == "spread" and b.get("clv") is not None]
+    clv_total = len(clv_bets)
+    avg_clv = round(sum(b["clv"] for b in clv_bets) / clv_total, 2) if clv_total else None
+    beat_close = sum(1 for b in clv_bets if b.get("clv_direction") == 1)
+    beat_close_rate = round(beat_close / clv_total * 100, 1) if clv_total else None
+
     return {
         "overall": {
             "wins": w,
@@ -384,6 +409,11 @@ def get_tracked_dashboard(user_email, sport=None):
             "win_rate_ci": {"ci_lower": ci[0], "ci_upper": ci[1]},
             "roi": roi,
             "streak": streak,
+        },
+        "clv": {
+            "avg_clv": avg_clv,
+            "beat_close_rate": beat_close_rate,
+            "clv_total": clv_total,
         },
         "by_type": by_type,
         "by_sport": by_sport,
@@ -469,3 +499,141 @@ def delete_tracked_bet(bet_id, user_email):
         cur.close()
         conn.close()
         return deleted
+
+
+# ─── grade_all_tracked_bets ──────────────────────────────────────────────────
+
+def grade_all_tracked_bets():
+    """Grade all PENDING bets for ALL users. Called by daily scan."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Get distinct user emails with PENDING bets
+    if _use_supabase():
+        sb = _get_supabase()
+        resp = sb.table(TABLE).select("user_email").eq("result", "PENDING").execute()
+        emails = list(set(r["user_email"] for r in (resp.data or [])))
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(f"SELECT DISTINCT user_email FROM {TABLE} WHERE result = 'PENDING'")
+        emails = [r[0] for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    total_graded = 0
+    total_wins = 0
+    total_losses = 0
+    total_pushes = 0
+    total_not_final = 0
+
+    for email in emails:
+        try:
+            result = grade_tracked_bets(email)
+            total_graded += result.get("graded", 0)
+            total_wins += result.get("wins", 0)
+            total_losses += result.get("losses", 0)
+            total_pushes += result.get("pushes", 0)
+            total_not_final += result.get("not_final", 0)
+        except Exception as exc:
+            logger.warning("[bet_tracker] grade failed for %s: %s", email, exc)
+
+    summary = {
+        "graded": total_graded,
+        "wins": total_wins,
+        "losses": total_losses,
+        "pushes": total_pushes,
+        "not_final": total_not_final,
+        "users_graded": len(emails),
+    }
+    if total_graded > 0:
+        logger.info("[bet_tracker] Auto-graded %d bets for %d users: %dW/%dL/%dP",
+                     total_graded, len(emails), total_wins, total_losses, total_pushes)
+    return summary
+
+
+# ─── fetch_closing_lines_for_bets ────────────────────────────────────────────
+
+def fetch_closing_lines_for_bets(sport=None):
+    """Fetch closing lines and compute CLV for all PENDING spread bets missing closing_line."""
+    import logging
+    from tracker import _compute_clv, _fetch_odds_api_lines, _normalize_team_name
+    from api_client import get_game_spread
+
+    logger = logging.getLogger(__name__)
+    ODDS_SPORT_KEYS = {"nba", "nhl", "nfl", "cfb", "cbb"}
+    sports_to_fetch = [sport] if sport else list(ODDS_SPORT_KEYS)
+    updated = 0
+
+    for sp in sports_to_fetch:
+        # Fetch odds API lines once per sport
+        try:
+            odds_lines = _fetch_odds_api_lines(sp)
+        except Exception:
+            odds_lines = {}
+
+        # Get PENDING spread bets without closing_line
+        if _use_supabase():
+            sb = _get_supabase()
+            q = sb.table(TABLE).select("*").eq("result", "PENDING").eq("bet_type", "spread").is_("closing_line", "null").eq("sport", sp)
+            rows = q.execute().data or []
+        else:
+            conn = _get_sqlite()
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'spread' AND closing_line IS NULL AND sport = ?",
+                (sp,)
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            conn.close()
+
+        for row in rows:
+            home_norm = _normalize_team_name(row["home_team"])
+            away_norm = _normalize_team_name(row["away_team"])
+            matchup_key = f"{home_norm}|{away_norm}"
+
+            closing = odds_lines.get(matchup_key)
+
+            # Fallback: ESPN spread
+            if closing is None:
+                try:
+                    _, espn_current = get_game_spread(row["event_id"], sp)
+                    if espn_current is not None:
+                        closing = espn_current
+                except Exception:
+                    pass
+
+            if closing is None:
+                continue
+
+            line_at_pick = row.get("spread_at_pick")
+            clv, clv_dir = _compute_clv(line_at_pick, closing, row.get("lean_team"), row["home_team"])
+
+            _update_bet_clv(row["id"], closing, clv, clv_dir)
+            updated += 1
+
+    if updated > 0:
+        logger.info("[bet_tracker] CLV updated for %d tracked bets", updated)
+    return {"updated": updated}
+
+
+def _update_bet_clv(bet_id, closing_line, clv, clv_direction):
+    """Update a single bet's closing line and CLV data."""
+    if _use_supabase():
+        sb = _get_supabase()
+        update = {"closing_line": closing_line}
+        if clv is not None:
+            update["clv"] = clv
+            update["clv_direction"] = clv_direction
+        sb.table(TABLE).update(update).eq("id", bet_id).execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE {TABLE} SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
+            (closing_line, clv, clv_direction, bet_id)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()

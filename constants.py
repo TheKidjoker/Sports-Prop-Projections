@@ -123,6 +123,15 @@ SPORT_VALIDATION_STATUS = {
     "cfb": {"badge": "UNVALIDATED",  "css_class": "badge-unvalidated",  "text": "UNVALIDATED \u2014 No OOS data"},
 }
 
+# ─── Validation Tier Configuration ─────────────────────────────────────────
+# Dynamic tiers based on best OOS accuracy across rules + EV models.
+VALIDATION_TIERS = {
+    "validated": {"min_oos": 55.0, "css_class": "badge-validated", "label": "VALIDATED"},
+    "caution":   {"min_oos": 52.4, "css_class": "badge-caution",   "label": "CAUTION"},
+    "degraded":  {"min_oos": 0.0,  "css_class": "badge-experimental", "label": "DEGRADED"},
+}
+BREAKEVEN_RATE = 52.38  # -110 standard vig breakeven
+
 
 def wilson_interval(wins, total, z=1.96):
     """
@@ -308,6 +317,19 @@ NBA_UNVALIDATED_CAPS = {
     "feedback": 0,         # zero permanently (circular dependency)
 }
 
+CBB_UNVALIDATED_CAPS = {
+    "vegas_trap": 2,
+    "trell": 3,
+    "public_betting": 1,
+    "feedback": 0,
+}
+
+UNVALIDATED_SPORTS = {"nba", "cbb"}
+
+
+# ─── Signal Decay Classification ──────────────────────────────────────────
+# How quickly each factor's signal degrades after the scan was produced.
+# "fast" = line already moved, "slow" = changes over hours, "none" = schedule fact.
 
 EV_CONFIG = {
     "auc_gate": 0.58,               # Minimum AUC-ROC to activate model (raised from 0.54)

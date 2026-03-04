@@ -105,6 +105,13 @@ body {
     background: var(--text-primary);
 }
 
+.nav-logo {
+    height: 32px;
+    width: auto;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
 .nav-title {
     font-size: 1rem;
     font-weight: 600;
@@ -530,6 +537,22 @@ button[type="submit"]:disabled {
     animation: sonar-dot-glow 2s ease-in-out infinite;
 }
 
+.sonar-logo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 60px;
+    height: auto;
+    transform: translate(-50%, -50%);
+    filter: drop-shadow(0 0 12px rgba(200, 30, 30, 0.5));
+    animation: sonar-logo-pulse 2s ease-in-out infinite;
+}
+
+@keyframes sonar-logo-pulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.85; }
+}
+
 @keyframes sonar-sweep-spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
@@ -613,6 +636,10 @@ button[type="submit"]:disabled {
 .sonar-lg .sonar-dot {
     width: 10px;
     height: 10px;
+}
+
+.sonar-lg .sonar-logo {
+    width: 80px;
 }
 
 .scan-sonar .sonar-text {
@@ -1040,6 +1067,11 @@ button[type="submit"]:disabled {
     background: rgba(255, 152, 0, 0.12);
     color: var(--accent-orange);
     border: 1px solid rgba(255, 152, 0, 0.25);
+}
+.scan-validation-badge.badge-caution {
+    background: rgba(255, 235, 59, 0.12);
+    color: #ffe082;
+    border: 1px solid rgba(255, 235, 59, 0.25);
 }
 .scan-validation-badge.badge-limited,
 .scan-validation-badge.badge-unvalidated {
@@ -1847,6 +1879,20 @@ button[type="submit"]:disabled {
     text-align: center;
     min-height: calc(100vh - var(--nav-height) - var(--ticker-height) - 3rem);
     padding: 2rem 1rem;
+}
+
+.hero-logo {
+    width: 220px;
+    height: auto;
+    margin-bottom: 1.5rem;
+    animation: hero-logo-spin 8s ease-in-out infinite;
+    filter: drop-shadow(0 0 20px rgba(200, 30, 30, 0.4));
+}
+
+@keyframes hero-logo-spin {
+    0%   { transform: rotateY(0deg); }
+    25%  { transform: rotateY(360deg); }
+    100% { transform: rotateY(360deg); }
 }
 
 .hero-tagline {
@@ -3178,6 +3224,63 @@ button[type="submit"]:disabled {
     opacity: 0.85;
 }
 
+/* ── No Validated Edge Banner ── */
+.scan-no-edge-banner {
+    background: rgba(255, 165, 0, 0.1);
+    border-left: 3px solid #ffa500;
+    padding: 4px 8px;
+    margin: 4px 0;
+    font-size: 0.78rem;
+    color: #ffa500;
+}
+
+/* ── Line Shop ── */
+.line-shop-game {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    margin: 8px 0;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.line-shop-matchup {
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+}
+
+.line-shop-best {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.line-shop-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.line-shop-table th {
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.line-shop-table td {
+    padding: 4px 8px;
+}
+
+.line-best {
+    color: #00ff88;
+    font-weight: bold;
+}
+
 /* =========================================
    Auth Gate (Login Screen)
    ========================================= */
@@ -3200,6 +3303,14 @@ button[type="submit"]:disabled {
     padding: 2.5rem 2rem;
     text-align: center;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.auth-logo {
+    width: 160px;
+    height: auto;
+    margin-bottom: 1rem;
+    animation: hero-logo-spin 8s ease-in-out infinite;
+    filter: drop-shadow(0 0 16px rgba(200, 30, 30, 0.4));
 }
 
 .auth-title {
@@ -3542,6 +3653,11 @@ button[type="submit"]:disabled {
 
     .parlay-leg-pick {
         flex-basis: 100%;
+    }
+
+    .hero-logo {
+        width: 160px;
+        margin-bottom: 1rem;
     }
 
     .hero-tagline {
@@ -4179,3 +4295,636 @@ button[type="submit"]:disabled {
         font-size: 0.7rem;
     }
 }
+
+/* =========================================
+   EV Engine
+   ========================================= */
+.evengine-section {
+    padding: 1rem;
+}
+
+.ev-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.ev-section-title {
+    color: var(--accent-green);
+    border-bottom: 2px solid var(--accent-green);
+    padding-bottom: 0.25rem;
+}
+
+.ev-sport-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.ev-sport-btn {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 20px;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ev-sport-btn:hover {
+    border-color: var(--accent-green);
+    color: var(--text-primary);
+}
+
+.ev-sport-btn.active {
+    background: var(--accent-green);
+    color: #fff;
+    border-color: var(--accent-green);
+}
+
+.ev-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-primary);
+    margin-bottom: 1.25rem;
+}
+
+.ev-tab {
+    padding: 0.6rem 1.25rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.ev-tab:hover {
+    color: var(--text-primary);
+}
+
+.ev-tab.active {
+    color: var(--accent-green);
+    border-bottom-color: var(--accent-green);
+}
+
+.ev-panel {
+    /* matches .tm-panel */
+}
+
+/* ── Status Badge ── */
+.ev-status-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.ev-status-badge {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ev-status-active {
+    background: rgba(76, 175, 80, 0.2);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+}
+
+.ev-status-inactive {
+    background: rgba(230, 57, 70, 0.15);
+    color: var(--accent-red);
+    border: 1px solid var(--accent-red);
+}
+
+.ev-status-meta {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+/* ── Stat Cards (reuses TM layout) ── */
+.ev-stat-cards {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.ev-stat-card {
+    flex: 1;
+    min-width: 90px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    text-align: center;
+}
+
+.ev-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.25rem;
+}
+
+.ev-stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* ── Training Section ── */
+.ev-training-section {
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.ev-training-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.ev-train-btn {
+    padding: 0.6rem 1.5rem;
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--accent-green);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.ev-train-btn:hover {
+    opacity: 0.85;
+}
+
+.ev-train-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ev-train-progress {
+    margin-top: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+/* ── Metrics Section ── */
+.ev-metrics-section {
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.ev-metrics-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+/* Edge Buckets Table */
+.ev-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.85rem;
+}
+
+.ev-table th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--border-primary);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ev-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+}
+
+.ev-table tr:hover {
+    background: var(--bg-elevated);
+}
+
+/* Feature Weights */
+.ev-feat-section {
+    margin-bottom: 1.25rem;
+}
+
+.ev-feat-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.ev-feat-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.82rem;
+}
+
+.ev-feat-name {
+    width: 140px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ev-feat-bar-container {
+    flex: 1;
+    height: 14px;
+    background: var(--bg-base);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.ev-feat-bar-pos {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent-green), #66bb6a);
+}
+
+.ev-feat-bar-neg {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent-red), #ef5350);
+}
+
+.ev-feat-value {
+    width: 60px;
+    flex-shrink: 0;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+/* ── Predictions Toolbar ── */
+.ev-predictions-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.ev-view-toggle {
+    display: flex;
+    border: 1px solid var(--border-primary);
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.ev-view-btn {
+    padding: 0.4rem 1rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ev-view-btn.active {
+    background: var(--accent-green);
+    color: #fff;
+}
+
+.ev-refresh-btn {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--accent-green);
+    border-radius: 20px;
+    background: transparent;
+    color: var(--accent-green);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ev-refresh-btn:hover {
+    background: rgba(76, 175, 80, 0.15);
+}
+
+/* ── Prediction Summary ── */
+.ev-prediction-summary {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.ev-summary-pos {
+    color: var(--accent-green);
+    font-weight: 600;
+}
+
+/* ── EV Detail Overlay on Cards ── */
+.ev-detail-overlay {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    border-radius: var(--radius-md);
+    background: rgba(76, 175, 80, 0.06);
+}
+
+.ev-detail-header {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent-green);
+    margin-bottom: 0.5rem;
+}
+
+.ev-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.ev-detail-item {
+    font-size: 0.8rem;
+}
+
+.ev-detail-label {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
+.ev-detail-val {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.ev-detail-rec {
+    display: inline-block;
+    margin-top: 0.25rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.ev-rec-strong {
+    background: rgba(76, 175, 80, 0.2);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+}
+
+.ev-rec-confident {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--accent-yellow);
+    border: 1px solid var(--accent-yellow);
+}
+
+.ev-rec-lean {
+    background: rgba(139, 148, 158, 0.15);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-primary);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .evengine-section {
+        padding: 0.75rem;
+    }
+    .ev-sport-bar {
+        flex-wrap: wrap;
+    }
+    .ev-stat-cards {
+        gap: 0.4rem;
+    }
+    .ev-stat-card {
+        min-width: 70px;
+        padding: 0.5rem;
+    }
+    .ev-stat-value {
+        font-size: 1rem;
+    }
+    .ev-feat-name {
+        width: 90px;
+        font-size: 0.72rem;
+    }
+    .ev-predictions-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .ev-view-toggle {
+        justify-content: center;
+    }
+    .ev-detail-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ── CLV Trend & Health ── */
+.clv-health-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.clv-health-badge {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.clv-health-edge {
+    background: rgba(76, 175, 80, 0.2);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+}
+.clv-health-neutral {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--accent-yellow);
+    border: 1px solid var(--accent-yellow);
+}
+.clv-health-declining {
+    background: rgba(230, 57, 70, 0.15);
+    color: var(--accent-red);
+    border: 1px solid var(--accent-red);
+}
+.clv-trend-arrow {
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+.clv-health-message {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+.clv-rolling-cards {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.clv-rolling-card {
+    flex: 1;
+    min-width: 90px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.8rem;
+    text-align: center;
+}
+.clv-rolling-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+.clv-rolling-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+.clv-rolling-sub {
+    font-size: 0.7rem;
+    margin-top: 0.15rem;
+}
+.clv-trend-chart-header {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+    margin-top: 0.75rem;
+}
+.clv-trend-chart {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-md);
+    padding: 0.4rem;
+    background: var(--bg-glass);
+}
+.clv-trend-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+}
+.clv-trend-date {
+    width: 42px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    text-align: right;
+}
+.clv-trend-bar-container {
+    flex: 1;
+    height: 14px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.clv-trend-bar {
+    height: 100%;
+    border-radius: 3px;
+    min-width: 2px;
+    transition: width 0.3s ease;
+}
+.clv-trend-bar-pos {
+    background: linear-gradient(90deg, rgba(76,175,80,0.5), rgba(76,175,80,0.85));
+}
+.clv-trend-bar-neg {
+    background: linear-gradient(90deg, rgba(230,57,70,0.5), rgba(230,57,70,0.85));
+}
+.clv-trend-val {
+    width: 40px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-align: right;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    .clv-rolling-cards {
+        flex-direction: column;
+    }
+    .clv-rolling-card {
+        min-width: unset;
+    }
+    .clv-health-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .clv-trend-chart {
+        max-height: 240px;
+    }
+}
+
+/* =========================================
+   CLV Badge Styles (Bet History)
+   ========================================= */
+.dash-recent-clv { font-size: 0.75rem; margin-left: 8px; }
+.clv-positive { color: var(--accent-green); font-weight: 600; }
+.clv-negative { color: var(--accent-red); }
+.clv-neutral { color: var(--text-muted); }
+
+/* =========================================
+   Kelly Unit Badge Styles (Game Cards + History)
+   ========================================= */
+.unit-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; margin-top: 4px; }
+.unit-lean { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+.unit-confident { background: rgba(0, 230, 118, 0.15); color: #00e676; }
+.unit-strong { background: rgba(255, 82, 82, 0.15); color: #ff5252; }
+.unit-kelly-detail { font-weight: 400; font-size: 0.7rem; margin-left: 4px; opacity: 0.7; }
+.dash-recent-units { font-size: 0.75rem; margin-left: 8px; font-weight: 600; color: #ffc107; }
+
+/* =========================================
+   Pace Mismatch Badge
+   ========================================= */
+.scan-pace-mismatch { background: rgba(255,165,0,0.1); border-left: 3px solid #ffa500; padding: 0.3rem 0.5rem; margin-bottom: 0.3rem; border-radius: var(--radius-sm); }
+.pace-label { font-weight: 600; font-size: 0.68rem; letter-spacing: 0.3px; text-transform: uppercase; color: #ffa500; }
+.pace-detail { font-size: 0.75rem; color: var(--text-secondary); margin-left: 4px; }
+
+/* =========================================
+   Signal Freshness Badge
+   ========================================= */
+.freshness-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; margin-left: 6px; font-weight: 600; letter-spacing: 0.3px; }
+.freshness-aging { background: rgba(255,165,0,0.15); color: #ffa500; }
+.freshness-stale { background: rgba(255,60,60,0.15); color: #ff4444; }

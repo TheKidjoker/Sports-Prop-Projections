@@ -11,7 +11,7 @@ from api_client import (
 )
 from api_odds import _match_odds_to_game
 from line_movement import score_line_movement
-from constants import get_override, UNIVERSAL_DEFAULTS, NBA_UNVALIDATED_CAPS
+from constants import get_override, UNIVERSAL_DEFAULTS, NBA_UNVALIDATED_CAPS, CBB_UNVALIDATED_CAPS
 
 
 # ─── NFL INDOOR STADIUMS ────────────────────────────────────────────────────
@@ -85,31 +85,42 @@ def _analyze_nfl_trend_discrepancy(home_team_id, away_team_id):
     return result
 
 
-def _analyze_nfl_overunder(event_id, home_team_id, away_team_id):
+_OU_THRESHOLDS = {
+    "nfl": {"high_total": 50.5, "divergence": 6, "recent_count": 4},
+    "nba": {"high_total": 230, "divergence": 10, "recent_count": 5},
+    "cbb": {"high_total": 155, "divergence": 8, "recent_count": 5},
+    "nhl": {"high_total": 6.5, "divergence": 1.0, "recent_count": 5},
+    "cfb": {"high_total": 58, "divergence": 7, "recent_count": 4},
+}
+
+
+def _analyze_overunder(event_id, home_team_id, away_team_id, sport="nfl"):
     """
     Two checks:
-    1. Flag totals above 50.5 as potential under.
-    2. Compare total to combined team scoring averages, flag 6+ point divergence.
+    1. Flag totals above sport-specific high threshold as potential under.
+    2. Compare total to combined team scoring averages, flag divergence.
 
     Returns:
         Dict with O/U analysis data.
     """
     result = {"applies": False, "flags": []}
+    thresholds = _OU_THRESHOLDS.get(sport, _OU_THRESHOLDS["nfl"])
 
-    total = get_game_overunder(event_id)
+    total = get_game_overunder(event_id, sport)
     if total is None:
         return result
 
     result["total"] = total
 
     # Check 1: high total
-    if total > 50.5:
+    if total > thresholds["high_total"]:
         result["applies"] = True
-        result["flags"].append(f"Total {total} is above 50.5 — lean UNDER")
+        result["flags"].append(f"Total {total} is above {thresholds['high_total']} — lean UNDER")
 
     # Check 2: compare to team scoring averages
-    home_results = get_team_recent_results(home_team_id, count=4)
-    away_results = get_team_recent_results(away_team_id, count=4)
+    recent_count = thresholds["recent_count"]
+    home_results = get_team_recent_results(home_team_id, count=recent_count, sport=sport)
+    away_results = get_team_recent_results(away_team_id, count=recent_count, sport=sport)
 
     if home_results and away_results:
         home_avg = sum(r["score"] for r in home_results) / len(home_results)
@@ -120,7 +131,7 @@ def _analyze_nfl_overunder(event_id, home_team_id, away_team_id):
         result["combined_avg"] = round(combined_avg, 1)
         result["divergence"] = round(divergence, 1)
 
-        if divergence >= 6:
+        if divergence >= thresholds["divergence"]:
             result["applies"] = True
             direction = "OVER" if total < combined_avg else "UNDER"
             result["flags"].append(
@@ -129,6 +140,11 @@ def _analyze_nfl_overunder(event_id, home_team_id, away_team_id):
             )
 
     return result
+
+
+def _analyze_nfl_overunder(event_id, home_team_id, away_team_id):
+    """Legacy wrapper for NFL-only callers."""
+    return _analyze_overunder(event_id, home_team_id, away_team_id, sport="nfl")
 
 
 def _analyze_nfl_weather(game, event_id):
@@ -618,7 +634,12 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if line_confirms:
         breakdown["line_movement"] = score_line_movement(line_magnitude, sport=sport)
     if trell_applies:
-        breakdown["trell"] = NBA_UNVALIDATED_CAPS["trell"] if sport == "nba" else 5
+        if sport == "nba":
+            breakdown["trell"] = NBA_UNVALIDATED_CAPS["trell"]
+        elif sport == "cbb":
+            breakdown["trell"] = CBB_UNVALIDATED_CAPS["trell"]
+        else:
+            breakdown["trell"] = 5
     if rank_scam_applies:
         breakdown["rank_scam"] = 5
     if spread_disc_applies:
@@ -626,7 +647,11 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
     if trend_disc_applies:
         breakdown["trend_discrepancy"] = 5
     if ou_disc_applies:
-        breakdown["overunder"] = 5
+        # NFL: validated +5; unvalidated sports: informational +3; others: +5
+        if sport in ("nba", "cbb"):
+            breakdown["overunder"] = 3
+        else:
+            breakdown["overunder"] = 5
     if weather_applies:
         breakdown["weather"] = 5
 
@@ -649,6 +674,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
 
     if sport == "nba":
         breakdown["public_betting"] = min(public_betting_bonus, NBA_UNVALIDATED_CAPS["public_betting"])
+    elif sport == "cbb":
+        breakdown["public_betting"] = min(public_betting_bonus, CBB_UNVALIDATED_CAPS["public_betting"])
     else:
         breakdown["public_betting"] = public_betting_bonus
     breakdown["feedback"] = feedback_adjustment
@@ -663,6 +690,8 @@ def _calculate_score(slot_type, line_confirms, trell_applies,
 
     if sport == "nba":
         breakdown["vegas_trap"] = min(vegas_trap_bonus, NBA_UNVALIDATED_CAPS["vegas_trap"])
+    elif sport == "cbb":
+        breakdown["vegas_trap"] = min(vegas_trap_bonus, CBB_UNVALIDATED_CAPS["vegas_trap"])
     else:
         breakdown["vegas_trap"] = vegas_trap_bonus
 

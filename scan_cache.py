@@ -65,7 +65,7 @@ def request_refresh(*sports):
 
 
 def _scan(sport):
-    """Run scan_all_games, cache results, sync to pick curation."""
+    """Run scan_all_games, cache results, sync to pick curation, fetch closing lines."""
     from game_scanner import scan_all_games
     import pick_curation
     try:
@@ -73,6 +73,21 @@ def _scan(sport):
         put(sport, results)
         try:
             pick_curation.sync_picks_from_scan(results, sport)
+        except Exception:
+            pass
+        # Progressively capture closing lines as games approach
+        try:
+            import tracker
+            cl_result = tracker.fetch_closing_lines(sport)
+            cl_updated = cl_result.get("updated", 0) if cl_result else 0
+            if cl_updated > 0:
+                logger.info("[scan_cache] Close lines for %s: %d updated", sport, cl_updated)
+        except Exception:
+            pass
+        # Fetch closing lines for tracked bets (bet_tracker)
+        try:
+            import bet_tracker
+            bet_tracker.fetch_closing_lines_for_bets(sport)
         except Exception:
             pass
         logger.info("[scan_cache] Refreshed %s: %d games", sport, len(results))
@@ -113,6 +128,12 @@ def _loop():
             logger.info("[scan_cache] Daily 6 AM EST refresh — scanning all sports")
             for sport in ALL_SPORTS:
                 _scan(sport)
+            # Auto-grade all tracked bets after daily scan
+            try:
+                import bet_tracker
+                bet_tracker.grade_all_tracked_bets()
+            except Exception:
+                pass
             next_daily = time.monotonic() + _seconds_until_next_daily()
             continue  # skip hourly refresh since we just did everything
 
@@ -121,3 +142,9 @@ def _loop():
             sports = list(_cache.keys())
         for sport in sports:
             _scan(sport)
+        # Auto-grade after hourly refresh to catch late-finishing games
+        try:
+            import bet_tracker
+            bet_tracker.grade_all_tracked_bets()
+        except Exception:
+            pass

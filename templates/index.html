@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Joker's Edge</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260226a">
+    <link rel="stylesheet" href="/static/style.css?v=20260303a">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
     <!-- Auth Gate -->
     <div id="auth-gate" class="auth-gate">
         <div class="auth-card">
+            <img src="/static/logo.png" alt="Joker's Edge" class="auth-logo">
             <h1 class="auth-title">Joker's Edge</h1>
             <p class="auth-subtitle">Why so serious about logging in?</p>
             <form id="auth-form" class="auth-form">
@@ -60,7 +61,7 @@
                     <div class="sonar-ring ring-2"></div>
                     <div class="sonar-ring ring-3"></div>
                     <div class="sonar-sweep"></div>
-                    <div class="sonar-dot"></div>
+                    <img src="/static/logo.png" alt="" class="sonar-logo">
                 </div>
                 <p class="sonar-text">Scanning Gotham for picks<span class="sonar-dots"></span></p>
             </div>
@@ -70,6 +71,8 @@
             <button type="button" id="ledger-btn">The Ledger</button>
 
             <button type="button" id="mybets-btn" disabled>My Bets</button>
+
+            <button type="button" id="lineshop-btn">Line Shop</button>
 
             <button type="button" id="testmodel-btn">Test Model</button>
             <div id="testmodel-loading" class="sonar-loading hidden">
@@ -81,6 +84,18 @@
                     <div class="sonar-dot"></div>
                 </div>
                 <p class="sonar-text">Loading Test Model<span class="sonar-dots"></span></p>
+            </div>
+
+            <button type="button" id="evengine-btn" disabled>EV Engine</button>
+            <div id="evengine-loading" class="sonar-loading hidden">
+                <div class="sonar-container">
+                    <div class="sonar-ring ring-1"></div>
+                    <div class="sonar-ring ring-2"></div>
+                    <div class="sonar-ring ring-3"></div>
+                    <div class="sonar-sweep"></div>
+                    <div class="sonar-dot"></div>
+                </div>
+                <p class="sonar-text">Loading EV Engine<span class="sonar-dots"></span></p>
             </div>
 
             <button type="button" id="lotto-btn">Joker's Lotto</button>
@@ -104,6 +119,7 @@
             <span></span>
             <span></span>
         </button>
+        <img src="/static/logo.png" alt="Joker's Edge" class="nav-logo">
         <span class="nav-title">Joker's Edge</span>
         <button type="button" class="nav-home-btn" id="nav-home-btn" aria-label="Go home">&#8962;</button>
         <button type="button" class="nav-logout-btn" id="nav-logout-btn" aria-label="Log out">Logout</button>
@@ -113,6 +129,7 @@
     <!-- Main content -->
     <main class="main-content">
         <section id="welcome-hero" class="welcome-hero">
+            <img src="/static/logo.png" alt="Joker's Edge" class="hero-logo">
             <h1 class="hero-tagline">Why so serious?</h1>
             <p class="hero-sub">Pick your poison. Get the last laugh.</p>
             <div class="hero-sport-grid">
@@ -230,6 +247,17 @@
             <div id="mybets-recent"></div>
         </section>
 
+        <section id="lineshop-section" class="dashboard-section hidden">
+            <div class="dashboard-header">
+                <h2 class="dashboard-title">Line Shop</h2>
+            </div>
+            <div id="lineshop-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Fetching lines...</p>
+            </div>
+            <div id="lineshop-content"></div>
+        </section>
+
         <div id="lotto-results" class="lotto-results hidden"></div>
 
         <!-- Test Model Section -->
@@ -273,6 +301,7 @@
                 <button type="button" class="tm-tab" data-tm-tab="rules">Rules Replay</button>
                 <button type="button" class="tm-tab" data-tm-tab="calibration">Calibration</button>
                 <button type="button" class="tm-tab" data-tm-tab="collect">Data Collection</button>
+                <button type="button" class="tm-tab" data-tm-tab="slots">Slot Validation</button>
                 <button type="button" class="tm-tab" data-tm-tab="metrics">Metrics</button>
             </div>
 
@@ -308,9 +337,18 @@
                 <div class="tm-collect-actions">
                     <button type="button" class="tm-action-btn" id="tm-collect-btn">Start Collection</button>
                     <button type="button" class="tm-action-btn tm-action-secondary" id="tm-features-btn">Compute Features</button>
+                    <button type="button" class="tm-action-btn tm-action-secondary" id="tm-injury-backfill-btn">Injury Backfill</button>
                 </div>
                 <div id="tm-collect-progress"></div>
                 <div id="tm-collect-status"></div>
+                <div id="tm-injury-backfill-progress"></div>
+            </div>
+
+            <div id="tm-panel-slots" class="tm-panel hidden">
+                <p class="tm-panel-desc">Statistically tests whether public vs vegas slot classification produces different dog cover rates. Uses z-test, chi-squared, and permutation test.</p>
+                <button type="button" class="tm-action-btn" id="tm-slots-btn">Run Slot Validation</button>
+                <div id="tm-slots-progress"></div>
+                <div id="tm-slots-results"></div>
             </div>
 
             <div id="tm-panel-metrics" class="tm-panel hidden">
@@ -319,6 +357,44 @@
                     <p>Loading metrics...</p>
                 </div>
                 <div id="tm-metrics-content"></div>
+            </div>
+        </section>
+
+        <!-- EV Engine Section -->
+        <section id="evengine-section" class="evengine-section hidden">
+            <div class="ev-title-row">
+                <h2 class="dashboard-title ev-section-title">EV Engine</h2>
+            </div>
+            <div class="ev-sport-bar">
+                <button type="button" class="ev-sport-btn active" data-ev-sport="nba">NBA</button>
+                <button type="button" class="ev-sport-btn" data-ev-sport="nhl">NHL</button>
+                <button type="button" class="ev-sport-btn" data-ev-sport="cbb">CBB</button>
+            </div>
+            <div class="ev-tabs">
+                <button type="button" class="ev-tab active" data-ev-tab="dashboard">Dashboard</button>
+                <button type="button" class="ev-tab" data-ev-tab="predictions">Predictions</button>
+            </div>
+
+            <div id="ev-panel-dashboard" class="ev-panel">
+                <div id="ev-model-status"></div>
+                <div id="ev-training-controls"></div>
+                <div id="ev-metrics-display"></div>
+            </div>
+
+            <div id="ev-panel-predictions" class="ev-panel hidden">
+                <div class="ev-predictions-toolbar">
+                    <div class="ev-view-toggle">
+                        <button type="button" class="ev-view-btn active" data-ev-view="all">All Games</button>
+                        <button type="button" class="ev-view-btn" data-ev-view="ev">EV Picks Only</button>
+                    </div>
+                    <button type="button" class="ev-refresh-btn" id="ev-refresh-btn">Refresh</button>
+                </div>
+                <div id="ev-predictions-summary"></div>
+                <div id="ev-predictions-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Scanning for EV predictions...</p>
+                </div>
+                <div id="ev-predictions-results"></div>
             </div>
         </section>
 
@@ -409,6 +485,6 @@
 
     </div><!-- /app-container -->
 
-    <script src="/static/app.js?v=20260226a"></script>
+    <script src="/static/app.js?v=20260303a"></script>
 </body>
 </html>

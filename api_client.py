@@ -484,6 +484,92 @@ def get_game_final_score(event_id, sport="nba"):
         return None, None, False
 
 
+def get_game_boxscore_players(event_id, sport="nba"):
+    """
+    Fetch per-player box score data from ESPN game summary.
+
+    Returns:
+        {
+            home_team: str, away_team: str,
+            home_players: [{name, minutes, points, ...}],
+            away_players: [{name, minutes, points, ...}],
+        }
+        or None on failure.
+    """
+    try:
+        url = _espn_url(sport, "summary")
+        data = _cached_request(url, params={"event": event_id}, timeout=10)
+        if data is None:
+            return None
+
+        boxscore = data.get("boxscore", {})
+        teams_data = boxscore.get("players", [])
+        if not teams_data or len(teams_data) < 2:
+            return None
+
+        # Get team names from header
+        header = data.get("header", {})
+        competitions = header.get("competitions", [])
+        home_team = away_team = ""
+        if competitions:
+            for c in competitions[0].get("competitors", []):
+                tn = c.get("team", {}).get("displayName", "")
+                if c.get("homeAway") == "home":
+                    home_team = tn
+                else:
+                    away_team = tn
+
+        result = {"home_team": home_team, "away_team": away_team,
+                  "home_players": [], "away_players": []}
+
+        for team_entry in teams_data:
+            team_name = team_entry.get("team", {}).get("displayName", "")
+            is_home = (team_name == home_team)
+            key = "home_players" if is_home else "away_players"
+
+            stats_sets = team_entry.get("statistics", [])
+            if not stats_sets:
+                continue
+
+            stat_set = stats_sets[0]
+            labels = [l.lower() for l in stat_set.get("labels", [])]
+            athletes = stat_set.get("athletes", [])
+
+            for athlete in athletes:
+                player_info = athlete.get("athlete", {})
+                name = player_info.get("displayName", "")
+                stats = athlete.get("stats", [])
+
+                if not name or not stats:
+                    continue
+
+                player = {"name": name}
+
+                # Map stats by label
+                for idx, label in enumerate(labels):
+                    if idx < len(stats):
+                        val = stats[idx]
+                        # Parse time-based stats (MIN, TOI)
+                        if label in ("min", "toi") and isinstance(val, str) and ":" in val:
+                            try:
+                                parts = val.split(":")
+                                player[label] = int(parts[0]) + int(parts[1]) / 60
+                            except (ValueError, IndexError):
+                                player[label] = 0
+                        else:
+                            try:
+                                player[label] = float(val)
+                            except (ValueError, TypeError):
+                                player[label] = val
+
+                result[key].append(player)
+
+        return result
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
 def get_team_schedule(team_id, sport="nba"):
     """
     Fetches a team's schedule from ESPN.
@@ -717,6 +803,138 @@ def get_team_defensive_stats(team_id, sport="nba"):
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None
+
+
+def get_team_stats(team_id, sport="nba"):
+    """
+    Fetch comprehensive team stats from ESPN /statistics endpoint.
+    Returns a flat dict of stat_name -> float_value, or None on failure.
+
+    Merges two data sources:
+      1. /teams/{id}/statistics — general, offensive, defensive categories
+      2. /teams/{id} record — avgPointsAgainst, avgPointsFor (team record)
+    """
+    try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
+        base = (
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams/{team_id}"
+        )
+
+        # Fetch statistics endpoint
+        stats_url = base + "/statistics"
+        stats_data = _cached_request(stats_url, timeout=10)
+
+        result = {}
+
+        if stats_data:
+            # ESPN structure: results.stats.categories[].stats[]
+            categories = []
+            results_obj = stats_data.get("results", {})
+            if isinstance(results_obj, dict):
+                stats_obj = results_obj.get("stats", {})
+                if isinstance(stats_obj, dict):
+                    categories = stats_obj.get("categories", [])
+                elif isinstance(stats_obj, list):
+                    categories = stats_obj
+            elif isinstance(results_obj, list):
+                categories = results_obj
+
+            # Also check top-level categories fallback
+            if not categories:
+                categories = stats_data.get("categories", [])
+
+            for category in categories:
+                if not isinstance(category, dict):
+                    continue
+                stat_list = category.get("stats", [])
+                for stat in stat_list:
+                    if isinstance(stat, dict):
+                        name = stat.get("name") or stat.get("abbreviation", "")
+                        value = stat.get("value")
+                        if name and value is not None:
+                            try:
+                                result[name] = float(value)
+                            except (ValueError, TypeError):
+                                pass
+
+        # Merge team record stats (avgPointsAgainst, avgPointsFor)
+        record_data = _cached_request(base, timeout=10)
+        if record_data:
+            team_data = record_data.get("team", record_data)
+            record = team_data.get("record", {})
+            items = record.get("items", [])
+            for item in items:
+                if item.get("type") == "total":
+                    for stat in item.get("stats", []):
+                        if isinstance(stat, dict):
+                            name = stat.get("name", "")
+                            value = stat.get("value")
+                            if name and value is not None and name not in result:
+                                try:
+                                    result[name] = float(value)
+                                except (ValueError, TypeError):
+                                    pass
+
+        return result if result else None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+_league_avg_cache = {}
+_league_avg_ts = {}
+
+
+def get_league_avg_stats(sport="nba"):
+    """
+    Fetch league-wide average stats by querying all teams' statistics.
+    Cached in-memory for 24 hours. Returns dict of stat averages or None.
+    """
+    import time
+    now = time.time()
+    if sport in _league_avg_cache and now - _league_avg_ts.get(sport, 0) < 86400:
+        return _league_avg_cache[sport]
+
+    try:
+        info = SPORT_MAP.get(sport, SPORT_MAP["nba"])
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/"
+            f"{info['category']}/{info['league']}/teams?limit=50"
+        )
+        data = _cached_request(url, timeout=15)
+        if not data:
+            return _league_avg_cache.get(sport)
+
+        teams = (data.get("sports", [{}])[0]
+                 .get("leagues", [{}])[0]
+                 .get("teams", []))
+        team_ids = [t.get("team", t).get("id") for t in teams if t.get("team", t).get("id")]
+
+        # Fetch stats for all teams in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {tid: pool.submit(get_team_stats, tid, sport) for tid in team_ids}
+            all_stats = {tid: f.result() for tid, f in futures.items()}
+
+        # Average key stats across all teams
+        stat_keys = ["avgRebounds", "avgSteals", "avgAssists", "avgBlocks",
+                     "avgPoints", "avgPointsAgainst", "avgTurnovers",
+                     "avgFieldGoalsAttempted", "avgFreeThrowsAttempted",
+                     "avgOffensiveRebounds"]
+        averages = {}
+        for key in stat_keys:
+            vals = [s[key] for s in all_stats.values() if s and key in s]
+            if vals:
+                averages[key] = round(sum(vals) / len(vals), 2)
+
+        if averages:
+            _league_avg_cache[sport] = averages
+            _league_avg_ts[sport] = now
+
+        return averages if averages else None
+    except Exception:
+        return _league_avg_cache.get(sport)
 
 
 # ─── Backward-compatible re-exports ──────────────────────────────────────────

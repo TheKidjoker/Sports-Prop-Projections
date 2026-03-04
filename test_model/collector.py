@@ -250,14 +250,15 @@ def _match_odds_to_game(odds_game, home_team, away_team):
 
 def fetch_odds_api_spreads(sport_key, date_iso):
     """
-    Fetch historical spreads from The Odds API for a given date.
+    Fetch historical spreads and totals from The Odds API for a given date.
 
     Args:
         sport_key: Odds API sport key (e.g., "basketball_nba")
         date_iso: ISO 8601 date string (e.g., "2024-01-15T00:00:00Z")
 
     Returns:
-        List of dicts: [{home_team, away_team, opening_spread, closing_spread}]
+        List of dicts: [{home_team, away_team, opening_spread, closing_spread,
+                         pinnacle_spread, pinnacle_total, consensus_total}]
         Empty list on error or no data.
     """
     if not ODDS_API_KEY:
@@ -267,7 +268,7 @@ def fetch_odds_api_spreads(sport_key, date_iso):
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "us",
-        "markets": "spreads",
+        "markets": "spreads,totals",
         "oddsFormat": "american",
         "date": date_iso,
     }
@@ -296,24 +297,41 @@ def fetch_odds_api_spreads(sport_key, date_iso):
             closing_spread = None
             opening_spread = None
             pinnacle_spread = None
+            pinnacle_total = None
+            all_totals = []
+
             for bk in bookmakers:
                 bk_key = bk.get("key", "")
                 markets = bk.get("markets", [])
                 for market in markets:
-                    if market.get("key") != "spreads":
-                        continue
+                    mkey = market.get("key")
                     outcomes = market.get("outcomes", [])
-                    for outcome in outcomes:
-                        if _normalize_team_name(outcome.get("name", "")) in _normalize_team_name(home) or \
-                           _normalize_team_name(home) in _normalize_team_name(outcome.get("name", "")):
-                            spread_val = outcome.get("point")
-                            if spread_val is not None:
-                                if closing_spread is None or bk_key in ("fanduel", "draftkings"):
-                                    closing_spread = float(spread_val)
-                                if opening_spread is None:
-                                    opening_spread = float(spread_val)
+
+                    if mkey == "spreads":
+                        for outcome in outcomes:
+                            if _normalize_team_name(outcome.get("name", "")) in _normalize_team_name(home) or \
+                               _normalize_team_name(home) in _normalize_team_name(outcome.get("name", "")):
+                                spread_val = outcome.get("point")
+                                if spread_val is not None:
+                                    if closing_spread is None or bk_key in ("fanduel", "draftkings"):
+                                        closing_spread = float(spread_val)
+                                    if opening_spread is None:
+                                        opening_spread = float(spread_val)
+                                    if bk_key == "pinnacle":
+                                        pinnacle_spread = float(spread_val)
+
+                    elif mkey == "totals":
+                        for outcome in outcomes:
+                            total_point = outcome.get("point")
+                            if total_point is not None:
+                                all_totals.append(float(total_point))
                                 if bk_key == "pinnacle":
-                                    pinnacle_spread = float(spread_val)
+                                    pinnacle_total = float(total_point)
+                                break  # Only need point once per book
+
+            consensus_total = None
+            if all_totals:
+                consensus_total = round(sum(all_totals) / len(all_totals), 1)
 
             if closing_spread is not None:
                 results.append({
@@ -322,6 +340,8 @@ def fetch_odds_api_spreads(sport_key, date_iso):
                     "opening_spread": opening_spread,
                     "closing_spread": closing_spread,
                     "pinnacle_spread": pinnacle_spread,
+                    "pinnacle_total": pinnacle_total,
+                    "consensus_total": consensus_total,
                 })
 
         return results
@@ -380,16 +400,37 @@ def backfill_spreads_from_odds_api(sport):
                     closing = odds_game["closing_spread"]
                     opening = odds_game.get("opening_spread")
                     pinnacle = odds_game.get("pinnacle_spread")
+                    pinnacle_total = odds_game.get("pinnacle_total")
+                    consensus_total = odds_game.get("consensus_total")
                     home_covered = _compute_home_covered(
                         game.get("home_score"), game.get("away_score"), closing
                     )
-                    tm_db.upsert_historical_game({
+                    # Compute O/U result if we have total and scores
+                    ou_result = None
+                    total_line = pinnacle_total or consensus_total
+                    if total_line and game.get("home_score") is not None and game.get("away_score") is not None:
+                        actual_total = game["home_score"] + game["away_score"]
+                        if actual_total > total_line:
+                            ou_result = "OVER"
+                        elif actual_total < total_line:
+                            ou_result = "UNDER"
+                        else:
+                            ou_result = "PUSH"
+
+                    update_dict = {
                         **game,
                         "closing_spread": closing,
                         "opening_spread": opening or game.get("opening_spread"),
                         "home_covered": home_covered,
                         "pinnacle_spread": pinnacle,
-                    })
+                    }
+                    if pinnacle_total is not None:
+                        update_dict["pinnacle_total"] = pinnacle_total
+                    if consensus_total is not None:
+                        update_dict["consensus_total"] = consensus_total
+                    if ou_result:
+                        update_dict["over_under_result"] = ou_result
+                    tm_db.upsert_historical_game(update_dict)
                     updated += 1
                     break
 

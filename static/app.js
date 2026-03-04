@@ -55,15 +55,18 @@ document.addEventListener("DOMContentLoaded", function () {
         var btn = document.getElementById("testmodel-btn");
         if (!btn) return;
         var mybetsBtn = document.getElementById("mybets-btn");
+        var evBtn = document.getElementById("evengine-btn");
         if (_isAdmin) {
             btn.disabled = false;
             btn.title = "";
             if (mybetsBtn) { mybetsBtn.disabled = false; mybetsBtn.title = ""; }
+            if (evBtn) { evBtn.disabled = false; evBtn.title = ""; }
             loadTrackedBetsState();
         } else {
             btn.disabled = true;
             btn.title = "Admin only";
             if (mybetsBtn) { mybetsBtn.disabled = true; mybetsBtn.title = "Admin only"; }
+            if (evBtn) { evBtn.disabled = true; evBtn.title = "Admin only"; }
         }
     }
 
@@ -273,6 +276,8 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.innerHTML = "";
         playerSearchSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         welcomeHero.classList.remove("hidden");
         closeSidebar();
     });
@@ -321,6 +326,7 @@ document.addEventListener("DOMContentLoaded", function () {
             loadedProps = {};
             lastScanGames = [];
             if (testmodelSection) testmodelSection.classList.add("hidden");
+            if (evengineSection) evengineSection.classList.add("hidden");
             playerSearchSection.classList.add("hidden");
             welcomeHero.classList.remove("hidden");
 
@@ -349,7 +355,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     .then(function (res) { return res.json(); })
                     .then(function (scanData) {
                         if (scanData.success) {
-                            renderScanResults(scanData.games || []);
+                            var sg = scanData.games || [];
+                            if (scanData.signal_freshness) sg.forEach(function (g) { g._freshness = scanData.signal_freshness; });
+                            renderScanResults(sg);
                             // Hide cache indicator — fresh data arrived
                             var ci = document.getElementById("cache-indicator");
                             if (ci) ci.classList.add("hidden");
@@ -431,6 +439,8 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         playerSearchSection.classList.add("hidden");
         welcomeHero.classList.add("hidden");
 
@@ -461,7 +471,9 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (currentSport === "all" && data.all_sports) {
                 renderAllSportsResults(data.all_sports);
             } else {
-                renderScanResults(data.games || []);
+                var gList = data.games || [];
+                if (data.signal_freshness) gList.forEach(function (g) { g._freshness = data.signal_freshness; });
+                renderScanResults(gList);
             }
 
             // Show cache indicator if results came from cache
@@ -505,6 +517,7 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.classList.add("hidden");
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
         playerSearchSection.classList.remove("hidden");
 
         if (window.innerWidth <= 768) closeSidebar();
@@ -835,6 +848,12 @@ document.addEventListener("DOMContentLoaded", function () {
         if ((sport === "cfb" || sport === "cbb" || sport === "nfl") && g.slot_type) {
             html += '<div class="scan-slot slot-' + g.slot_type + '">' + g.slot_type.toUpperCase() + '</div>';
         }
+        // Signal freshness badge (aging/stale cached data)
+        if (g._freshness && g._freshness !== "fresh") {
+            var fClass = g._freshness === "aging" ? "freshness-aging" : "freshness-stale";
+            var fLabel = g._freshness === "aging" ? "AGING DATA" : "STALE DATA";
+            html += '<span class="freshness-badge ' + fClass + '">' + fLabel + '</span>';
+        }
         return html;
     }
 
@@ -900,11 +919,16 @@ document.addEventListener("DOMContentLoaded", function () {
         if (g.vegas_trap && g.vegas_trap.is_vegas_trap) {
             html += '<div class="scan-vegas-trap"><span class="vegas-trap-label">VEGAS TRAP</span> <span class="vegas-trap-detail">' + g.vegas_trap.detail + '</span></div>';
         }
+        // Pace Mismatch
+        if (g.pace_mismatch && g.pace_mismatch.is_mismatch) {
+            var pm = g.pace_mismatch;
+            html += '<div class="scan-pace-mismatch"><span class="pace-label">PACE MISMATCH</span> <span class="pace-detail">' + pm.fast_team + ' ' + pm.fast_pace + ' vs ' + pm.slow_team + ' ' + pm.slow_pace + ' (' + pm.gap + ' pt gap)</span></div>';
+        }
         return html;
     }
 
     function buildCardProps(g, sport) {
-        if (sport !== "nba" || g.date_label !== "Today" || g.skip) return '';
+        if ((sport !== "nba" && sport !== "cbb") || g.date_label !== "Today" || g.skip) return '';
         var alreadyLoaded = loadedProps[g.event_id] && loadedProps[g.event_id].length > 0;
         var html = '<div class="scan-prism-section' + (alreadyLoaded ? ' prism-expanded' : '') + '" id="prism-section-' + g.event_id + '">';
         html += '<div class="prism-dropdown-toggle" data-event-id="' + g.event_id + '">';
@@ -985,6 +1009,13 @@ document.addEventListener("DOMContentLoaded", function () {
         else if (g.recommendation === "LEAN") recClass = "rec-lean";
         html += '<div class="scan-rec ' + recClass + '">' + g.recommendation + '</div>';
 
+        // Kelly unit badge
+        if (g.kelly && g.kelly.suggested_units > 0) {
+            var uCls = g.kelly.suggested_units >= 2 ? "unit-strong" : g.kelly.suggested_units >= 1 ? "unit-confident" : "unit-lean";
+            html += '<div class="unit-badge ' + uCls + '">' + g.kelly.suggested_units + 'u';
+            html += '<span class="unit-kelly-detail">' + g.kelly.kelly_pct + '% Kelly</span></div>';
+        }
+
         // Per-sport validation badge
         if (g.model_status_text && g.model_status_class) {
             html += '<div class="scan-validation-badge ' + g.model_status_class + '">' + g.model_status_text + '</div>';
@@ -1019,6 +1050,8 @@ document.addEventListener("DOMContentLoaded", function () {
             html += ' data-rec="' + g.recommendation + '" data-pct="' + (getEffectivePct(g) || '') + '"';
             html += ' data-slot="' + (g.slot_type || '') + '" data-date="' + (g.game_date || '') + '"';
             html += ' data-sport="' + (sport || currentSport) + '"';
+            html += ' data-kelly="' + (g.kelly ? g.kelly.kelly_fraction : '') + '"';
+            html += ' data-units="' + (g.kelly ? g.kelly.suggested_units : '') + '"';
             if (isTracked) html += ' disabled';
             html += '>' + tLabel + '</button>';
         }
@@ -1034,9 +1067,9 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div>';
         }
 
-        // Historical accuracy badge
-        if (g.historical_accuracy && g.historical_sample_size) {
-            html += '<div class="scan-backtest-badge"><span class="backtest-rate">' + g.historical_accuracy + '% hit rate</span><span class="backtest-sample">(' + g.historical_sample_size + ' similar picks)</span></div>';
+        // No-edge banner for unvalidated sports without EV model
+        if (["nba","cbb"].indexOf(currentSport) !== -1 && !isEvModelGame(g) && g.recommendation && g.recommendation !== "MONITOR") {
+            html += '<div class="scan-no-edge-banner">Rules model has no validated edge for this sport. EV model or PRISM props recommended.</div>';
         }
 
         html += '</div>';
@@ -1495,6 +1528,8 @@ document.addEventListener("DOMContentLoaded", function () {
         dashboardVisible = false;
         if (testmodelSection) testmodelSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         playerSearchSection.classList.add("hidden");
 
         authFetch("/api/scan", {
@@ -1614,8 +1649,9 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         playerSearchSection.classList.add("hidden");
-        if (mybetsSection) mybetsSection.classList.add("hidden");
         dashboardSection.classList.remove("hidden");
         dashboardVisible = true;
         fetchDashboard();
@@ -1832,6 +1868,9 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!clv || !clv.clv_total) return '';
         var html = '<h3 class="dash-section-title">Closing Line Value (CLV)</h3>';
 
+        // Trend placeholder — filled async by fetchClvTrend
+        html += '<div id="clv-trend-container"></div>';
+
         // Sport summary cards
         if (clv.clv_by_sport && clv.clv_by_sport.length > 0) {
             html += '<div class="dash-stat-cards">';
@@ -1873,6 +1912,86 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    function fetchClvTrend() {
+        var sportParam = dashboardSportFilter.value;
+        var url = "/api/clv/trend";
+        if (sportParam) url += "?sport=" + sportParam;
+        authFetch(url)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success && data.trend) {
+                    var container = document.getElementById("clv-trend-container");
+                    if (container) container.innerHTML = renderClvTrend(data.trend);
+                }
+            })
+            .catch(function () {});
+    }
+
+    function renderClvTrend(trend) {
+        var html = '';
+
+        // Health badge row
+        if (trend.health) {
+            var h = trend.health;
+            var badgeClass = 'clv-health-' + h.status;
+            var badgeLabel = h.status === 'edge' ? 'EDGE CONFIRMED' : h.status === 'declining' ? 'DECLINING' : 'NEUTRAL';
+            var arrowChar = h.trend === 'up' ? '\u2191' : h.trend === 'down' ? '\u2193' : '\u2192';
+            var arrowClass = h.trend === 'up' ? 'clv-positive' : h.trend === 'down' ? 'clv-negative' : 'clv-neutral';
+            html += '<div class="clv-health-row">';
+            html += '<span class="clv-health-badge ' + badgeClass + '">' + badgeLabel + '</span>';
+            html += '<span class="clv-trend-arrow ' + arrowClass + '">' + arrowChar + '</span>';
+            html += '<span class="clv-health-message">' + h.message + '</span>';
+            html += '</div>';
+        }
+
+        // Rolling stat cards
+        var windows = [
+            {label: '7 Day', data: trend.rolling_7},
+            {label: '14 Day', data: trend.rolling_14},
+            {label: '30 Day', data: trend.rolling_30}
+        ];
+        var hasRolling = windows.some(function (w) { return w.data; });
+        if (hasRolling) {
+            html += '<div class="clv-rolling-cards">';
+            windows.forEach(function (w) {
+                if (!w.data) return;
+                var clvClass = w.data.avg_clv > 0 ? 'clv-positive' : w.data.avg_clv < 0 ? 'clv-negative' : 'clv-neutral';
+                var brClass = w.data.beat_rate >= 55 ? 'clv-positive' : w.data.beat_rate < 45 ? 'clv-negative' : 'clv-neutral';
+                html += '<div class="clv-rolling-card">';
+                html += '<div class="clv-rolling-label">' + w.label + '</div>';
+                html += '<div class="clv-rolling-value ' + clvClass + '">' + (w.data.avg_clv > 0 ? '+' : '') + w.data.avg_clv + '</div>';
+                html += '<div class="clv-rolling-sub ' + brClass + '">' + w.data.beat_rate + '% (' + w.data.count + ')</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        // Daily trend chart (last 30 days)
+        if (trend.daily && trend.daily.length > 0) {
+            var chartDays = trend.daily.slice(0, 30);
+            var maxAbsClv = 0;
+            chartDays.forEach(function (d) { maxAbsClv = Math.max(maxAbsClv, Math.abs(d.avg_clv)); });
+            if (maxAbsClv === 0) maxAbsClv = 1;
+
+            html += '<div class="clv-trend-chart-header">Daily CLV Trend</div>';
+            html += '<div class="clv-trend-chart">';
+            chartDays.forEach(function (d) {
+                var pct = Math.round(Math.abs(d.avg_clv) / maxAbsClv * 100);
+                var barClass = d.avg_clv >= 0 ? 'clv-trend-bar-pos' : 'clv-trend-bar-neg';
+                var dateLabel = d.date.substring(5); // MM-DD
+                var valStr = (d.avg_clv > 0 ? '+' : '') + d.avg_clv;
+                html += '<div class="clv-trend-row">';
+                html += '<span class="clv-trend-date">' + dateLabel + '</span>';
+                html += '<div class="clv-trend-bar-container"><div class="clv-trend-bar ' + barClass + '" style="width:' + pct + '%"></div></div>';
+                html += '<span class="clv-trend-val">' + valStr + '</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        return html;
+    }
+
     function renderDashboard(data) {
         document.getElementById("dashboard-stats").innerHTML = renderDashboardStats(data.overall);
         document.getElementById("dashboard-clv").innerHTML = renderDashboardCLV(data.clv);
@@ -1880,6 +1999,7 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("dashboard-recent").innerHTML = renderDashboardHistory(data.recent);
         document.getElementById("dashboard-model-health").innerHTML = "";
         fetchModelHealth();
+        fetchClvTrend();
     }
 
     function fetchModelHealth() {
@@ -1995,6 +2115,38 @@ document.addEventListener("DOMContentLoaded", function () {
                 html += '<span class="mh-metric-label">CLV Avg</span>';
                 html += '<span class="mh-metric-value ' + clvClass + '">' + (s.clv_avg >= 0 ? '+' : '') + s.clv_avg.toFixed(1) + '</span>';
                 html += '</div>';
+            }
+
+            // Model Comparison (dynamic tier)
+            var comp = s.model_comparison;
+            if (comp) {
+                var tierColors = { validated: "mh-gap-green", caution: "mh-gap-yellow", degraded: "mh-gap-red" };
+                var tierLabels = { validated: "VALIDATED", caution: "CAUTION", degraded: "DEGRADED" };
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">Best Model</span>';
+                html += '<span class="mh-metric-value">';
+                if (comp.best_model) {
+                    html += comp.best_model.toUpperCase() + ' (' + (comp.best_oos_accuracy != null ? comp.best_oos_accuracy.toFixed(1) + '% OOS' : '--') + ')';
+                } else {
+                    html += 'None';
+                }
+                html += '</span></div>';
+                html += '<div class="mh-metric-row">';
+                html += '<span class="mh-metric-label">Validation</span>';
+                html += '<span class="mh-metric-value ' + (tierColors[comp.validation_tier] || '') + '">' + (tierLabels[comp.validation_tier] || comp.validation_tier) + '</span>';
+                html += '</div>';
+
+                // Side-by-side comparison when both exist
+                if (comp.rules_oos && comp.ev_oos) {
+                    html += '<div class="mh-metric-row">';
+                    html += '<span class="mh-metric-label">Rules OOS</span>';
+                    html += '<span class="mh-metric-value">' + (comp.rules_oos.accuracy != null ? comp.rules_oos.accuracy.toFixed(1) + '%' : '--') + '</span>';
+                    html += '</div>';
+                    html += '<div class="mh-metric-row">';
+                    html += '<span class="mh-metric-label">EV OOS</span>';
+                    html += '<span class="mh-metric-value">' + (comp.ev_oos.accuracy != null ? comp.ev_oos.accuracy.toFixed(1) + '%' : '--') + '</span>';
+                    html += '</div>';
+                }
             }
 
             // Last updated
@@ -2124,6 +2276,8 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("tm-collect-status").innerHTML = "";
             document.getElementById("tm-metrics-content").innerHTML = "";
             document.getElementById("tm-calibration-results").innerHTML = "";
+            document.getElementById("tm-slots-progress").innerHTML = "";
+            document.getElementById("tm-slots-results").innerHTML = "";
             // Stop any active poll timers
             clearAllPolls();
             // Re-enable buttons
@@ -2133,6 +2287,8 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
             document.getElementById("tm-rules-btn").disabled = false;
             document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
+            document.getElementById("tm-slots-btn").disabled = false;
+            document.getElementById("tm-slots-btn").textContent = "Run Slot Validation";
             // Reload data for active tab
             var activeTab = document.querySelector(".tm-tab.active");
             var target = activeTab ? activeTab.getAttribute("data-tm-tab") : "scan";
@@ -2140,6 +2296,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (target === "rules") tmLoadRulesMetrics();
             if (target === "collect") tmPollCollect();
             if (target === "calibration") tmLoadCalibration();
+            if (target === "slots") tmLoadSlotMetrics();
         });
     });
 
@@ -2165,6 +2322,8 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.innerHTML = "";
         playerSearchSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         testmodelSection.classList.remove("hidden");
 
         // Load metrics on first open
@@ -2173,9 +2332,10 @@ document.addEventListener("DOMContentLoaded", function () {
         if (window.innerWidth <= 768) closeSidebar();
     });
 
-    // Hide testmodel section on home/sport change
+    // Hide testmodel/evengine section on home/sport change
     document.getElementById("nav-home-btn").addEventListener("click", function () {
         testmodelSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
     });
 
     // Tab switching
@@ -2289,6 +2449,71 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.textContent = "Compute Features";
         });
     });
+
+    // ── Injury Backfill ──
+    document.getElementById("tm-injury-backfill-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-injury-backfill-btn");
+        if (["nfl", "cfb"].indexOf(tmSport) !== -1) {
+            document.getElementById("tm-injury-backfill-progress").innerHTML =
+                '<div class="tm-progress-text" style="color:var(--accent-orange)">Injury backfill only supports NBA, NHL, CBB</div>';
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Backfilling...";
+        document.getElementById("tm-injury-backfill-progress").innerHTML = "";
+
+        authFetch("/api/tm/injury-backfill", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: tmSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.success) {
+                startPoll("injuryBackfill", tmPollInjuryBackfill);
+            } else {
+                btn.disabled = false;
+                btn.textContent = "Injury Backfill";
+                document.getElementById("tm-injury-backfill-progress").innerHTML =
+                    '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Backfill failed') + '</div>';
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Injury Backfill";
+        });
+    });
+
+    function tmPollInjuryBackfill() {
+        authFetch("/api/tm/injury-backfill/status?sport=" + tmSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var prog = data.progress || {};
+                var el = document.getElementById("tm-injury-backfill-progress");
+                var btn = document.getElementById("tm-injury-backfill-btn");
+
+                if (prog.status === "running") {
+                    var pct = prog.total_games > 0 ? Math.round(prog.processed / prog.total_games * 100) : 0;
+                    el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>' +
+                        '<div class="tm-progress-text">Injury Backfill: ' + prog.processed + '/' + prog.total_games + ' games' +
+                        (prog.absences_found > 0 ? ' — ' + prog.absences_found + ' star absences found' : '') +
+                        (prog.errors > 0 ? ' — ' + prog.errors + ' errors' : '') + '</div>';
+                } else if (prog.status === "complete") {
+                    el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-green)">Backfill complete: ' +
+                        prog.absences_found + ' star absences found in ' + prog.processed + ' games</div>';
+                    btn.disabled = false;
+                    btn.textContent = "Injury Backfill";
+                    stopPoll("injuryBackfill");
+                } else if (prog.status === "error") {
+                    el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Backfill error') + '</div>';
+                    btn.disabled = false;
+                    btn.textContent = "Injury Backfill";
+                    stopPoll("injuryBackfill");
+                }
+            })
+            .catch(function () {});
+    }
 
     // ── Backtest ──
     document.getElementById("tm-backtest-btn").addEventListener("click", function () {
@@ -2788,6 +3013,142 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    // ── Slot Validation ──
+    document.getElementById("tm-slots-btn").addEventListener("click", function () {
+        var btn = document.getElementById("tm-slots-btn");
+        btn.disabled = true;
+        btn.textContent = "Running...";
+        document.getElementById("tm-slots-progress").innerHTML = '<div class="tm-progress-text">Starting slot validation...</div>';
+        document.getElementById("tm-slots-results").innerHTML = "";
+
+        authFetch("/api/tm/slot-validation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: tmSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.success && data.started) {
+                startPoll("slots", tmPollSlotValidation, 2000);
+            } else {
+                btn.disabled = false;
+                btn.textContent = "Run Slot Validation";
+                document.getElementById("tm-slots-progress").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Failed to start') + '</div>';
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = "Run Slot Validation";
+        });
+    });
+
+    function tmPollSlotValidation() {
+        authFetch("/api/tm/slot-validation/status?sport=" + tmSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var prog = data.progress || {};
+                var progEl = document.getElementById("tm-slots-progress");
+                if (prog.status === "running") {
+                    progEl.innerHTML = '<div class="tm-progress-text">Slot Validation: ' + (prog.progress || 0) + '% — ' + (prog.message || '') + '</div>';
+                } else if (prog.status === "complete") {
+                    stopPoll("slots");
+                    progEl.innerHTML = '';
+                    document.getElementById("tm-slots-btn").disabled = false;
+                    document.getElementById("tm-slots-btn").textContent = "Run Slot Validation";
+                    if (prog.metrics) {
+                        document.getElementById("tm-slots-results").innerHTML = tmRenderSlotValidation(prog.metrics);
+                    }
+                } else if (prog.status === "error") {
+                    stopPoll("slots");
+                    progEl.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Error') + '</div>';
+                    document.getElementById("tm-slots-btn").disabled = false;
+                    document.getElementById("tm-slots-btn").textContent = "Run Slot Validation";
+                }
+            });
+    }
+
+    function tmLoadSlotMetrics() {
+        var resEl = document.getElementById("tm-slots-results");
+        if (resEl.innerHTML.trim()) return; // already loaded
+        resEl.innerHTML = '<div class="tm-progress-text">Loading saved slot validation results...</div>';
+        authFetch("/api/tm/slot-validation/metrics?sport=" + tmSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success || !data.metrics) {
+                    resEl.innerHTML = '<div class="tm-progress-text">No slot validation results yet. Run a validation first.</div>';
+                    return;
+                }
+                var params = data.metrics.model_params || data.metrics;
+                resEl.innerHTML = tmRenderSlotValidation(params);
+            })
+            .catch(function () {
+                resEl.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Failed to load slot validation data.</div>';
+            });
+    }
+
+    function tmRenderSlotValidation(metrics) {
+        if (!metrics) return '';
+        var html = '';
+        var ps = metrics.per_slot || {};
+        var chi = metrics.chi_squared || {};
+        var perm = metrics.permutation_test || {};
+
+        // Summary cards
+        html += '<div class="tm-stat-cards">';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Total Games</div><div class="tm-stat-value">' + (metrics.total_games || 0) + '</div></div>';
+        var chiClass = chi.significant ? 'stat-green' : 'stat-red';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Chi-Squared p</div><div class="tm-stat-value ' + chiClass + '">' + (chi.p_value != null ? chi.p_value : 'N/A') + '</div></div>';
+        var permClass = perm.significant ? 'stat-green' : 'stat-red';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Perm Test p</div><div class="tm-stat-value ' + permClass + '">' + (perm.p_value != null ? perm.p_value : 'N/A') + '</div></div>';
+        html += '<div class="tm-stat-card"><div class="tm-stat-label">Max Rate Diff</div><div class="tm-stat-value">' + (perm.actual_diff != null ? perm.actual_diff + '%' : 'N/A') + '</div></div>';
+        html += '</div>';
+
+        // Per-slot table
+        var slotKeys = Object.keys(ps).sort();
+        if (slotKeys.length > 0) {
+            html += '<div class="tm-feat-section"><h3 class="tm-feat-title">Per-Slot Dog Cover Rates</h3>';
+            html += '<table class="tm-table"><thead><tr><th>Slot</th><th>Games</th><th>Dog Cover %</th><th>95% CI</th><th>z-stat</th><th>p-value</th><th>Sig?</th></tr></thead><tbody>';
+            slotKeys.forEach(function (slot) {
+                var s = ps[slot];
+                var rateClass = s.dog_cover_rate >= 55 ? 'style="color:var(--accent-green)"' : (s.dog_cover_rate < 45 ? 'style="color:var(--accent-red)"' : '');
+                var sigStar = s.significant ? '<span style="color:var(--accent-green)">&#10004;</span>' : '<span style="color:var(--accent-red)">&#10008;</span>';
+                html += '<tr><td style="text-transform:uppercase;font-weight:600">' + slot + '</td>';
+                html += '<td>' + s.total_games + '</td>';
+                html += '<td ' + rateClass + '>' + s.dog_cover_rate + '%</td>';
+                html += '<td>[' + s.ci_lower + '%, ' + s.ci_upper + '%]</td>';
+                html += '<td>' + s.z_stat + '</td>';
+                html += '<td>' + s.p_value + '</td>';
+                html += '<td>' + sigStar + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Chi-squared detail
+        if (chi.statistic != null) {
+            html += '<div class="tm-feat-section"><h3 class="tm-feat-title">Chi-Squared Test</h3>';
+            html += '<p class="tm-panel-desc">Tests whether slot cover rates differ significantly from each other (not just from 50%).</p>';
+            html += '<div class="tm-stat-cards">';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">Statistic</div><div class="tm-stat-value">' + chi.statistic + '</div></div>';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">p-value</div><div class="tm-stat-value ' + chiClass + '">' + chi.p_value + '</div></div>';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">Significant</div><div class="tm-stat-value ' + chiClass + '">' + (chi.significant ? 'YES' : 'NO') + '</div></div>';
+            html += '</div></div>';
+        }
+
+        // Permutation test detail
+        if (perm.actual_diff != null) {
+            html += '<div class="tm-feat-section"><h3 class="tm-feat-title">Permutation Test (' + (perm.n_iterations || 1000) + ' iterations)</h3>';
+            html += '<p class="tm-panel-desc">Shuffles slot labels to test if the observed cover rate difference exceeds random chance.</p>';
+            html += '<div class="tm-stat-cards">';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">Observed Diff</div><div class="tm-stat-value">' + perm.actual_diff + '%</div></div>';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">p-value</div><div class="tm-stat-value ' + permClass + '">' + perm.p_value + '</div></div>';
+            html += '<div class="tm-stat-card"><div class="tm-stat-label">Significant</div><div class="tm-stat-value ' + permClass + '">' + (perm.significant ? 'YES' : 'NO') + '</div></div>';
+            html += '</div></div>';
+        }
+
+        return html;
+    }
+
     // ── Model Scan ──
     document.getElementById("tm-scan-btn").addEventListener("click", function () {
         var btn = document.getElementById("tm-scan-btn");
@@ -2987,6 +3348,436 @@ document.addEventListener("DOMContentLoaded", function () {
         return html;
     }
 
+    // ─── EV Engine ───────────────────────────────────────────────────────────────
+
+    var evengineBtn = document.getElementById("evengine-btn");
+    var evengineSection = document.getElementById("evengine-section");
+    var evSport = "nba";
+    var evViewMode = "all";
+    var evPollTimers = { train: null };
+    var evLastGames = [];
+
+    function evClearTrainPoll() {
+        if (evPollTimers.train) {
+            clearInterval(evPollTimers.train);
+            evPollTimers.train = null;
+        }
+    }
+
+    // EV Sport switcher
+    document.querySelectorAll(".ev-sport-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var newSport = btn.getAttribute("data-ev-sport");
+            if (newSport === evSport) return;
+            evSport = newSport;
+            document.querySelectorAll(".ev-sport-btn").forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            // Clear panels
+            document.getElementById("ev-model-status").innerHTML = "";
+            document.getElementById("ev-training-controls").innerHTML = "";
+            document.getElementById("ev-metrics-display").innerHTML = "";
+            document.getElementById("ev-predictions-summary").innerHTML = "";
+            document.getElementById("ev-predictions-results").innerHTML = "";
+            evLastGames = [];
+            evClearTrainPoll();
+            // Reload active tab
+            var activeTab = document.querySelector(".ev-tab.active");
+            var target = activeTab ? activeTab.getAttribute("data-ev-tab") : "dashboard";
+            if (target === "dashboard") evLoadDashboard();
+            if (target === "predictions") evLoadPredictions();
+        });
+    });
+
+    // EV Tab switcher
+    document.querySelectorAll(".ev-tab").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+            document.querySelectorAll(".ev-tab").forEach(function (t) { t.classList.remove("active"); });
+            tab.classList.add("active");
+            var target = tab.getAttribute("data-ev-tab");
+            document.querySelectorAll(".ev-panel").forEach(function (p) { p.classList.add("hidden"); });
+            document.getElementById("ev-panel-" + target).classList.remove("hidden");
+            if (target === "dashboard") evLoadDashboard();
+            if (target === "predictions") evLoadPredictions();
+        });
+    });
+
+    // View toggle (event delegation)
+    document.querySelectorAll(".ev-view-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var mode = btn.getAttribute("data-ev-view");
+            if (mode === evViewMode) return;
+            evViewMode = mode;
+            document.querySelectorAll(".ev-view-btn").forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            evRenderPredictions(evLastGames);
+        });
+    });
+
+    // Refresh button
+    document.getElementById("ev-refresh-btn").addEventListener("click", function () {
+        evLoadPredictions();
+    });
+
+    // Show EV Engine section
+    if (evengineBtn) {
+        evengineBtn.addEventListener("click", function () {
+            if (!_isAdmin) return;
+            welcomeHero.classList.add("hidden");
+            scanResults.classList.add("hidden");
+            scanResultsVisible = false;
+            results.classList.add("hidden");
+            errorBanner.classList.add("hidden");
+            dashboardSection.classList.add("hidden");
+            dashboardVisible = false;
+            lottoResults.classList.add("hidden");
+            lottoResults.innerHTML = "";
+            playerSearchSection.classList.add("hidden");
+            if (mybetsSection) mybetsSection.classList.add("hidden");
+            if (testmodelSection) testmodelSection.classList.add("hidden");
+            hideLineshop();
+            evengineSection.classList.remove("hidden");
+            evLoadDashboard();
+            if (window.innerWidth <= 768) closeSidebar();
+        });
+    }
+
+    // ── Dashboard ──
+
+    function evLoadDashboard() {
+        var statusEl = document.getElementById("ev-model-status");
+        var trainEl = document.getElementById("ev-training-controls");
+        var metricsEl = document.getElementById("ev-metrics-display");
+        statusEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading model data...</p></div>';
+        trainEl.innerHTML = "";
+        metricsEl.innerHTML = "";
+
+        authFetch("/api/tm/" + evSport + "-ev/metrics")
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) {
+                    statusEl.innerHTML = '<div class="ev-status-row"><span class="ev-status-badge ev-status-inactive">Error</span><span class="ev-status-meta">' + (data.error || 'Failed to load') + '</span></div>';
+                    return;
+                }
+                evRenderModelStatus(data, statusEl);
+                evRenderTrainingControls(data, trainEl);
+                evRenderMetricsDisplay(data, metricsEl);
+            })
+            .catch(function () {
+                statusEl.innerHTML = '<div class="ev-status-row"><span class="ev-status-badge ev-status-inactive">Offline</span><span class="ev-status-meta">Could not reach API</span></div>';
+            });
+    }
+
+    function evRenderModelStatus(data, el) {
+        var active = data.model_active;
+        var run = data.ev_metrics;
+        var html = '<div class="ev-status-row">';
+        html += '<span class="ev-status-badge ' + (active ? 'ev-status-active' : 'ev-status-inactive') + '">';
+        html += active ? 'Model Active' : 'Model Inactive';
+        html += '</span>';
+        if (run && run.created_at) {
+            html += '<span class="ev-status-meta">Last trained: ' + run.created_at + '</span>';
+        }
+        html += '</div>';
+
+        // Stat cards
+        if (run && run.model_params) {
+            var p = run.model_params;
+            var wf = p.walk_forward || {};
+            var cal = p.calibration || {};
+
+            html += '<div class="ev-stat-cards">';
+            html += evStatCard("AUC", p.auc != null ? p.auc.toFixed(3) : "—", p.auc >= 0.58 ? "stat-green" : p.auc >= 0.54 ? "stat-yellow" : "stat-red");
+            html += evStatCard("Valid", p.is_valid ? "Yes" : "No", p.is_valid ? "stat-green" : "stat-red");
+            html += evStatCard("ECE", cal.ece != null ? (cal.ece * 100).toFixed(1) + "%" : "—", "");
+            html += evStatCard("Brier", wf.mean_brier != null ? wf.mean_brier.toFixed(4) : "—", "");
+            html += '</div>';
+        }
+
+        el.innerHTML = html;
+    }
+
+    function evStatCard(label, value, colorClass) {
+        return '<div class="ev-stat-card"><div class="ev-stat-label">' + label + '</div><div class="ev-stat-value ' + (colorClass || '') + '">' + value + '</div></div>';
+    }
+
+    function evRenderTrainingControls(data, el) {
+        var sportUpper = evSport.toUpperCase();
+        var html = '<div class="ev-training-section">';
+        html += '<div class="ev-training-title">Training</div>';
+        html += '<button type="button" class="ev-train-btn" id="ev-train-btn">Train ' + sportUpper + ' EV Model</button>';
+        html += '<div class="ev-train-progress" id="ev-train-progress"></div>';
+        html += '</div>';
+        el.innerHTML = html;
+
+        document.getElementById("ev-train-btn").addEventListener("click", function () {
+            var btn = document.getElementById("ev-train-btn");
+            btn.disabled = true;
+            btn.textContent = "Training...";
+            document.getElementById("ev-train-progress").textContent = "Starting training...";
+
+            authFetch("/api/tm/" + evSport + "-ev/train", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    evStartTrainPoll();
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = "Train " + sportUpper + " EV Model";
+                    document.getElementById("ev-train-progress").textContent = "Error: " + (data.error || "Failed to start");
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.textContent = "Train " + sportUpper + " EV Model";
+                document.getElementById("ev-train-progress").textContent = "Network error";
+            });
+        });
+    }
+
+    function evStartTrainPoll() {
+        evClearTrainPoll();
+        evPollTimers.train = setInterval(evPollTrainStatus, POLL_INTERVAL);
+        evPollTrainStatus();
+    }
+
+    function evPollTrainStatus() {
+        var sportUpper = evSport.toUpperCase();
+        authFetch("/api/tm/" + evSport + "-ev/status")
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) return;
+                var p = data.progress || {};
+                var progressEl = document.getElementById("ev-train-progress");
+                if (!progressEl) { evClearTrainPoll(); return; }
+
+                if (p.status === "complete" || p.status === "done") {
+                    evClearTrainPoll();
+                    var btn = document.getElementById("ev-train-btn");
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "Train " + sportUpper + " EV Model";
+                    }
+                    progressEl.textContent = "Training complete!";
+                    // Reload dashboard
+                    setTimeout(evLoadDashboard, 500);
+                } else if (p.status === "error" || p.status === "failed") {
+                    evClearTrainPoll();
+                    var btn = document.getElementById("ev-train-btn");
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "Train " + sportUpper + " EV Model";
+                    }
+                    progressEl.textContent = "Error: " + (p.error || p.message || "Training failed");
+                } else {
+                    progressEl.textContent = p.message || p.step || ("Training in progress... " + (p.status || ""));
+                }
+            })
+            .catch(function () {});
+    }
+
+    function evRenderMetricsDisplay(data, el) {
+        var run = data.ev_metrics;
+        if (!run || !run.model_params) {
+            el.innerHTML = '<div class="ev-metrics-section"><div class="ev-metrics-title">No model trained yet</div><p style="color:var(--text-secondary);font-size:0.85rem;">Train a model to see metrics here.</p></div>';
+            return;
+        }
+
+        var p = run.model_params;
+        var wf = p.walk_forward || {};
+        var html = '';
+
+        // Edge Buckets
+        if (p.edge_buckets && p.edge_buckets.length > 0) {
+            html += '<div class="ev-metrics-section">';
+            html += '<div class="ev-metrics-title">Edge Buckets</div>';
+            html += '<table class="ev-table">';
+            html += '<thead><tr><th>Range</th><th>Count</th><th>Accuracy</th><th>ROI</th><th>Avg Edge</th></tr></thead>';
+            html += '<tbody>';
+            p.edge_buckets.forEach(function (b) {
+                var accClass = b.accuracy >= 55 ? "stat-green" : b.accuracy >= 50 ? "stat-yellow" : "stat-red";
+                var roiClass = b.roi > 0 ? "stat-green" : "stat-red";
+                html += '<tr>';
+                html += '<td>' + b.range + '</td>';
+                html += '<td>' + b.count + '</td>';
+                html += '<td class="' + accClass + '">' + b.accuracy.toFixed(1) + '%</td>';
+                html += '<td class="' + roiClass + '">' + (b.roi > 0 ? '+' : '') + b.roi.toFixed(1) + '%</td>';
+                html += '<td>' + b.avg_edge.toFixed(1) + '%</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Walk-Forward Validation
+        if (wf.folds != null) {
+            html += '<div class="ev-metrics-section">';
+            html += '<div class="ev-metrics-title">Walk-Forward Validation</div>';
+            html += '<div class="ev-stat-cards">';
+            html += evStatCard("Mean AUC", wf.mean_auc != null ? wf.mean_auc.toFixed(3) : "—", wf.mean_auc >= 0.55 ? "stat-green" : "stat-yellow");
+            html += evStatCard("Folds", wf.folds || "—", "");
+            html += evStatCard("OOS Acc", wf.oos_accuracy != null ? wf.oos_accuracy.toFixed(1) + "%" : "—", wf.oos_accuracy >= 55 ? "stat-green" : "stat-yellow");
+            html += evStatCard("OOS ROI", wf.oos_roi != null ? (wf.oos_roi > 0 ? "+" : "") + wf.oos_roi.toFixed(1) + "%" : "—", wf.oos_roi > 0 ? "stat-green" : "stat-red");
+            html += '</div></div>';
+        }
+
+        // Feature Weights (coefficients)
+        if (p.coefficients) {
+            var coefs = p.coefficients;
+            var keys = Object.keys(coefs).sort(function (a, b) { return Math.abs(coefs[b]) - Math.abs(coefs[a]); });
+            if (keys.length > 0) {
+                var maxAbs = Math.abs(coefs[keys[0]]) || 0.01;
+                html += '<div class="ev-feat-section">';
+                html += '<div class="ev-feat-title">Feature Weights</div>';
+                keys.forEach(function (k) {
+                    var val = coefs[k];
+                    var pct = Math.round(Math.abs(val) / maxAbs * 100);
+                    var barClass = val >= 0 ? "ev-feat-bar-pos" : "ev-feat-bar-neg";
+                    html += '<div class="ev-feat-row">';
+                    html += '<span class="ev-feat-name">' + k + '</span>';
+                    html += '<div class="ev-feat-bar-container"><div class="' + barClass + '" style="width:' + pct + '%"></div></div>';
+                    html += '<span class="ev-feat-value">' + (val >= 0 ? '+' : '') + val.toFixed(4) + '</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        }
+
+        // Also check feature_importances if no coefficients
+        if (!p.coefficients && p.feature_importances) {
+            var feats = p.feature_importances;
+            var keys = Object.keys(feats).sort(function (a, b) { return feats[b] - feats[a]; }).slice(0, 15);
+            if (keys.length > 0) {
+                var maxVal = feats[keys[0]] || 0.01;
+                html += '<div class="ev-feat-section">';
+                html += '<div class="ev-feat-title">Feature Importances</div>';
+                keys.forEach(function (k) {
+                    var pct = Math.round(feats[k] / maxVal * 100);
+                    html += '<div class="ev-feat-row">';
+                    html += '<span class="ev-feat-name">' + k + '</span>';
+                    html += '<div class="ev-feat-bar-container"><div class="ev-feat-bar-pos" style="width:' + pct + '%"></div></div>';
+                    html += '<span class="ev-feat-value">' + (feats[k] * 100).toFixed(1) + '%</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        }
+
+        el.innerHTML = html || '<div style="color:var(--text-secondary);font-size:0.85rem;">No detailed metrics available.</div>';
+    }
+
+    // ── Predictions ──
+
+    function evLoadPredictions() {
+        var loadEl = document.getElementById("ev-predictions-loading");
+        var resultsEl = document.getElementById("ev-predictions-results");
+        var summaryEl = document.getElementById("ev-predictions-summary");
+        loadEl.classList.remove("hidden");
+        resultsEl.innerHTML = "";
+        summaryEl.innerHTML = "";
+
+        authFetch("/api/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sport: evSport })
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            loadEl.classList.add("hidden");
+            if (!data.success) {
+                resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">' + (data.error || 'Scan failed') + '</div>';
+                return;
+            }
+            var games = data.games || [];
+            evLastGames = games;
+            evRenderPredictions(games);
+        })
+        .catch(function () {
+            loadEl.classList.add("hidden");
+            resultsEl.innerHTML = '<div style="color:var(--accent-red);font-size:0.85rem;">Network error</div>';
+        });
+    }
+
+    function evRenderPredictions(games) {
+        var resultsEl = document.getElementById("ev-predictions-results");
+        var summaryEl = document.getElementById("ev-predictions-summary");
+
+        var totalGames = games.length;
+        var evGames = games.filter(function (g) { return isEvModelGame(g); });
+        var posEdge = evGames.filter(function (g) { return g.ev_model && g.ev_model.edge > 0; });
+
+        // Summary
+        summaryEl.innerHTML = '<div class="ev-prediction-summary">' +
+            '<span>' + totalGames + ' total games</span>' +
+            '<span>' + evGames.length + ' with EV model</span>' +
+            '<span class="ev-summary-pos">' + posEdge.length + ' positive edge</span>' +
+            '</div>';
+
+        // Filter based on view mode
+        var display = games;
+        if (evViewMode === "ev") {
+            display = posEdge;
+        }
+
+        // Sort by edge descending for EV games, then by cover_pct for others
+        display.sort(function (a, b) {
+            var aEdge = (a.ev_model && a.ev_model.active) ? (a.ev_model.edge || 0) : -999;
+            var bEdge = (b.ev_model && b.ev_model.active) ? (b.ev_model.edge || 0) : -999;
+            return bEdge - aEdge;
+        });
+
+        if (display.length === 0) {
+            resultsEl.innerHTML = '<div style="color:var(--text-secondary);padding:2rem;text-align:center;">No ' + (evViewMode === "ev" ? "positive-edge EV" : "") + ' games found.</div>';
+            return;
+        }
+
+        var html = '';
+        display.forEach(function (g) {
+            html += buildScanCard(g, evSport);
+            if (isEvModelGame(g)) {
+                html += evBuildDetailOverlay(g);
+            }
+        });
+        resultsEl.innerHTML = html;
+    }
+
+    function evBuildDetailOverlay(g) {
+        var ev = g.ev_model;
+        if (!ev) return '';
+
+        var prob = ev.probability != null ? ev.probability.toFixed(1) + '%' : '—';
+        var edge = ev.edge != null ? (ev.edge > 0 ? '+' : '') + ev.edge.toFixed(1) + '%' : '—';
+        var evUnit = ev.edge != null ? (ev.edge > 0 ? '+' : '') + (ev.edge * 0.9091).toFixed(1) + 'c' : '—';
+        var auc = ev.auc != null ? ev.auc.toFixed(3) : '—';
+
+        // Determine recommendation
+        var rec = 'MONITOR';
+        var recClass = 'ev-rec-lean';
+        if (ev.probability >= 60) {
+            rec = 'STRONG PLAY';
+            recClass = 'ev-rec-strong';
+        } else if (ev.probability >= 57) {
+            rec = 'CONFIDENT';
+            recClass = 'ev-rec-confident';
+        } else if (ev.edge > 0) {
+            rec = 'LEAN';
+            recClass = 'ev-rec-lean';
+        }
+
+        var html = '<div class="ev-detail-overlay">';
+        html += '<div class="ev-detail-header">EV Model Analysis</div>';
+        html += '<div class="ev-detail-grid">';
+        html += '<div class="ev-detail-item"><div class="ev-detail-label">Model Prob</div><div class="ev-detail-val">' + prob + '</div></div>';
+        html += '<div class="ev-detail-item"><div class="ev-detail-label">Edge</div><div class="ev-detail-val">' + edge + '</div></div>';
+        html += '<div class="ev-detail-item"><div class="ev-detail-label">EV/Unit</div><div class="ev-detail-val">' + evUnit + '</div></div>';
+        html += '<div class="ev-detail-item"><div class="ev-detail-label">AUC</div><div class="ev-detail-val">' + auc + '</div></div>';
+        html += '</div>';
+        html += '<span class="ev-detail-rec ' + recClass + '">' + rec + '</span>';
+        html += '</div>';
+        return html;
+    }
+
     // ─── Bet Tracker (My Picks + My Bets) ──────────────────────────────────────
 
     var picksPanel = document.getElementById("picks-panel");
@@ -3025,6 +3816,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     recommendation: btn.getAttribute("data-rec"),
                     cover_pct: parseFloat(btn.getAttribute("data-pct")) || null,
                     slot_type: btn.getAttribute("data-slot"),
+                    kelly_fraction: parseFloat(btn.getAttribute("data-kelly")) || null,
+                    suggested_units: parseFloat(btn.getAttribute("data-units")) || null,
                 });
                 btn.className = "track-bet-btn selected";
                 btn.textContent = "Selected";
@@ -3265,6 +4058,101 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
+    // ─── Line Shop ────────────────────────────────────────────────────────────
+    var lineshopSection = document.getElementById("lineshop-section");
+    var lineshopBtn = document.getElementById("lineshop-btn");
+    var lineshopLoading = document.getElementById("lineshop-loading");
+    var lineshopContent = document.getElementById("lineshop-content");
+
+    function hideLineshop() {
+        if (lineshopSection) lineshopSection.classList.add("hidden");
+    }
+
+    if (lineshopBtn) {
+        lineshopBtn.addEventListener("click", function () {
+            welcomeHero.classList.add("hidden");
+            scanResults.classList.add("hidden");
+            scanResultsVisible = false;
+            results.classList.add("hidden");
+            errorBanner.classList.add("hidden");
+            lottoResults.classList.add("hidden");
+            lottoResults.innerHTML = "";
+            if (testmodelSection) testmodelSection.classList.add("hidden");
+            if (mybetsSection) mybetsSection.classList.add("hidden");
+            if (evengineSection) evengineSection.classList.add("hidden");
+            playerSearchSection.classList.add("hidden");
+            dashboardSection.classList.add("hidden");
+            dashboardVisible = false;
+            lineshopSection.classList.remove("hidden");
+            fetchLineShop();
+            if (window.innerWidth <= 768) closeSidebar();
+        });
+    }
+
+    function fetchLineShop() {
+        lineshopLoading.classList.remove("hidden");
+        lineshopContent.innerHTML = "";
+        authFetch("/api/lines?sport=" + currentSport)
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                lineshopLoading.classList.add("hidden");
+                if (data.success && data.lines && data.lines.length > 0) {
+                    renderLineShop(data.lines);
+                } else {
+                    lineshopContent.innerHTML = '<p class="prism-empty">No odds data available. Ensure THE_ODDS_API_KEY is configured.</p>';
+                }
+            })
+            .catch(function () {
+                lineshopLoading.classList.add("hidden");
+                lineshopContent.innerHTML = '<p class="prism-empty">Failed to fetch line data.</p>';
+            });
+    }
+
+    function renderLineShop(lines) {
+        var html = '';
+        lines.forEach(function (game) {
+            var bookNames = Object.keys(game.books);
+            if (bookNames.length === 0) return;
+
+            var bestSpreadVal = game.best_spread ? game.best_spread.value : null;
+            var bestOverBook = game.best_total_over ? game.best_total_over.book : null;
+            var bestUnderBook = game.best_total_under ? game.best_total_under.book : null;
+
+            html += '<div class="line-shop-game">';
+            html += '<div class="line-shop-matchup">' + game.away_team + ' @ ' + game.home_team + '</div>';
+            if (game.best_spread) {
+                html += '<div class="line-shop-best">Best Spread: <span class="line-best">' + fmtSpread(game.best_spread.value) + '</span> (' + game.best_spread.book + ')</div>';
+            }
+            html += '<table class="line-shop-table"><thead><tr>';
+            html += '<th>Book</th><th>Spread</th><th>Odds</th><th>Total</th><th>O</th><th>U</th>';
+            html += '</tr></thead><tbody>';
+
+            bookNames.forEach(function (bk) {
+                var b = game.books[bk];
+                var spreadClass = (b.spread !== undefined && b.spread !== null && bestSpreadVal !== null && b.spread === bestSpreadVal) ? ' class="line-best"' : '';
+                var overClass = (bk === bestOverBook) ? ' class="line-best"' : '';
+                var underClass = (bk === bestUnderBook) ? ' class="line-best"' : '';
+
+                html += '<tr>';
+                html += '<td>' + bk + '</td>';
+                html += '<td' + spreadClass + '>' + (b.spread != null ? fmtSpread(b.spread) : '-') + '</td>';
+                html += '<td>' + (b.spread_odds != null ? b.spread_odds : '-') + '</td>';
+                html += '<td>' + (b.total != null ? b.total : '-') + '</td>';
+                html += '<td' + overClass + '>' + (b.over_odds != null ? b.over_odds : '-') + '</td>';
+                html += '<td' + underClass + '>' + (b.under_odds != null ? b.under_odds : '-') + '</td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+        });
+        lineshopContent.innerHTML = html;
+    }
+
+    function fmtSpread(val) {
+        if (val == null) return '-';
+        return val > 0 ? '+' + val : '' + val;
+    }
+
     // ─── My Bets Dashboard ───────────────────────────────────────────────────
     mybetsBtn.addEventListener("click", function () {
         welcomeHero.classList.add("hidden");
@@ -3276,6 +4164,8 @@ document.addEventListener("DOMContentLoaded", function () {
         lottoResults.innerHTML = "";
         if (testmodelSection) testmodelSection.classList.add("hidden");
         if (mybetsSection) mybetsSection.classList.add("hidden");
+        if (evengineSection) evengineSection.classList.add("hidden");
+        hideLineshop();
         playerSearchSection.classList.add("hidden");
         dashboardSection.classList.add("hidden");
         dashboardVisible = false;
@@ -3329,12 +4219,12 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderMyBetsDashboard(data) {
-        document.getElementById("mybets-stats").innerHTML = renderMyBetsStats(data.overall);
+        document.getElementById("mybets-stats").innerHTML = renderMyBetsStats(data.overall, data.clv);
         document.getElementById("mybets-breakdowns").innerHTML = renderMyBetsBreakdowns(data);
         document.getElementById("mybets-recent").innerHTML = renderMyBetsHistory(data.recent);
     }
 
-    function renderMyBetsStats(o) {
+    function renderMyBetsStats(o, clv) {
         var rateClass = o.win_rate >= 55 ? "stat-green" : o.win_rate >= 45 ? "stat-yellow" : "stat-red";
         var ciHtml = o.win_rate_ci ? formatCi(o.win_rate_ci) : '';
         var roiClass = o.roi > 0 ? "stat-green" : o.roi < 0 ? "stat-red" : "stat-yellow";
@@ -3352,6 +4242,13 @@ document.addEventListener("DOMContentLoaded", function () {
         html += '<div class="dash-stat-value ' + streakClass + '">' + streakText + '</div></div>';
         html += '<div class="dash-stat-card"><div class="dash-stat-label">Pending</div>';
         html += '<div class="dash-stat-value stat-muted">' + o.pending + '</div></div>';
+        if (clv && clv.clv_total > 0) {
+            var avgClvClass = clv.avg_clv > 0 ? "stat-green" : clv.avg_clv < 0 ? "stat-red" : "stat-muted";
+            html += '<div class="dash-stat-card"><div class="dash-stat-label">Avg CLV</div>';
+            html += '<div class="dash-stat-value ' + avgClvClass + '">' + (clv.avg_clv > 0 ? '+' : '') + clv.avg_clv + '</div></div>';
+            html += '<div class="dash-stat-card"><div class="dash-stat-label">Beat Close %</div>';
+            html += '<div class="dash-stat-value ' + (clv.beat_close_rate >= 50 ? "stat-green" : "stat-red") + '">' + clv.beat_close_rate + '%</div></div>';
+        }
         html += '</div>';
         return html;
     }
@@ -3457,6 +4354,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 if (b.cover_pct) {
                     html += '<span class="dash-recent-pct">' + b.cover_pct + '%</span>';
+                }
+                if (b.bet_type === "spread" && b.clv != null) {
+                    var clvC = b.clv > 0 ? "clv-positive" : b.clv < 0 ? "clv-negative" : "clv-neutral";
+                    html += '<span class="dash-recent-clv ' + clvC + '">' + (b.clv > 0 ? '+' : '') + b.clv + ' CLV</span>';
+                }
+                if (b.suggested_units) {
+                    html += '<span class="dash-recent-units">' + b.suggested_units + 'u</span>';
                 }
                 // Delete button for pending bets
                 if (b.result === "PENDING") {

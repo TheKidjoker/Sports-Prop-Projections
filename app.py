@@ -105,7 +105,7 @@ scan_cache.init()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
-ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "chance.kelly2003@gmail.com").split(",") if e.strip()}
 
 _jwks_client = None
 
@@ -364,6 +364,8 @@ def api_scan():
         cached, age = scan_cache.get(sport)
         if cached is not None:
             scan_cache.request_refresh(sport)
+            cache_age_min = round(age / 60) if age else 0
+            freshness = "fresh" if cache_age_min < 30 else ("aging" if cache_age_min < 120 else "stale")
             games = _apply_approval_filter(cached, sport, is_admin)
             if games is None:
                 return jsonify({"success": True, "games": [],
@@ -371,6 +373,8 @@ def api_scan():
             return jsonify({
                 "success": True, "games": games,
                 "cached": True, "cache_age": round(age),
+                "signal_freshness": freshness,
+                "scan_age_minutes": cache_age_min,
             })
 
         # No cache — blocking scan
@@ -448,10 +452,25 @@ def api_props():
         sport = request.args.get("sport", "nba").lower()
         if not event_id:
             return jsonify({"success": False, "error": "event_id required"}), 400
-        if sport not in ("nba",):
+        if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
         props = get_game_props(event_id, sport)
         return jsonify({"success": True, "props": props})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/lines", methods=["GET"])
+@require_auth
+def api_lines():
+    """Fetch per-book spreads and totals for Line Shop."""
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        from api_odds import get_multibook_lines
+        lines = get_multibook_lines(sport)
+        return jsonify({"success": True, "lines": lines})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -462,7 +481,7 @@ def api_top_props():
     """Generate PRISM player props for ALL today's games at once."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba",):
+        if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
         props = get_top_props(sport)
         return jsonify({"success": True, "props": props})
@@ -717,6 +736,20 @@ def api_grade():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/clv/trend", methods=["GET"])
+@require_auth
+def api_clv_trend():
+    """CLV time-series trend data with rolling averages and health indicators."""
+    try:
+        sport = request.args.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        trend = tracker.get_clv_trend(sport)
+        return jsonify({"success": True, "trend": trend})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/close-lines", methods=["POST"])
 @require_auth
 def api_close_lines():
@@ -814,9 +847,36 @@ def api_model_health():
                     if is_acc is not None:
                         entry["overfit_gap"] = round(is_acc - oos_acc, 1)
 
+            # Model comparison (dynamic tier)
+            try:
+                from model_selection import get_model_comparison
+                comp = get_model_comparison(sport)
+                entry["model_comparison"] = comp
+            except Exception:
+                entry["model_comparison"] = None
+
             sports_data[sport] = entry
 
         return jsonify({"success": True, "sports": sports_data})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/model-comparison", methods=["GET"])
+@require_auth
+def api_model_comparison():
+    """Compare rules vs EV model OOS performance per sport."""
+    try:
+        from model_selection import get_model_comparison
+        sport = request.args.get("sport")
+        if sport:
+            comp = get_model_comparison(sport)
+            return jsonify({"success": True, "comparisons": {sport: comp}})
+        # All sports
+        comparisons = {}
+        for s in ("nba", "nhl", "nfl", "cfb", "cbb"):
+            comparisons[s] = get_model_comparison(s)
+        return jsonify({"success": True, "comparisons": comparisons})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1036,6 +1096,60 @@ def api_tm_rules_backtest_metrics():
             "rules_metrics": rules_metrics,
             "ml_metrics": ml_metrics,
         })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/slot-validation", methods=["POST"])
+@require_auth
+def api_tm_slot_validation():
+    """Start background slot validation for a sport."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.slot_validation import start_slot_validation_thread
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        started = start_slot_validation_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/slot-validation/status", methods=["GET"])
+@require_auth
+def api_tm_slot_validation_status():
+    """Poll slot validation progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.slot_validation import get_slot_validation_status
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        progress = get_slot_validation_status(sport)
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/slot-validation/metrics", methods=["GET"])
+@require_auth
+def api_tm_slot_validation_metrics():
+    """Get saved slot validation results."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = "nba"
+        run = tm_db.get_latest_model_run(sport, "slot_validation")
+        return jsonify({"success": True, "metrics": run})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1689,6 +1803,42 @@ def api_tm_prism_backtest_status():
     try:
         from test_model.prism_backtest import get_prism_backtest_status
         progress = get_prism_backtest_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Injury Backfill API ──────────────────────────────────────────────────────
+
+@app.route("/api/tm/injury-backfill", methods=["POST"])
+@require_auth
+def api_tm_injury_backfill():
+    """Start background injury backfill from box scores."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.json.get("sport", "nba") if request.json else "nba"
+        if sport not in ("nba", "nhl", "cbb"):
+            return jsonify({"success": False, "error": "Injury backfill only supports nba, nhl, cbb"}), 400
+        from test_model.injury_backfill import start_backfill_thread
+        started = start_backfill_thread(sport)
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/injury-backfill/status", methods=["GET"])
+@require_auth
+def api_tm_injury_backfill_status():
+    """Poll injury backfill progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba")
+        from test_model.injury_backfill import get_backfill_status
+        progress = get_backfill_status(sport)
         return jsonify({"success": True, "progress": progress})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

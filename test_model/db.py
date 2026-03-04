@@ -87,8 +87,11 @@ def init_tm_db():
             UNIQUE(sport, date_str)
         )
     """)
-    # Migrate: add venue and pinnacle columns
-    for col_def in ("venue_name TEXT", "venue_city TEXT", "pinnacle_spread REAL"):
+    # Migrate: add venue, pinnacle, and totals columns
+    for col_def in (
+        "venue_name TEXT", "venue_city TEXT", "pinnacle_spread REAL",
+        "pinnacle_total REAL", "consensus_total REAL", "over_under_result TEXT",
+    ):
         try:
             cur.execute(f"ALTER TABLE tm_historical_games ADD COLUMN {col_def}")
         except Exception:
@@ -154,13 +157,24 @@ def upsert_historical_game(game_dict):
         "venue_name": game_dict.get("venue_name"),
         "venue_city": game_dict.get("venue_city"),
         "pinnacle_spread": game_dict.get("pinnacle_spread"),
+        "pinnacle_total": game_dict.get("pinnacle_total"),
+        "consensus_total": game_dict.get("consensus_total"),
+        "over_under_result": game_dict.get("over_under_result"),
     }
 
     if _use_supabase():
         sb = _get_supabase()
-        sb.table("tm_historical_games").upsert(
-            row, on_conflict="event_id,sport"
-        ).execute()
+        try:
+            sb.table("tm_historical_games").upsert(
+                row, on_conflict="event_id,sport"
+            ).execute()
+        except Exception:
+            # Columns may not exist yet — retry without new totals columns
+            for k in ("pinnacle_total", "consensus_total", "over_under_result"):
+                row.pop(k, None)
+            sb.table("tm_historical_games").upsert(
+                row, on_conflict="event_id,sport"
+            ).execute()
     else:
         conn = _get_sqlite()
         cur = conn.cursor()
@@ -170,8 +184,9 @@ def upsert_historical_game(game_dict):
                  home_team_id, away_team_id, home_rank, away_rank,
                  closing_spread, opening_spread, over_under,
                  home_score, away_score, home_covered, game_status,
-                 venue_name, venue_city, pinnacle_spread)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 venue_name, venue_city, pinnacle_spread,
+                 pinnacle_total, consensus_total, over_under_result)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(event_id, sport) DO UPDATE SET
                 closing_spread = EXCLUDED.closing_spread,
                 opening_spread = EXCLUDED.opening_spread,
@@ -182,7 +197,10 @@ def upsert_historical_game(game_dict):
                 game_status = EXCLUDED.game_status,
                 venue_name = COALESCE(EXCLUDED.venue_name, tm_historical_games.venue_name),
                 venue_city = COALESCE(EXCLUDED.venue_city, tm_historical_games.venue_city),
-                pinnacle_spread = COALESCE(EXCLUDED.pinnacle_spread, tm_historical_games.pinnacle_spread)
+                pinnacle_spread = COALESCE(EXCLUDED.pinnacle_spread, tm_historical_games.pinnacle_spread),
+                pinnacle_total = COALESCE(EXCLUDED.pinnacle_total, tm_historical_games.pinnacle_total),
+                consensus_total = COALESCE(EXCLUDED.consensus_total, tm_historical_games.consensus_total),
+                over_under_result = COALESCE(EXCLUDED.over_under_result, tm_historical_games.over_under_result)
         """, (
             row["event_id"], row["sport"], row["game_date"],
             row["home_team"], row["away_team"],
@@ -194,6 +212,8 @@ def upsert_historical_game(game_dict):
             row["home_covered"], row["game_status"],
             row.get("venue_name"), row.get("venue_city"),
             row.get("pinnacle_spread"),
+            row.get("pinnacle_total"), row.get("consensus_total"),
+            row.get("over_under_result"),
         ))
         conn.commit()
         cur.close()
@@ -591,6 +611,56 @@ def upsert_historical_injury(sport, game_date, team, player_name, status,
         conn.commit()
         cur.close()
         conn.close()
+
+
+def get_historical_injuries(sport, game_date):
+    """Query historical injuries for a specific sport + date."""
+    if _use_supabase():
+        sb = _get_supabase()
+        rows = (
+            sb.table("tm_historical_injuries")
+            .select("*")
+            .eq("sport", sport)
+            .eq("game_date", game_date)
+            .execute()
+            .data
+        )
+        return rows or []
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM tm_historical_injuries WHERE sport = ? AND game_date = ?",
+            (sport, game_date),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+
+
+def count_historical_injuries(sport):
+    """Total injury records for a sport (used for validation gates)."""
+    if _use_supabase():
+        sb = _get_supabase()
+        resp = (
+            sb.table("tm_historical_injuries")
+            .select("*", count="exact")
+            .eq("sport", sport)
+            .execute()
+        )
+        return resp.count or 0
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) as cnt FROM tm_historical_injuries WHERE sport = ?",
+            (sport,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row)["cnt"] if row else 0
 
 
 def get_backtest_metrics(sport):

@@ -8,7 +8,7 @@ _calculate_score, _analyze_home_away_split, _detect_rank_scam,
 _detect_spread_discrepancy) so results reflect the real scoring system.
 
 Factors NOT replayable (set to 0, documented):
-  - Trell Rule (+5): requires real-time injury reports
+  - Trell Rule (+5): NOW partially replayable via historical injury backfill
   - Public betting (+3/+5): requires Pinnacle odds
   - Feedback loop (-2/+3): requires tracker ledger
   - NFL weather (+5): requires weather API at game time
@@ -34,7 +34,7 @@ from test_model.date_utils import parse_iso_date, parse_game_dt
 MIN_WARMUP_GAMES = 10  # Need some team_state history before scoring
 
 MISSING_FACTORS = [
-    "Trell Rule (+5): requires real-time injury reports",
+    "Trell Rule (+5): partially replayable via injury backfill (if data exists)",
     "Public betting (+3/+5): requires Pinnacle odds at game time",
     "Feedback loop (-2/+3): requires tracker ledger at game time",
     "NFL weather (+5): requires weather API at game time",
@@ -348,9 +348,23 @@ def run_rules_backtest(sport):
                 elif ats_rate < 40:
                     ats_penalty = True
 
+        # ── Trell Rule (from historical injury backfill if available) ──
+        trell_applies = False
+        try:
+            injuries = tm_db.get_historical_injuries(sport, game_date_str)
+            if injuries and lean_team:
+                # Trell fires if a star on the OPPOSING team is out
+                opp_team = away if lean_team == home else home
+                for inj in injuries:
+                    if inj.get("is_star") and inj.get("team") == opp_team:
+                        trell_applies = True
+                        break
+        except Exception:
+            pass  # Graceful: if no data, keep False
+
         # ── Calculate score ──
         score, breakdown = _calculate_score(
-            slot_type, line_confirms, False,  # trell_applies=False (not replayable)
+            slot_type, line_confirms, trell_applies,
             line_magnitude=line_magnitude,
             rank_scam_applies=rank_scam_applies,
             spread_disc_applies=spread_disc_applies,
@@ -406,6 +420,7 @@ def run_rules_backtest(sport):
         _track_factor(factor_tracker, "line_toward_fav", line_toward_fav, correct)
         _track_factor(factor_tracker, "day_penalty", breakdown.get("day_penalty", 0) < 0, correct)
         _track_factor(factor_tracker, "spread_sweet_spot", breakdown.get("spread_penalty", 0) > 0, correct)
+        _track_factor(factor_tracker, "trell_rule", trell_applies, correct)
 
         # Per-game factor record for factor analysis (never truncated)
         factor_records.append({
@@ -432,6 +447,7 @@ def run_rules_backtest(sport):
                 "line_toward_dog": line_toward_dog,
                 "line_toward_fav": line_toward_fav,
                 "day_penalty": breakdown.get("day_penalty", 0) < 0,
+                "trell_rule": trell_applies,
             },
         })
 

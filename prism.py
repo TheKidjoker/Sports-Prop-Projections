@@ -12,6 +12,35 @@ import math
 LEAGUE_AVG_TOTALS = {"nba": 224.0}
 LEAGUE_AVG_DEF = {"nba": 112.0}
 
+# League averages for stat-specific matchup multipliers (hardcoded fallbacks)
+_LEAGUE_AVG_STATS_DEFAULTS = {
+    "nba": {"reb": 43.5, "steals": 7.5},
+}
+
+# Dynamic league averages cache for matchup stats
+_league_matchup_avgs = {}
+_league_matchup_ts = 0
+
+
+def _get_league_matchup_avgs(sport="nba"):
+    """Get league-wide avgRebounds and avgSteals, cached 24 hours."""
+    import time
+    global _league_matchup_avgs, _league_matchup_ts
+    now = time.time()
+    if sport in _league_matchup_avgs and now - _league_matchup_ts < 86400:
+        return _league_matchup_avgs[sport]
+    try:
+        from api_client import get_league_avg_stats
+        avgs = get_league_avg_stats(sport)
+        if avgs and avgs.get("avgRebounds") and avgs.get("avgSteals"):
+            result = {"reb": avgs["avgRebounds"], "steals": avgs["avgSteals"]}
+            _league_matchup_avgs[sport] = result
+            _league_matchup_ts = now
+            return result
+    except Exception:
+        pass
+    return _LEAGUE_AVG_STATS_DEFAULTS.get(sport, {})
+
 # Dynamic league averages cache
 _dynamic_avgs = {}
 _dynamic_avgs_ts = 0
@@ -54,7 +83,8 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
                                opponent_def_rating, league_avg_def,
                                game_total, is_b2b, is_home, spread,
                                injured_teammates, posted_line, slot_type,
-                               sport="nba", player_rank=0):
+                               sport="nba", player_rank=0,
+                               opponent_stats=None):
     """
     Core PRISM projection for a single player + stat type.
 
@@ -103,22 +133,44 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     else:
         weighted_avg = season_avg
 
-    # ── 2. Matchup Multiplier ──
-    # Points: full weight (opponent defense directly impacts scoring)
-    # Assists: half weight (more baskets = more assists, loosely correlated)
-    # Rebounds: neutral (we only have pts-allowed data, not reb-allowed)
-    if opponent_def_rating and league_avg_def and stat_type == "pts":
-        matchup_mult = opponent_def_rating / league_avg_def
-        matchup_mult = max(0.85, min(1.20, matchup_mult))
-        matchup_available = True
-    elif opponent_def_rating and league_avg_def and stat_type == "ast":
-        raw_mult = opponent_def_rating / league_avg_def
-        matchup_mult = 1.0 + (raw_mult - 1.0) * 0.5
-        matchup_mult = max(0.92, min(1.10, matchup_mult))
-        matchup_available = True
+    # ── 2. Matchup Multiplier (stat-specific) ──
+    league_stats = _get_league_matchup_avgs(sport)
+    opp = opponent_stats or {}
+
+    if stat_type == "pts":
+        # Points: opponent pts allowed / league avg defense
+        if opponent_def_rating and league_avg_def:
+            matchup_mult = opponent_def_rating / league_avg_def
+            matchup_mult = max(0.85, min(1.20, matchup_mult))
+            matchup_available = True
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
+    elif stat_type == "reb":
+        # Rebounds: inverted opponent rebounding (weak rebounder = more boards)
+        opp_avg_reb = opp.get("avgRebounds")
+        league_avg_reb = league_stats.get("reb", 43.5)
+        if opp_avg_reb and opp_avg_reb > 0:
+            matchup_mult = league_avg_reb / opp_avg_reb
+            matchup_mult = max(0.88, min(1.15, matchup_mult))
+            matchup_available = True
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
+    elif stat_type == "ast":
+        # Assists: inverted opponent steals (more steals = disruption = fewer assists)
+        opp_avg_steals = opp.get("avgSteals")
+        league_avg_steals = league_stats.get("steals", 7.5)
+        if opp_avg_steals and opp_avg_steals > 0:
+            matchup_mult = league_avg_steals / opp_avg_steals
+            matchup_mult = max(0.90, min(1.12, matchup_mult))
+            matchup_available = True
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
     else:
         matchup_mult = 1.0
-        matchup_available = stat_type == "reb"  # reb uses pace instead
+        matchup_available = False
 
     # ── 3. Pace Factor ──
     if game_total and game_total > 0:

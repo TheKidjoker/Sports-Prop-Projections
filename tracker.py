@@ -881,6 +881,120 @@ def _compute_clv_metrics(predictions):
     }
 
 
+def get_clv_trend(sport=None):
+    """
+    Compute CLV time-series data: daily averages, rolling windows, and health status.
+    Returns daily data (last 60 days), rolling 7/14/30 averages, and health assessment.
+    """
+    # Fetch predictions with CLV data
+    if _use_supabase():
+        sb = _get_supabase()
+        query = sb.table("predictions").select(
+            "game_date,clv,clv_direction"
+        ).not_.is_("clv", "null").not_.is_("game_date", "null")
+        if sport:
+            query = query.eq("sport", sport)
+        rows = query.execute().data
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        sql = "SELECT game_date, clv, clv_direction FROM predictions WHERE clv IS NOT NULL AND game_date IS NOT NULL"
+        params = []
+        if sport:
+            sql += " AND sport = ?"
+            params.append(sport)
+        cur.execute(sql, params)
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    if not rows:
+        return {
+            "daily": [],
+            "rolling_7": None,
+            "rolling_14": None,
+            "rolling_30": None,
+            "health": {"status": "neutral", "trend": "flat", "message": "No CLV data available yet"},
+        }
+
+    # Group by game_date
+    by_date = {}
+    for r in rows:
+        d = r["game_date"]
+        if not d:
+            continue
+        if d not in by_date:
+            by_date[d] = {"clv_sum": 0, "beat_count": 0, "count": 0}
+        by_date[d]["clv_sum"] += (r["clv"] or 0)
+        by_date[d]["beat_count"] += (1 if r.get("clv_direction") == 1 else 0)
+        by_date[d]["count"] += 1
+
+    # Sort by date, limit to last 60 days
+    sorted_dates = sorted(by_date.keys(), reverse=True)[:60]
+    daily = []
+    for d in sorted_dates:
+        entry = by_date[d]
+        avg = round(entry["clv_sum"] / entry["count"], 2) if entry["count"] > 0 else 0
+        beat = round(entry["beat_count"] / entry["count"] * 100, 1) if entry["count"] > 0 else 0
+        daily.append({"date": d, "avg_clv": avg, "beat_rate": beat, "count": entry["count"]})
+
+    # Compute rolling windows from most-recent-first daily data
+    def _rolling(n):
+        window = daily[:n]
+        if not window:
+            return None
+        total_clv = sum(d["avg_clv"] * d["count"] for d in window)
+        total_beats = sum(round(d["beat_rate"] / 100 * d["count"]) for d in window)
+        total_count = sum(d["count"] for d in window)
+        if total_count == 0:
+            return None
+        return {
+            "avg_clv": round(total_clv / total_count, 2),
+            "beat_rate": round(total_beats / total_count * 100, 1),
+            "count": total_count,
+        }
+
+    rolling_7 = _rolling(7)
+    rolling_14 = _rolling(14)
+    rolling_30 = _rolling(30)
+
+    # Health assessment
+    r7_clv = rolling_7["avg_clv"] if rolling_7 else 0
+    r30_clv = rolling_30["avg_clv"] if rolling_30 else 0
+
+    if r7_clv > 0.3:
+        status = "edge"
+    elif r7_clv > 0:
+        status = "neutral"
+    else:
+        status = "declining"
+
+    if r7_clv > r30_clv + 0.2:
+        trend = "up"
+    elif r7_clv < r30_clv - 0.2:
+        trend = "down"
+    else:
+        trend = "flat"
+
+    if status == "edge":
+        message = "Your 7-day CLV (+%.1f) is above your 30-day avg (%s%.1f)" % (
+            r7_clv, "+" if r30_clv >= 0 else "", r30_clv)
+    elif status == "declining":
+        message = "Your 7-day CLV (%.1f) has dipped below zero — monitor for sustained decline" % r7_clv
+    else:
+        message = "CLV is neutral — picks are close to market consensus"
+
+    health = {"status": status, "trend": trend, "message": message}
+
+    return {
+        "daily": daily,
+        "rolling_7": rolling_7,
+        "rolling_14": rolling_14,
+        "rolling_30": rolling_30,
+        "health": health,
+    }
+
+
 # ─── PRISM Auto-Tracking ──────────────────────────────────────────────────
 
 def save_prism_predictions(props, event_id, sport):

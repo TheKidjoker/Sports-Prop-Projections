@@ -16,14 +16,15 @@ ODDS_API_SPORT_MAP = {
 
 def get_odds_comparison(sport="nba"):
     """
-    Fetches spreads from The-Odds-API for multiple sportsbooks.
-    Returns per-game data with Pinnacle (sharp) vs consensus spread.
+    Fetches spreads and totals from The-Odds-API for multiple sportsbooks.
+    Returns per-game data with Pinnacle (sharp) vs consensus spread + totals.
     Gracefully returns empty list if THE_ODDS_API_KEY is not set.
 
     Called once per sport per scan (not per game).
 
     Returns:
-        List of dicts: [{home_team, away_team, pinnacle_spread, consensus_spread}, ...]
+        List of dicts: [{home_team, away_team, pinnacle_spread, consensus_spread,
+                         pinnacle_total, consensus_total}, ...]
     """
     api_key = os.environ.get("THE_ODDS_API_KEY")
     if not api_key:
@@ -38,7 +39,7 @@ def get_odds_comparison(sport="nba"):
         params = {
             "apiKey": api_key,
             "regions": "us",
-            "markets": "spreads",
+            "markets": "spreads,totals",
             "oddsFormat": "american",
         }
         data = _cached_request(url, params=params, timeout=15)
@@ -52,28 +53,44 @@ def get_odds_comparison(sport="nba"):
 
             pinnacle_spread = None
             all_spreads = []
+            pinnacle_total = None
+            all_totals = []
 
             for bookmaker in game.get("bookmakers", []):
                 book_key = bookmaker.get("key", "")
                 for market in bookmaker.get("markets", []):
-                    if market.get("key") != "spreads":
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        if outcome.get("name") == home_team:
-                            spread_val = outcome.get("point")
-                            if spread_val is not None:
-                                all_spreads.append(float(spread_val))
+                    mkey = market.get("key")
+
+                    if mkey == "spreads":
+                        for outcome in market.get("outcomes", []):
+                            if outcome.get("name") == home_team:
+                                spread_val = outcome.get("point")
+                                if spread_val is not None:
+                                    all_spreads.append(float(spread_val))
+                                    if book_key == "pinnacle":
+                                        pinnacle_spread = float(spread_val)
+
+                    elif mkey == "totals":
+                        for outcome in market.get("outcomes", []):
+                            total_val = outcome.get("point")
+                            if total_val is not None:
+                                all_totals.append(float(total_val))
                                 if book_key == "pinnacle":
-                                    pinnacle_spread = float(spread_val)
+                                    pinnacle_total = float(total_val)
+                                break  # Only need point once per book
 
             if all_spreads:
                 consensus = sum(all_spreads) / len(all_spreads)
-                results.append({
+                entry = {
                     "home_team": home_team,
                     "away_team": away_team,
                     "pinnacle_spread": pinnacle_spread,
                     "consensus_spread": round(consensus, 1),
-                })
+                }
+                if all_totals:
+                    entry["pinnacle_total"] = pinnacle_total
+                    entry["consensus_total"] = round(sum(all_totals) / len(all_totals), 1)
+                results.append(entry)
 
         return results
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
@@ -238,3 +255,108 @@ def get_game_weather_openweather(city, state):
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None
+
+
+def get_multibook_lines(sport="nba"):
+    """
+    Fetch per-book spreads and totals for all games from The-Odds-API.
+    Called on-demand when user opens Line Shop (not on every scan).
+
+    Returns:
+        List of game dicts with per-book lines and best-line highlights.
+    """
+    api_key = os.environ.get("THE_ODDS_API_KEY")
+    if not api_key:
+        return []
+
+    odds_sport = ODDS_API_SPORT_MAP.get(sport)
+    if not odds_sport:
+        return []
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "spreads,totals",
+            "oddsFormat": "american",
+        }
+        data = _cached_request(url, params=params, timeout=15)
+        if data is None:
+            return []
+
+        results = []
+        for game in data:
+            home_team = game.get("home_team", "")
+            away_team = game.get("away_team", "")
+            commence_time = game.get("commence_time", "")
+
+            books = {}
+            for bookmaker in game.get("bookmakers", []):
+                book_key = bookmaker.get("key", "")
+                book_title = bookmaker.get("title", book_key)
+                book_entry = {}
+
+                for market in bookmaker.get("markets", []):
+                    mkey = market.get("key")
+                    outcomes = market.get("outcomes", [])
+
+                    if mkey == "spreads":
+                        for outcome in outcomes:
+                            if outcome.get("name") == home_team:
+                                book_entry["spread"] = outcome.get("point")
+                                book_entry["spread_odds"] = outcome.get("price")
+
+                    elif mkey == "totals":
+                        for outcome in outcomes:
+                            point = outcome.get("point")
+                            price = outcome.get("price")
+                            if outcome.get("name") == "Over":
+                                book_entry["total"] = point
+                                book_entry["over_odds"] = price
+                            elif outcome.get("name") == "Under":
+                                book_entry["under_odds"] = price
+                                if "total" not in book_entry:
+                                    book_entry["total"] = point
+
+                if book_entry:
+                    books[book_title] = book_entry
+
+            if not books:
+                continue
+
+            # Find best lines
+            best_spread = None
+            best_total_over = None
+            best_total_under = None
+
+            for bk, entry in books.items():
+                # Best spread = highest (most favorable to dog)
+                if entry.get("spread") is not None:
+                    if best_spread is None or entry["spread"] > best_spread["value"]:
+                        best_spread = {"book": bk, "value": entry["spread"]}
+
+                # Best over = lowest total (easier to go over)
+                if entry.get("total") is not None and entry.get("over_odds") is not None:
+                    if best_total_over is None or entry["total"] < best_total_over["total"]:
+                        best_total_over = {"book": bk, "total": entry["total"], "odds": entry["over_odds"]}
+
+                # Best under = highest total (easier to go under)
+                if entry.get("total") is not None and entry.get("under_odds") is not None:
+                    if best_total_under is None or entry["total"] > best_total_under["total"]:
+                        best_total_under = {"book": bk, "total": entry["total"], "odds": entry["under_odds"]}
+
+            results.append({
+                "home_team": home_team,
+                "away_team": away_team,
+                "commence_time": commence_time,
+                "books": books,
+                "best_spread": best_spread,
+                "best_total_over": best_total_over,
+                "best_total_under": best_total_under,
+            })
+
+        return results
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return []
