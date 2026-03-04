@@ -523,12 +523,16 @@ def api_top_props():
         # Cache miss - compute fresh
         props = get_top_props(sport)
 
-        # Store in cache for next request
+        # Even if no props found, cache empty result to avoid hammering APIs
         cache_manager.cache_props(sport, props)
 
         return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        # Log detailed error for debugging
+        import traceback
+        print(f"[api_top_props] Error: {traceback.format_exc()}", flush=True)
+        # Return empty props instead of 500 error (graceful degradation)
+        return jsonify({"success": True, "props": [], "error": str(e)})
 
 
 @app.route("/api/ev/player-props", methods=["GET"])
@@ -580,7 +584,11 @@ def api_ev_player_props():
 
         return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        # Log detailed error for debugging
+        import traceback
+        print(f"[api_ev_player_props] Error: {traceback.format_exc()}", flush=True)
+        # Return empty props instead of 500 error (graceful degradation)
+        return jsonify({"success": True, "props": [], "error": str(e)})
 
 
 @app.route("/api/predict", methods=["POST"])

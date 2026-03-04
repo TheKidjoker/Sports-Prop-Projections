@@ -1,0 +1,107 @@
+{
+  "games": [
+    {
+      "away_team": "San Antonio Spurs",
+      "date_label": "Today",
+      "event_id": "401810683",
+      "game_time_est": "7:00 PM",
+      "home_team": "Detroit Pistons"
+    },
+    {
+      "away_team": "Sacramento Kings",
+      "date_label": "Today",
+      "event_id": "401810684",
+      "game_time_est": "8:00 PM",
+      "home_team": "Memphis Grizzlies"
+    },
+    {
+      "away_team": "Utah Jazz",
+      "date_label": "Today",
+      "event_id": "401810685",
+      "game_time_est": "9:30 PM",
+      "home_team": "Houston Rockets"
+    },
+    {
+      "away_team": "Philadelphia 76ers",
+      "date_label": "Tomorrow",
+      "event_id": "401810686",
+      "game_time_est": "7:00 PM",
+      "home_team": "Indiana Pacers"
+    },
+    {
+      "away_team": "Washington Wizards",
+      "date_label": "Tomorrow",
+      "event_id": "401810687",
+      "game_time_est": "7:30 PM",
+      "home_team": "Atlanta Hawks"
+    },
+    {
+      "away_team": "Dallas Mavericks",
+      "date_label": "Tomorrow",
+      "event_id": "401810688",
+      "game_time_est": "7:30 PM",
+      "home_team": "Brooklyn Nets"
+    },
+    {
+      "away_team": "Oklahoma City Thunder",
+      "date_label": "Tomorrow",
+      "event_id": "401810689",
+      "game_time_est": "7:30 PM",
+      "home_team": "Toronto Raptors"
+    },
+    {
+      "away_team": "New York Knicks",
+      "date_label": "Tomorrow",
+      "event_id": "401810690",
+      "game_time_est": "7:30 PM",
+      "home_team": "Cleveland Cavaliers"
+    },
+    {
+      "away_team": "Charlotte Hornets",
+      "date_label": "Tomorrow",
+      "event_id": "401810691",
+      "game_time_est": "8:00 PM",
+      "home_team": "Chicago Bulls"
+    },
+    {
+      "away_team": "Miami Heat",
+      "date_label": "Tomorrow",
+      "event_id": "401810692",
+      "game_time_est": "8:00 PM",
+      "home_team": "Milwaukee Bucks"
+    },
+    {
+      "away_team": "Golden State Warriors",
+      "date_label": "Tomorrow",
+      "event_id": "401810693",
+      "game_time_est": "8:00 PM",
+      "home_team": "New Orleans Pelicans"
+    },
+    {
+      "away_team": "Boston Celtics",
+      "date_label": "Tomorrow",
+      "event_id": "401810694",
+      "game_time_est": "9:00 PM",
+      "home_team": "Phoenix Suns"
+    },
+    {
+      "away_team": "Minnesota Timberwolves",
+      "date_label": "Tomorrow",
+      "event_id": "401810696",
+      "game_time_est": "10:00 PM",
+      "home_team": "Portland Trail Blazers"
+    },
+    {
+      "away_team": "Orlando Magic",
+      "date_label": "Tomorrow",
+      "event_id": "401810695",
+      "game_time_est": "10:30 PM",
+      "home_team": "Los Angeles Lakers"
+    }
+  ],
+  "slate": {
+    "game_count": 14,
+    "has_today": true,
+    "has_tomorrow": true
+  }
+}

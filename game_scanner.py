@@ -1048,7 +1048,8 @@ def get_top_props(sport="nba"):
         game_date = game.get("game_date", "")
         try:
             props = get_game_props(eid, sport)
-        except Exception:
+        except Exception as e:
+            print(f"[get_top_props] Failed for {matchup}: {type(e).__name__}: {str(e)[:100]}", flush=True)
             props = []
         for p in props:
             p["matchup"] = matchup
