@@ -108,16 +108,35 @@ SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "chance.kelly2003@gmail.com").split(",") if e.strip()}
 
 _jwks_client = None
+_jwks_failed = False
+_jwks_last_attempt = 0
+_jwks_warning_logged = False
 
 
 def _get_jwks_client():
     """Lazily initialize JWKS client to avoid startup crash if Supabase is unreachable."""
-    global _jwks_client
+    global _jwks_client, _jwks_failed, _jwks_last_attempt
+    import time
+
+    # If JWKS previously failed, only retry every 5 minutes
+    if _jwks_failed and (time.time() - _jwks_last_attempt) < 300:
+        return None
+
     if _jwks_client is None and SUPABASE_URL:
         try:
-            _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/jwks")
-        except Exception:
-            pass
+            _jwks_last_attempt = time.time()
+            # Add cache_keys=True to reduce unnecessary fetches
+            _jwks_client = jwt.PyJWKClient(
+                f"{SUPABASE_URL}/auth/v1/jwks",
+                cache_keys=True,
+                max_cached_keys=16,
+                cache_jwk_set_for_minutes=60
+            )
+            _jwks_failed = False
+            print(f"[AUTH] JWKS client initialized successfully", flush=True)
+        except Exception as e:
+            _jwks_failed = True
+            print(f"[AUTH] JWKS initialization failed: {e}", flush=True)
     return _jwks_client
 
 
@@ -157,8 +176,11 @@ def require_auth(f):
                 except Exception as jwks_err:
                     if isinstance(jwks_err, (jwt.ExpiredSignatureError, jwt.InvalidTokenError)):
                         raise
-                    # JWKS unavailable — verify claims without signature
-                    print(f"[AUTH] JWKS unavailable ({jwks_err}), verifying claims only", flush=True)
+                    # JWKS unavailable — verify claims without signature (log once)
+                    global _jwks_warning_logged
+                    if not _jwks_warning_logged:
+                        print(f"[AUTH] JWKS unavailable ({jwks_err}), verifying claims only (future warnings suppressed)", flush=True)
+                        _jwks_warning_logged = True
                     payload = jwt.decode(
                         token, options={"verify_signature": False},
                         algorithms=["ES256"],
