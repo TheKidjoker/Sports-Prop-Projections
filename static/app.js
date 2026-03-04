@@ -1163,11 +1163,19 @@ document.addEventListener("DOMContentLoaded", function () {
         // Already loaded
         if (loadedProps[eventId]) return;
 
-        // Show loading state
-        body.innerHTML = '<div class="prism-loading"><div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div><span style="font-size:0.8rem;color:var(--text-muted)">Loading props...</span></div>';
+        // Show loading state with time estimate
+        body.innerHTML = '<div class="prism-loading"><div class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:middle"></div><span style="font-size:0.8rem;color:var(--text-muted)">Loading props (5-10 sec)...</span></div>';
 
         authFetch("/api/props?event_id=" + eventId + "&sport=" + currentSport)
-            .then(function (res) { return res.json(); })
+            .then(function (res) {
+                if (!res.ok) {
+                    if (res.status === 504) {
+                        throw new Error("Timeout - try again");
+                    }
+                    throw new Error("Failed to load");
+                }
+                return res.json();
+            })
             .then(function (data) {
                 if (data.success) {
                     var props = data.props || [];
@@ -1184,11 +1192,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     }
                     rebuildParlays();
                 } else {
-                    body.innerHTML = '<div class="prism-empty">Failed to load props</div>';
+                    body.innerHTML = '<div class="prism-empty">Error: ' + (data.error || 'Failed to load') + '</div>';
                 }
             })
-            .catch(function () {
-                body.innerHTML = '<div class="prism-empty">Connection error</div>';
+            .catch(function (err) {
+                body.innerHTML = '<div class="prism-empty">' + (err.message || 'Connection error') + '</div>';
             });
     }
 

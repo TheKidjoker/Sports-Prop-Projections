@@ -477,6 +477,10 @@ def _apply_approval_filter(games, sport, is_admin, featured_only=False):
 @require_auth
 def api_props():
     """On-demand PRISM player props for a single game."""
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
     try:
         event_id = request.args.get("event_id", "")
         sport = request.args.get("sport", "nba").lower()
@@ -484,9 +488,21 @@ def api_props():
             return jsonify({"success": False, "error": "event_id required"}), 400
         if sport not in ("nba", "cbb"):
             return jsonify({"success": True, "props": []})
-        props = get_game_props(event_id, sport)
-        return jsonify({"success": True, "props": props})
+
+        # Run with timeout to prevent indefinite hangs
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(get_game_props, event_id, sport)
+            try:
+                props = future.result(timeout=15)  # 15 second timeout
+                elapsed = time.time() - start_time
+                print(f"[api_props] Loaded props for {event_id} in {elapsed:.2f}s", flush=True)
+                return jsonify({"success": True, "props": props})
+            except FuturesTimeoutError:
+                print(f"[api_props] Timeout loading props for {event_id}", flush=True)
+                return jsonify({"success": False, "error": "Request timeout - try again"}), 504
     except Exception as e:
+        print(f"[api_props] Error: {e}", flush=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

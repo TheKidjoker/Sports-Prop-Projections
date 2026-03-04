@@ -1190,6 +1190,7 @@ def get_game_props(event_id, sport="nba"):
     Returns:
         List of prop signal dicts, or empty list on failure.
     """
+    start = time.time()
     if sport not in ("nba", "cbb"):
         return []
 
@@ -1199,10 +1200,11 @@ def get_game_props(event_id, sport="nba"):
     with _props_cache_lock:
         entry = _props_cache.get(cache_key)
         if entry and (now - entry["ts"]) < _PROPS_CACHE_TTL:
-            print(f"[get_game_props] Cache hit for {cache_key}", flush=True)
+            print(f"[get_game_props] Cache hit for {cache_key} in {time.time()-start:.2f}s", flush=True)
             return entry["data"]
 
     # Find the game across today + tomorrow
+    t1 = time.time()
     now_utc = datetime.now(timezone.utc)
     tomorrow_str = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
 
@@ -1216,7 +1218,9 @@ def get_game_props(event_id, sport="nba"):
         if game:
             break
 
+    print(f"[get_game_props] Found game in {time.time()-t1:.2f}s", flush=True)
     if not game:
+        print(f"[get_game_props] Game {event_id} not found", flush=True)
         return []
 
     home_team = game["home_team"]
@@ -1244,17 +1248,17 @@ def get_game_props(event_id, sport="nba"):
         except (ValueError, TypeError):
             pass
 
-    # Parallel fetch: spread, injuries, B2B, O/U, player props odds
+    # Parallel fetch: spread, B2B, O/U, player props odds
+    # NOTE: Injuries removed from parallel fetch - too slow for league-wide fetch
+    t2 = time.time()
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as pool:
         spread_f = pool.submit(get_game_spread, event_id, sport)
-        injuries_f = pool.submit(get_all_injuries, sport)
         b2b_home_f = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
         b2b_away_f = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
         ou_f = pool.submit(get_game_overunder, event_id, sport=sport)
         props_odds_f = pool.submit(get_player_props_odds, sport)
 
         opening, current = spread_f.result()
-        all_injuries = injuries_f.result()
         home_b2b = b2b_home_f.result()
         away_b2b = b2b_away_f.result()
         game_total = ou_f.result()
@@ -1262,31 +1266,14 @@ def get_game_props(event_id, sport="nba"):
             player_props_lines = props_odds_f.result()
         except Exception:
             player_props_lines = {}
+    print(f"[get_game_props] Context fetch completed in {time.time()-t2:.2f}s", flush=True)
 
-    # Build injured_stars list
+    # Build injured_stars list (skip injuries for props - not critical for PRISM)
+    # Injuries can take 5-10 seconds for league-wide fetch, so we skip for on-demand props
     injured_stars = []
-    for team_name in [home_team, away_team]:
-        for injury in all_injuries.get(team_name, []):
-            if injury.get("status", "").lower() == "out":
-                pid = injury.get("player_id")
-                player_stats = None
-                star = False
-                star_reason = ""
-                if pid:
-                    player_stats = get_player_season_averages(pid, sport)
-                    if player_stats:
-                        star, star_reason = is_star_player(player_stats, sport)
-                injured_stars.append({
-                    "player_name": injury["player_name"],
-                    "is_star": star,
-                    "star_reason": star_reason,
-                    "is_recent": is_recent_injury(injury.get("injury_date", "")),
-                    "status": injury["status"],
-                    "team": team_name,
-                    "ppg": player_stats.get("ppg", 0) if player_stats else 0,
-                })
 
     # Run PRISM analysis
+    t3 = time.time()
     results = _run_prism_analysis(
         home_team_id, away_team_id, home_team, away_team,
         event_id, game_date_str, current, slot_type,
@@ -1294,6 +1281,7 @@ def get_game_props(event_id, sport="nba"):
         sport,
         home_b2b=home_b2b, away_b2b=away_b2b, game_total=game_total,
     )
+    print(f"[get_game_props] PRISM analysis completed in {time.time()-t3:.2f}s", flush=True)
 
     # Cache the results
     with _props_cache_lock:
@@ -1304,4 +1292,5 @@ def get_game_props(event_id, sport="nba"):
             for old_key in oldest[:len(_props_cache) - 50]:
                 del _props_cache[old_key]
 
+    print(f"[get_game_props] Total time: {time.time()-start:.2f}s for {len(results)} props", flush=True)
     return results
