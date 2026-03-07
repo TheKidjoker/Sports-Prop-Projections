@@ -2082,6 +2082,10 @@ def react_catchall(path):
     file_path = os.path.join(REACT_DIST, path)
     if os.path.isfile(file_path):
         return send_from_directory(REACT_DIST, path)
+    # Asset requests for missing files should 404, not return HTML
+    # (prevents MIME type errors when old hashed JS/CSS files are requested)
+    if path.startswith("assets/"):
+        return "Not Found", 404
     # Otherwise fall through to React Router
     return send_from_directory(REACT_DIST, "index.html")
 
