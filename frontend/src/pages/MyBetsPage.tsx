@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
-import { useTrackedBets, useGradeBets, useDeleteBet, useBetsDashboard } from "@/hooks/use-bets";
+import { useGradeBets, useDeleteBet, useBetsCombined } from "@/hooks/use-bets";
 import { toLowerSport, type Sport, type TrackedBet } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -118,8 +118,9 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
   const activeSport = sport ? toLowerSport(sport) : undefined;
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
-  const { data: betsData, isLoading } = useTrackedBets(activeSport, statusFilter);
-  const { data: dashData } = useBetsDashboard(activeSport);
+  const { data: combinedData, isLoading } = useBetsCombined(activeSport, statusFilter);
+  const bets = combinedData?.bets ?? [];
+  const dashboard = combinedData?.dashboard;
   const gradeBets = useGradeBets();
   const deleteBet = useDeleteBet();
 
@@ -127,8 +128,8 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
   const hasAutoGraded = useRef(false);
   useEffect(() => {
     if (hasAutoGraded.current) return;
-    if (!betsData?.bets) return;
-    const hasPending = betsData.bets.some((b) => b.result === "PENDING");
+    if (!bets.length) return;
+    const hasPending = bets.some((b) => b.result === "PENDING");
     if (hasPending) {
       hasAutoGraded.current = true;
       gradeBets.mutate(undefined, {
@@ -139,10 +140,10 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
         },
       });
     }
-  }, [betsData?.bets]);
+  }, [bets]);
 
   const statuses = ["ALL", "PENDING", "WIN", "LOSS", "PUSH"];
-  const overall = dashData?.overall;
+  const overall = dashboard?.overall;
 
   return (
     <div className="py-6 px-6 max-w-5xl mx-auto">
@@ -226,15 +227,15 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
         </div>
       )}
 
-      {betsData?.bets && betsData.bets.length > 0 && (
+      {bets.length > 0 && (
         <div className="card-surface rounded-sm overflow-hidden">
-          {betsData.bets.map((bet) => (
+          {bets.map((bet) => (
             <BetLine key={bet.id} bet={bet} />
           ))}
         </div>
       )}
 
-      {betsData?.bets && betsData.bets.length === 0 && (
+      {!isLoading && bets.length === 0 && (
         <div className="text-center py-10">
           <p className="text-muted-foreground text-sm font-heading tracking-wider">
             No bets found

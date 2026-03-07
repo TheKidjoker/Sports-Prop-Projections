@@ -1,10 +1,12 @@
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle } from "lucide-react";
 import { PickCard } from "./PickCard";
 import { PickCardSkeleton } from "./PickCardSkeleton";
 import { LogoLoader } from "@/components/ui/LogoLoader";
 import { useScan } from "@/hooks/use-scan";
+import { fetchTopProps } from "@/lib/api";
 import { toLowerSport, type Sport } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
 
@@ -16,11 +18,23 @@ interface ScanResultsProps {
 
 export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
   const lowerSport = toLowerSport(sport);
+  const queryClient = useQueryClient();
   const { scan, isScanning, picks, pendingReview, error } = useScan(lowerSport);
 
   useEffect(() => {
     scan();
   }, [sport]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefetch props in background after scan completes
+  useEffect(() => {
+    if (!isScanning && picks.length > 0 && ["nba", "nhl", "cbb"].includes(lowerSport)) {
+      queryClient.prefetchQuery({
+        queryKey: ["top-props", lowerSport],
+        queryFn: () => fetchTopProps(lowerSport),
+        staleTime: 60_000,
+      });
+    }
+  }, [isScanning, picks.length, lowerSport, queryClient]);
 
   // Sort all picks by confidence descending
   const sorted = [...picks].sort((a, b) => b.coverPct - a.coverPct);

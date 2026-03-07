@@ -235,6 +235,25 @@ def scan_all_games(sport="nba", date_str=None):
     now = datetime.now()
     day_of_week = now.strftime("%A")
 
+    # Pre-fetch unique team stats (deduplicates across games — 14 games may share ~15 teams)
+    _team_stats_cache = {}
+    unique_team_ids = set()
+    for g in sorted_games:
+        if g.get("home_team_id"):
+            unique_team_ids.add(g["home_team_id"])
+        if g.get("away_team_id"):
+            unique_team_ids.add(g["away_team_id"])
+    if unique_team_ids:
+        with ThreadPoolExecutor(max_workers=4) as ts_pool:
+            ts_futures = {ts_pool.submit(get_team_stats, tid, sport): tid for tid in unique_team_ids}
+            for f in as_completed(ts_futures):
+                tid = ts_futures[f]
+                try:
+                    _team_stats_cache[tid] = f.result(timeout=10)
+                except Exception:
+                    _team_stats_cache[tid] = None
+        print(f"[scan_all_games] Pre-fetched team stats for {len(_team_stats_cache)} unique teams", flush=True)
+
     # NFL: detect last non-SNF Sunday game
     last_sunday_non_snf_idx = None
     if sport == "nfl" and now.strftime("%A").lower() == "sunday":
@@ -263,6 +282,7 @@ def scan_all_games(sport="nba", date_str=None):
             is_last_sunday_game=is_last_sunday,
             odds_data=odds_data,
             lightweight=is_tomorrow,
+            team_stats_cache=_team_stats_cache,
         )
 
     with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
@@ -449,7 +469,7 @@ def _detect_pace_mismatch(home_stats, away_stats, home_team, away_team, sport="n
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
                           is_last_sunday_game=False, odds_data=None,
-                          lightweight=False):
+                          lightweight=False, team_stats_cache=None):
     """
     Returns analysis dict for one game.
     lightweight=True skips expensive API calls (PRISM, B2B, H2H, NFL weather/trends)
@@ -546,10 +566,13 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                 if _run_ou:
                     ou_future = api_pool.submit(_analyze_overunder, event_id, home_team_id, away_team_id, sport)
 
-            # Team stats for pace mismatch detection
+            # Team stats for pace mismatch detection (use pre-fetched cache if available)
             if home_team_id and away_team_id:
-                home_stats_future = api_pool.submit(get_team_stats, home_team_id, sport)
-                away_stats_future = api_pool.submit(get_team_stats, away_team_id, sport)
+                if team_stats_cache and home_team_id in team_stats_cache and away_team_id in team_stats_cache:
+                    pass  # will use team_stats_cache directly below
+                else:
+                    home_stats_future = api_pool.submit(get_team_stats, home_team_id, sport)
+                    away_stats_future = api_pool.submit(get_team_stats, away_team_id, sport)
 
         # ── Collect spread result ──
         opening, current = spread_future.result()
@@ -684,11 +707,15 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         # PRISM Player Props — now loaded on-demand via /api/props
         # (removed from scan loop to speed up Quick Picks)
 
-    # Pace mismatch detection (uses team stats from parallel fetch)
+    # Pace mismatch detection (uses pre-fetched cache or parallel fetch)
     pace_mismatch = {"is_mismatch": False}
     if not lightweight:
-        home_stats = home_stats_future.result() if home_stats_future else None
-        away_stats = away_stats_future.result() if away_stats_future else None
+        if team_stats_cache and home_team_id in team_stats_cache and away_team_id in team_stats_cache:
+            home_stats = team_stats_cache.get(home_team_id)
+            away_stats = team_stats_cache.get(away_team_id)
+        else:
+            home_stats = home_stats_future.result() if home_stats_future else None
+            away_stats = away_stats_future.result() if away_stats_future else None
         pace_mismatch = _detect_pace_mismatch(home_stats, away_stats, home_team, away_team, sport)
 
     # Calculate score and cover percentage
@@ -1320,13 +1347,25 @@ def calculate_prop_ev(projection, line, edge, confidence, signal):
 def get_top_props_with_ev(sport="nba"):
     """
     Fetch all props and add EV calculations.
+    Reuses cached base props from cache_manager if available (saves ~45s).
     Returns props sorted by EV (highest first).
     """
-    try:
-        props = get_top_props(sport)
-    except Exception as e:
-        print(f"[get_top_props_with_ev] Failed to fetch props: {e}", flush=True)
-        return []
+    import cache_manager
+
+    # Try cached base props first (already computed by /api/top-props or scan_cache)
+    base_props = cache_manager.get_cached_props(sport, cache_minutes=15)
+    if base_props is not None:
+        print(f"[get_top_props_with_ev] Reusing cached base props for {sport}: {len(base_props)} props", flush=True)
+    else:
+        try:
+            base_props = get_top_props(sport)
+            cache_manager.cache_props(sport, base_props)
+        except Exception as e:
+            print(f"[get_top_props_with_ev] Failed to fetch props: {e}", flush=True)
+            return []
+
+    # Shallow copy to avoid mutating cached data
+    props = [dict(p) for p in base_props]
 
     # Add EV to each prop
     for p in props:
@@ -1370,24 +1409,37 @@ def get_prop_ev_analysis(sport="nba"):
     if sport not in ("nba", "cbb", "nhl"):
         return []
 
-    # Fetch PRISM projections and market odds in parallel
-    prism_props = []
+    # Try cached base props first, fetch odds in parallel
+    import cache_manager
+    prism_props = cache_manager.get_cached_props(sport, cache_minutes=15)
+    if prism_props is not None:
+        print(f"[get_prop_ev_analysis] Reusing cached base props for {sport}: {len(prism_props)} props", flush=True)
+
     odds_data = {}
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        prism_f = pool.submit(get_top_props, sport)
-        odds_f = pool.submit(get_player_props_odds_full, sport)
-
+    if prism_props is not None:
+        # Props cached — only need to fetch odds
         try:
-            prism_props = prism_f.result(timeout=55)
-        except Exception as e:
-            print(f"[get_prop_ev_analysis] PRISM fetch failed: {e}", flush=True)
-            prism_props = []
-
-        try:
-            odds_data = odds_f.result(timeout=15)
+            odds_data = get_player_props_odds_full(sport)
         except Exception:
             odds_data = {}
+    else:
+        # No cache — fetch both in parallel
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            prism_f = pool.submit(get_top_props, sport)
+            odds_f = pool.submit(get_player_props_odds_full, sport)
+
+            try:
+                prism_props = prism_f.result(timeout=55)
+                cache_manager.cache_props(sport, prism_props)
+            except Exception as e:
+                print(f"[get_prop_ev_analysis] PRISM fetch failed: {e}", flush=True)
+                prism_props = []
+
+            try:
+                odds_data = odds_f.result(timeout=15)
+            except Exception:
+                odds_data = {}
 
     if not prism_props:
         return []

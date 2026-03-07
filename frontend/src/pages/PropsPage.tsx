@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTopProps } from "@/hooks/use-props";
 import { PropRow } from "@/components/picks/PropRow";
 import { LogoLoader } from "@/components/ui/LogoLoader";
@@ -16,6 +16,11 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   const { data, isLoading, error } = useTopProps(activeSport, loadAll);
 
   const propsAvailable = activeSport === "nba" || activeSport === "nhl";
+
+  const sortedProps = useMemo(
+    () => data?.props ? [...data.props].sort((a, b) => b.confidence - a.confidence) : [],
+    [data?.props]
+  );
 
   const handleTrackProp = (prop: PropSignal) => {
     if (!onTrackBet) return;
@@ -79,7 +84,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         <LogoLoader text="LOADING PROPS..." />
       )}
 
-      {data?.props && data.props.length > 0 && (
+      {sortedProps.length > 0 && (
         <div className="card-surface rounded-sm overflow-hidden">
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-muted/30 text-[10px] font-heading tracking-wider text-muted-foreground">
@@ -92,19 +97,17 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
             <span className="w-8 text-right">CONF</span>
             <span className="w-6" />
           </div>
-          {data.props
-            .sort((a, b) => b.confidence - a.confidence)
-            .map((prop, i) => (
-              <PropRow
-                key={`${prop.player_name}-${prop.stat}-${i}`}
-                prop={prop}
-                onTrack={onTrackBet ? handleTrackProp : undefined}
-              />
-            ))}
+          {sortedProps.map((prop, i) => (
+            <PropRow
+              key={`${prop.player_name}-${prop.stat}-${i}`}
+              prop={prop}
+              onTrack={onTrackBet ? handleTrackProp : undefined}
+            />
+          ))}
         </div>
       )}
 
-      {loadAll && !isLoading && (!data?.props || data.props.length === 0) && (
+      {loadAll && !isLoading && sortedProps.length === 0 && (
         <div className="text-center py-10">
           <p className="text-muted-foreground text-sm font-heading tracking-wider">
             No props available

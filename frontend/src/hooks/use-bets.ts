@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchBets, saveBets, gradeBets, fetchBetsDashboard, deleteBet } from "@/lib/api";
+import { fetchBets, saveBets, gradeBets, fetchBetsDashboard, deleteBet, fetchBetsCombined } from "@/lib/api";
 import type { SportLower } from "@/lib/types";
 
 export function useTrackedBets(sport?: SportLower, status?: string) {
@@ -16,6 +16,7 @@ export function useSaveBets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
       queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-combined"] });
     },
   });
 }
@@ -27,6 +28,7 @@ export function useGradeBets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
       queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-combined"] });
     },
   });
 }
@@ -38,6 +40,7 @@ export function useDeleteBet() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
       queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-combined"] });
     },
   });
 }
@@ -46,5 +49,12 @@ export function useBetsDashboard(sport?: SportLower) {
   return useQuery({
     queryKey: ["bets-dashboard", sport ?? "all"],
     queryFn: () => fetchBetsDashboard(sport),
+  });
+}
+
+export function useBetsCombined(sport?: SportLower, status?: string) {
+  return useQuery({
+    queryKey: ["bets-combined", sport ?? "all", status ?? "all"],
+    queryFn: () => fetchBetsCombined(sport, status),
   });
 }

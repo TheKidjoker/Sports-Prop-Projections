@@ -469,6 +469,58 @@ def get_tracked_dashboard(user_email, sport=None):
     }
 
 
+def get_bets_with_dashboard(user_email, sport=None, status=None):
+    """Combined bets list + dashboard in single DB query (saves duplicate round trip)."""
+    all_bets = get_tracked_bets(user_email, sport=sport)
+
+    # Build dashboard from all_bets (same logic as get_tracked_dashboard)
+    decided = [b for b in all_bets if b["result"] in ("WIN", "LOSS", "PUSH")]
+    pending = [b for b in all_bets if b["result"] == "PENDING"]
+
+    w = sum(1 for b in decided if b["result"] == "WIN")
+    l = sum(1 for b in decided if b["result"] == "LOSS")
+    p = sum(1 for b in decided if b["result"] == "PUSH")
+    total = w + l
+    win_rate = round(w / total * 100, 1) if total > 0 else 0
+    ci = wilson_interval(w, total) if total > 0 else (0, 0)
+
+    roi = 0
+    if total > 0:
+        profit = w * (100 / 110) - l
+        roi = round(profit / (w + l) * 100, 1)
+
+    streak = _compute_streak(decided)
+    by_type = _aggregate_by_field(decided, "bet_type")
+    by_sport = _aggregate_by_field(decided, "sport")
+    spread_decided = [b for b in decided if b["bet_type"] == "spread"]
+    by_rec = _aggregate_by_field(spread_decided, "recommendation")
+    prop_decided = [b for b in decided if b["bet_type"] == "prop"]
+    by_stat = _aggregate_by_field(prop_decided, "stat_type")
+
+    clv_bets = [b for b in all_bets if b.get("bet_type") == "spread" and b.get("clv") is not None]
+    clv_total = len(clv_bets)
+    avg_clv = round(sum(b["clv"] for b in clv_bets) / clv_total, 2) if clv_total else None
+    beat_close = sum(1 for b in clv_bets if b.get("clv_direction") == 1)
+    beat_close_rate = round(beat_close / clv_total * 100, 1) if clv_total else None
+
+    dashboard = {
+        "overall": {
+            "wins": w, "losses": l, "pushes": p, "total": total,
+            "pending": len(pending), "win_rate": win_rate,
+            "win_rate_ci": {"ci_lower": ci[0], "ci_upper": ci[1]},
+            "roi": roi, "streak": streak,
+        },
+        "clv": {"avg_clv": avg_clv, "beat_close_rate": beat_close_rate, "clv_total": clv_total},
+        "by_type": by_type, "by_sport": by_sport,
+        "by_recommendation": by_rec, "by_stat_type": by_stat,
+        "recent": [_bet_to_dict(b) for b in all_bets[:50]],
+    }
+
+    # Apply status filter for the bets list (dashboard uses all bets)
+    filtered = [b for b in all_bets if b["result"] == status] if status else all_bets
+    return {"bets": filtered, "dashboard": dashboard}
+
+
 def _compute_streak(decided):
     """Compute current W/L streak from most recent bets."""
     if not decided:

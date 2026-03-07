@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTmMetrics, useTmEvTrain } from "@/hooks/use-test-model";
 import { TmStatCards } from "./TmStatCards";
 import { TmProgressBar } from "./TmProgressBar";
@@ -17,6 +18,14 @@ export function MetricsPanel({ sport }: MetricsPanelProps) {
   const hasEv = EV_SPORTS.includes(sport);
   const evProgress = ev.status.data?.progress;
   const evRunning = evProgress?.status === "running";
+  const evComplete = evProgress?.status === "complete";
+
+  // Auto-fetch EV metrics when training completes
+  useEffect(() => {
+    if (evComplete) {
+      ev.metrics.refetch();
+    }
+  }, [evComplete]);
 
   const d = metricsQ.data;
 

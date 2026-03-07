@@ -167,6 +167,14 @@ export function deleteBet(betId: number) {
   return del<{ success: boolean }>(`/api/bets/${betId}`);
 }
 
+export function fetchBetsCombined(sport?: SportLower, status?: string) {
+  const params = new URLSearchParams();
+  if (sport) params.set("sport", sport);
+  if (status) params.set("status", status);
+  const qs = params.toString();
+  return get<{ success: boolean; bets: TrackedBet[]; dashboard: Omit<BetDashboardResponse, "success"> }>(`/api/bets/combined${qs ? `?${qs}` : ""}`);
+}
+
 // ─── Pick Curation ─────────────────────────────────────
 export function fetchPendingPicks(sport: SportLower) {
   return get<{ success: boolean; picks: PendingPick[] }>(`/api/picks/pending?sport=${sport}`);

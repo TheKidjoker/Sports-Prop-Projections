@@ -9,6 +9,10 @@ export function useScan(sport: SportLower) {
     mutationFn: () => scanSport(sport),
     onSuccess: (data) => {
       queryClient.setQueryData(["scan", sport], data);
+      // Seed props cache from scan response (avoids separate fetch)
+      if (data.props) {
+        queryClient.setQueryData(["top-props", sport], { success: true, props: data.props });
+      }
     },
   });
 

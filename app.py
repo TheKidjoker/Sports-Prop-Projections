@@ -24,6 +24,7 @@ import tracker
 import bet_tracker
 import pick_curation
 import scan_cache
+import cache_manager
 
 try:
     from test_model import db as tm_db
@@ -408,13 +409,16 @@ def api_scan():
             if games is None:
                 return jsonify({"success": True, "games": [],
                                 "picks_pending_review": True})
-            return jsonify({
+            response = {
                 "success": True, "games": games,
                 "cached": True, "cache_age": round(age),
                 "signal_freshness": freshness,
                 "scan_age_minutes": cache_age_min,
                 "featured_mode": featured_only,
-            })
+            }
+            if sport in ("nba", "nhl", "cbb"):
+                response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
+            return jsonify(response)
 
         # No cache — wait briefly for background warm-up before blocking
         import time as _time
@@ -427,11 +431,14 @@ def api_scan():
                 if games is None:
                     return jsonify({"success": True, "games": [],
                                     "picks_pending_review": True})
-                return jsonify({
+                response = {
                     "success": True, "games": games,
                     "cached": True, "cache_age": round(age),
                     "featured_mode": featured_only,
-                })
+                }
+                if sport in ("nba", "nhl", "cbb"):
+                    response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
+                return jsonify(response)
 
         # Still empty — blocking scan (safety net)
         results = scan_all_games(sport)
@@ -444,7 +451,10 @@ def api_scan():
         if games is None:
             return jsonify({"success": True, "games": [],
                             "picks_pending_review": True})
-        return jsonify({"success": True, "games": games, "featured_mode": featured_only})
+        response = {"success": True, "games": games, "featured_mode": featured_only}
+        if sport in ("nba", "nhl", "cbb"):
+            response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
+        return jsonify(response)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -620,50 +630,18 @@ def api_ev_player_props():
         if sport not in ("nba", "cbb", "nhl"):
             return jsonify({"success": True, "props": []})
 
-        # Check persistent cache first (use separate cache key for EV props)
         import cache_manager
-        supabase = cache_manager._get_supabase()
-        if supabase:
-            try:
-                from datetime import datetime, timedelta, timezone
-                cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-                result = (
-                    supabase.table("props_cache")
-                    .select("*")
-                    .eq("sport", f"{sport}_ev")
-                    .gte("created_at", cutoff.isoformat())
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if result.data:
-                    import json
-                    cached = json.loads(result.data[0]["results"])
-                    return jsonify({"success": True, "props": cached, "cached": True})
-            except Exception:
-                pass
+        cached = cache_manager.get_cached_props(f"{sport}_ev", cache_minutes=10)
+        if cached is not None:
+            return jsonify({"success": True, "props": cached, "cached": True})
 
-        # Cache miss - compute fresh
         props = get_top_props_with_ev(sport)
-
-        # Store in cache with _ev suffix
-        if supabase:
-            try:
-                import json
-                supabase.table("props_cache").insert({
-                    "sport": f"{sport}_ev",
-                    "results": json.dumps(props),
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }).execute()
-            except Exception:
-                pass
+        cache_manager.cache_props(f"{sport}_ev", props)
 
         return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
-        # Log detailed error for debugging
         import traceback
         print(f"[api_ev_player_props] Error: {traceback.format_exc()}", flush=True)
-        # Return empty props instead of 500 error (graceful degradation)
         return jsonify({"success": True, "props": [], "error": str(e)})
 
 
@@ -676,46 +654,18 @@ def api_prop_ev():
         if sport not in ("nba", "nhl"):
             return jsonify({"success": True, "props": []})
 
-        # Check persistent cache (10 min TTL)
         import cache_manager
-        supabase = cache_manager._get_supabase()
-        if supabase:
-            try:
-                cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-                result = (
-                    supabase.table("props_cache")
-                    .select("*")
-                    .eq("sport", f"{sport}_prop_ev")
-                    .gte("created_at", cutoff.isoformat())
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if result.data:
-                    import json
-                    cached = json.loads(result.data[0]["results"])
-                    return jsonify({"success": True, "props": cached, "cached": True})
-            except Exception:
-                pass
+        cached = cache_manager.get_cached_props(f"{sport}_prop_ev", cache_minutes=10)
+        if cached is not None:
+            return jsonify({"success": True, "props": cached, "cached": True})
 
-        # Cache miss — compute fresh
         props = get_prop_ev_analysis(sport)
 
         # Strip recent_games from response (too large for JSON)
         for p in props:
             p.pop("recent_games", None)
 
-        # Store in cache
-        if supabase:
-            try:
-                import json
-                supabase.table("props_cache").insert({
-                    "sport": f"{sport}_prop_ev",
-                    "results": json.dumps(props),
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }).execute()
-            except Exception:
-                pass
+        cache_manager.cache_props(f"{sport}_prop_ev", props)
 
         return jsonify({"success": True, "props": props, "cached": False})
     except Exception as e:
@@ -1805,6 +1755,23 @@ def api_bets_dashboard():
             sport = None
         stats = bet_tracker.get_tracked_dashboard(request.user_email, sport=sport)
         return jsonify({"success": True, **stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/bets/combined", methods=["GET"])
+@require_auth
+def api_bets_combined():
+    """Combined bets list + dashboard in a single request (saves a round trip)."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        sport = request.args.get("sport", "").lower() or None
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+            sport = None
+        status = request.args.get("status", "").upper() or None
+        result = bet_tracker.get_bets_with_dashboard(request.user_email, sport=sport, status=status)
+        return jsonify({"success": True, **result})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

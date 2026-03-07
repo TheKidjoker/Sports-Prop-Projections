@@ -162,6 +162,24 @@ def _scan(sport):
             bet_tracker.fetch_closing_lines_for_bets(sport)
         except Exception:
             pass
+        # Pre-warm props cache for props-eligible sports
+        if sport in ("nba", "nhl", "cbb"):
+            try:
+                from game_scanner import get_top_props
+                props = get_top_props(sport)
+                cache_manager.cache_props(sport, props)
+                logger.info("[scan_cache] Pre-warmed props for %s: %d props", sport, len(props))
+            except Exception:
+                logger.warning("[scan_cache] Props pre-warm failed for %s", sport)
+
+            # Pre-warm EV props (reuses base props from cache — just adds math)
+            try:
+                from game_scanner import get_top_props_with_ev
+                ev_props = get_top_props_with_ev(sport)
+                cache_manager.cache_props(f"{sport}_ev", ev_props)
+                logger.info("[scan_cache] Pre-warmed EV props for %s: %d props", sport, len(ev_props))
+            except Exception:
+                logger.warning("[scan_cache] EV props pre-warm failed for %s", sport)
         logger.info("[scan_cache] Refreshed %s: %d games", sport, len(results))
         return results
     except Exception as e:
