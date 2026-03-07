@@ -308,31 +308,14 @@
                 </div>
             </div>
             <div class="tm-tabs">
-                <button type="button" class="tm-tab active" data-tm-tab="scan">Today's Model</button>
-                <button type="button" class="tm-tab" data-tm-tab="backtest">Backtest</button>
-                <button type="button" class="tm-tab" data-tm-tab="rules">Rules Replay</button>
+                <button type="button" class="tm-tab active" data-tm-tab="rules">Rules Replay</button>
                 <button type="button" class="tm-tab" data-tm-tab="calibration">Calibration</button>
                 <button type="button" class="tm-tab" data-tm-tab="collect">Data Collection</button>
                 <button type="button" class="tm-tab" data-tm-tab="slots">Slot Validation</button>
                 <button type="button" class="tm-tab" data-tm-tab="metrics">Metrics</button>
             </div>
 
-            <div id="tm-panel-scan" class="tm-panel">
-                <button type="button" class="tm-action-btn" id="tm-scan-btn">Run Model Scan</button>
-                <div id="tm-scan-loading" class="loading hidden">
-                    <div class="spinner"></div>
-                    <p>Running ML model scan...</p>
-                </div>
-                <div id="tm-scan-results"></div>
-            </div>
-
-            <div id="tm-panel-backtest" class="tm-panel hidden">
-                <button type="button" class="tm-action-btn" id="tm-backtest-btn">Run Backtest</button>
-                <div id="tm-backtest-progress"></div>
-                <div id="tm-backtest-results"></div>
-            </div>
-
-            <div id="tm-panel-rules" class="tm-panel hidden">
+            <div id="tm-panel-rules" class="tm-panel">
                 <p class="tm-panel-desc">Replays the actual scoring system against historical outcomes. Tests every factor except injury data, sharp money, feedback loop, and weather.</p>
                 <button type="button" class="tm-action-btn" id="tm-rules-btn">Run Rules Replay</button>
                 <div id="tm-rules-progress"></div>

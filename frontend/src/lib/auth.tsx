@@ -68,8 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Once Supabase client is ready, listen for auth changes
   useEffect(() => {
     if (!supabase) return;
+    let cancelled = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (cancelled) return;
       if (session?.access_token) {
         setAccessToken(session.access_token);
         setIsAuthenticated(true);
@@ -77,9 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
           const me = await fetchAuthMe();
-          setIsAdmin(me.is_admin);
+          if (!cancelled) setIsAdmin(me.is_admin);
         } catch {
-          setIsAdmin(false);
+          if (!cancelled) setIsAdmin(false);
         }
       } else {
         setAccessToken(null);
@@ -87,21 +89,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAdmin(false);
         setEmail(null);
       }
-      setIsLoading(false);
+      if (!cancelled) setIsLoading(false);
     });
 
     // Check existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
       if (session?.access_token) {
         setAccessToken(session.access_token);
         setIsAuthenticated(true);
         setEmail(session.user.email ?? null);
-        fetchAuthMe().then((me) => setIsAdmin(me.is_admin)).catch(() => setIsAdmin(false));
+        fetchAuthMe().then((me) => { if (!cancelled) setIsAdmin(me.is_admin); }).catch(() => { if (!cancelled) setIsAdmin(false); });
       }
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   // Wire 401 handler

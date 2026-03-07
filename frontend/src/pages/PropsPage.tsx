@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTopProps } from "@/hooks/use-props";
 import { PropRow } from "@/components/picks/PropRow";
+import { LogoLoader } from "@/components/ui/LogoLoader";
 import { toLowerSport, type Sport, type PropSignal } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
 
@@ -18,6 +19,10 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
 
   const handleTrackProp = (prop: PropSignal) => {
     if (!onTrackBet) return;
+    const direction = prop.edge > 0 ? "OVER" : "UNDER";
+    const dirLabel = direction === "OVER" ? "o" : "u";
+    const home_team = prop.is_home ? prop.team : prop.opponent;
+    const away_team = prop.is_home ? prop.opponent : prop.team;
     onTrackBet({
       event_id: prop.event_id,
       sport: activeSport,
@@ -25,7 +30,15 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       team: prop.team,
       stat: prop.stat,
       line: prop.line,
-      label: `${prop.player_name} ${prop.stat} o${prop.line}`,
+      label: `${prop.player_name} ${prop.stat} ${dirLabel}${prop.line}`,
+      home_team,
+      away_team,
+      player_name: prop.player_name,
+      direction,
+      projection: prop.projection,
+      edge: prop.edge,
+      confidence: prop.confidence,
+      signal: prop.signal,
     });
   };
 
@@ -60,6 +73,10 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
             Error: {(error as Error).message}
           </span>
         </div>
+      )}
+
+      {isLoading && loadAll && (
+        <LogoLoader text="LOADING PROPS..." />
       )}
 
       {data?.props && data.props.length > 0 && (

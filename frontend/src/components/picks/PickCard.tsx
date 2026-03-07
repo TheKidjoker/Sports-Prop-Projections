@@ -78,6 +78,12 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       team: pick.spreadLine.split(/\s[+-]/)[0] || pick.awayTeam,
       line,
       label: `${pick.awayTeam} @ ${pick.homeTeam} — ${pick.spreadLine}`,
+      home_team: pick.homeTeam,
+      away_team: pick.awayTeam,
+      recommendation: pick.tier,
+      cover_pct: pick.coverPct,
+      slot_type: pick.slotType,
+      action: pick.actionString,
     });
   };
 

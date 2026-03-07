@@ -2319,9 +2319,6 @@ document.addEventListener("DOMContentLoaded", function () {
             tmSportBtns.forEach(function (b) { b.classList.remove("active"); });
             btn.classList.add("active");
             // Clear progress/results in all panels
-            document.getElementById("tm-scan-results").innerHTML = "";
-            document.getElementById("tm-backtest-progress").innerHTML = "";
-            document.getElementById("tm-backtest-results").innerHTML = "";
             document.getElementById("tm-rules-progress").innerHTML = "";
             document.getElementById("tm-rules-results").innerHTML = "";
             document.getElementById("tm-collect-progress").innerHTML = "";
@@ -2335,15 +2332,13 @@ document.addEventListener("DOMContentLoaded", function () {
             // Re-enable buttons
             document.getElementById("tm-collect-btn").disabled = false;
             document.getElementById("tm-collect-btn").textContent = "Start Collection";
-            document.getElementById("tm-backtest-btn").disabled = false;
-            document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
             document.getElementById("tm-rules-btn").disabled = false;
             document.getElementById("tm-rules-btn").textContent = "Run Rules Replay";
             document.getElementById("tm-slots-btn").disabled = false;
             document.getElementById("tm-slots-btn").textContent = "Run Slot Validation";
             // Reload data for active tab
             var activeTab = document.querySelector(".tm-tab.active");
-            var target = activeTab ? activeTab.getAttribute("data-tm-tab") : "scan";
+            var target = activeTab ? activeTab.getAttribute("data-tm-tab") : "rules";
             if (target === "metrics") tmLoadMetrics();
             if (target === "rules") tmLoadRulesMetrics();
             if (target === "collect") tmPollCollect();
@@ -2562,72 +2557,6 @@ document.addEventListener("DOMContentLoaded", function () {
                     btn.disabled = false;
                     btn.textContent = "Injury Backfill";
                     stopPoll("injuryBackfill");
-                }
-            })
-            .catch(function () {});
-    }
-
-    // ── Backtest ──
-    document.getElementById("tm-backtest-btn").addEventListener("click", function () {
-        var btn = document.getElementById("tm-backtest-btn");
-        btn.disabled = true;
-        btn.textContent = "Running Backtest...";
-        document.getElementById("tm-backtest-results").innerHTML = "";
-
-        authFetch("/api/tm/backtest", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: tmSport })
-        })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-            if (data.success) {
-                tmStartBacktestPoll();
-            } else {
-                btn.disabled = false;
-                btn.textContent = "Run Backtest";
-                document.getElementById("tm-backtest-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Backtest failed') + '</div>';
-            }
-        })
-        .catch(function () {
-            btn.disabled = false;
-            btn.textContent = "Run Backtest";
-            document.getElementById("tm-backtest-results").innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">Connection error</div>';
-        });
-    });
-
-    function tmStartBacktestPoll() {
-        startPoll("backtest", tmPollBacktest);
-    }
-
-    function tmPollBacktest() {
-        authFetch("/api/tm/backtest/status?sport=" + tmSport)
-            .then(function (res) { return res.json(); })
-            .then(function (data) {
-                if (!data.success) return;
-                var prog = data.progress || {};
-                var el = document.getElementById("tm-backtest-progress");
-                var resEl = document.getElementById("tm-backtest-results");
-
-                if (prog.status === "running") {
-                    var pct = prog.total_games > 0 ? Math.round(prog.processed / prog.total_games * 100) : 0;
-                    el.innerHTML = '<div class="tm-progress-bar-container"><div class="tm-progress-bar" style="width:' + pct + '%"></div></div>' +
-                        '<div class="tm-progress-text">Backtesting: ' + prog.processed + '/' + prog.total_games + ' games — ' + (prog.current_date || '') + '</div>';
-                } else if (prog.status === "complete") {
-                    el.innerHTML = '';
-                    document.getElementById("tm-backtest-btn").disabled = false;
-                    document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
-                    stopPoll("backtest");
-
-                    if (prog.metrics) {
-                        resEl.innerHTML = tmRenderMetrics(prog.metrics);
-                    }
-                    tmLoadMetrics();
-                } else if (prog.status === "error") {
-                    el.innerHTML = '<div class="tm-progress-text" style="color:var(--accent-red)">' + (prog.message || 'Backtest error') + '</div>';
-                    document.getElementById("tm-backtest-btn").disabled = false;
-                    document.getElementById("tm-backtest-btn").textContent = "Run Backtest";
-                    stopPoll("backtest");
                 }
             })
             .catch(function () {});
@@ -3198,110 +3127,6 @@ document.addEventListener("DOMContentLoaded", function () {
             html += '</div></div>';
         }
 
-        return html;
-    }
-
-    // ── Model Scan ──
-    document.getElementById("tm-scan-btn").addEventListener("click", function () {
-        var btn = document.getElementById("tm-scan-btn");
-        var loadEl = document.getElementById("tm-scan-loading");
-        btn.disabled = true;
-        loadEl.classList.remove("hidden");
-        document.getElementById("tm-scan-results").innerHTML = "";
-
-        authFetch("/api/tm/scan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sport: tmSport })
-        })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-            btn.disabled = false;
-            loadEl.classList.add("hidden");
-            if (data.success) {
-                tmRenderScanResults(data.games || []);
-            } else {
-                document.getElementById("tm-scan-results").innerHTML =
-                    '<div class="tm-progress-text" style="color:var(--accent-red)">' + (data.error || 'Scan failed') + '</div>';
-            }
-        })
-        .catch(function () {
-            btn.disabled = false;
-            loadEl.classList.add("hidden");
-        });
-    });
-
-    function tmRenderScanResults(games) {
-        var el = document.getElementById("tm-scan-results");
-        if (games.length === 0) {
-            el.innerHTML = '<div class="scan-empty-state"><div class="scan-empty-headline">No games to scan.</div></div>';
-            return;
-        }
-
-        var html = '<h3 class="scan-title">' + tmSport.toUpperCase() + ' Model Scan</h3>';
-        html += '<div class="scan-grid">';
-
-        games.forEach(function (g) {
-            html += buildScanCard(g, tmSport);
-
-            // Add model overlay
-            var tm = g.tm_overlay || {};
-            if (tm.available) {
-                // Remove closing </div> of the scan card and append overlay
-                html = html.slice(0, html.lastIndexOf('</div>'));
-                html += tmBuildOverlay(g, tm);
-                html += '</div>';
-            }
-        });
-
-        html += '</div>';
-        el.innerHTML = html;
-    }
-
-    function tmBuildOverlay(game, tm) {
-        var html = '<div class="tm-model-overlay">';
-        html += '<div class="tm-overlay-header">ML MODEL OVERLAY</div>';
-
-        // Model probability
-        var probPct = (tm.model_prob * 100).toFixed(1);
-        var probClass = tm.model_prob >= 0.6 ? "tm-prob-high" : tm.model_prob >= 0.53 ? "tm-prob-mid" : "tm-prob-low";
-        html += '<div class="tm-prob ' + probClass + '">Model: ' + probPct + '% home covers</div>';
-
-        // Edge metrics
-        var edgeClass = tm.model_edge > 0 ? "tm-edge-pos" : "tm-edge-neg";
-        html += '<div class="tm-edge-row">';
-        html += '<div class="tm-edge-item ' + edgeClass + '">Edge: <span>' + (tm.model_edge > 0 ? '+' : '') + (tm.model_edge * 100).toFixed(1) + '%</span></div>';
-        html += '<div class="tm-edge-item ' + edgeClass + '">EV: <span>' + (tm.model_ev > 0 ? '+' : '') + (tm.model_ev * 100).toFixed(1) + 'c</span></div>';
-        html += '<div class="tm-edge-item ' + edgeClass + '">ROI: <span>' + (tm.model_roi > 0 ? '+' : '') + tm.model_roi + '%</span></div>';
-        html += '</div>';
-
-        // Comparison: model vs rules
-        var rulesPct = game.cover_pct || 0;
-        html += '<div class="tm-comparison">';
-        html += '<span class="tm-vs-label">Rules: ' + rulesPct + '%</span>';
-        html += '<span class="tm-vs-label">vs</span>';
-        html += '<span class="tm-vs-label">Model: ' + probPct + '%</span>';
-        html += '</div>';
-
-        // Cluster
-        if (tm.cluster_id >= 0) {
-            html += '<div class="tm-cluster-row">';
-            html += '<span class="tm-cluster-badge">Cluster ' + tm.cluster_id + '</span>';
-            html += '<span class="tm-alignment">Hit Rate: ' + tm.cluster_hit_rate + '% | Alignment: ' + tm.alignment_confidence + '%</span>';
-            html += '</div>';
-        }
-
-        // Sentiment
-        if (tm.sentiment && tm.sentiment.has_sentiment) {
-            html += '<div class="tm-sentiment-row">';
-            var hClass = tm.sentiment.home_sentiment > 0 ? "tm-sentiment-pos" : tm.sentiment.home_sentiment < 0 ? "tm-sentiment-neg" : "tm-sentiment-neutral";
-            var aClass = tm.sentiment.away_sentiment > 0 ? "tm-sentiment-pos" : tm.sentiment.away_sentiment < 0 ? "tm-sentiment-neg" : "tm-sentiment-neutral";
-            html += '<span class="' + hClass + '">Home: ' + tm.sentiment.home_sentiment.toFixed(2) + '</span>';
-            html += '<span class="' + aClass + '">Away: ' + tm.sentiment.away_sentiment.toFixed(2) + '</span>';
-            html += '</div>';
-        }
-
-        html += '</div>';
         return html;
     }
 

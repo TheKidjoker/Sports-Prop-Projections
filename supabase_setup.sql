@@ -95,6 +95,51 @@ CREATE TABLE IF NOT EXISTS tm_model_runs (
     predictions_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS tm_tracked_bets (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_email TEXT NOT NULL,
+    bet_type TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    game_date TEXT,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    lean_team TEXT,
+    spread_at_pick REAL,
+    action TEXT,
+    recommendation TEXT,
+    cover_pct REAL,
+    slot_type TEXT,
+    player_name TEXT NOT NULL DEFAULT '',
+    stat_type TEXT NOT NULL DEFAULT '',
+    prop_line REAL,
+    prop_direction TEXT,
+    projection REAL,
+    edge REAL,
+    confidence REAL,
+    signal TEXT,
+    result TEXT DEFAULT 'PENDING',
+    actual_value REAL,
+    home_score INTEGER,
+    away_score INTEGER,
+    created_at TEXT NOT NULL,
+    graded_at TEXT,
+    notes TEXT,
+    closing_line REAL,
+    clv REAL,
+    clv_direction INTEGER,
+    kelly_fraction REAL,
+    suggested_units REAL,
+    model_probability REAL,
+    implied_probability REAL,
+    over_odds INTEGER,
+    under_odds INTEGER,
+    expected_value REAL,
+    closing_odds INTEGER,
+    clv_prob_delta REAL,
+    UNIQUE(user_email, event_id, bet_type, player_name, stat_type)
+);
+
 -- ─── 2. Disable RLS on all tables (private backend-only access) ─────────────
 
 ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
@@ -111,6 +156,9 @@ CREATE POLICY "Allow all for service key" ON tm_collection_progress FOR ALL USIN
 
 ALTER TABLE tm_model_runs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for service key" ON tm_model_runs FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE tm_tracked_bets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for service key" ON tm_tracked_bets FOR ALL USING (true) WITH CHECK (true);
 
 -- ─── 3. RPC Functions ───────────────────────────────────────────────────────
 

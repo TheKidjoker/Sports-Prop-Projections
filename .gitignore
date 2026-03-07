@@ -1,7 +1,9 @@
+
+
+
 predictions.db
 __pycache__/
 daily_job.log
 nul
 .claude/
-node_modules/
-frontend/node_modules/
+.scan_cache_lock

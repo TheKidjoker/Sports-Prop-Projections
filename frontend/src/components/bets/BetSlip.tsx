@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { useSaveBets } from "@/hooks/use-bets";
+import { toast } from "sonner";
 
 export interface BetSlipItem {
   event_id: string;
@@ -10,6 +11,21 @@ export interface BetSlipItem {
   stat?: string;
   line: number;
   label: string;
+  // Extra fields for backend persistence
+  home_team?: string;
+  away_team?: string;
+  game_date?: string;
+  recommendation?: string;
+  cover_pct?: number;
+  slot_type?: string;
+  action?: string;
+  // Prop-specific
+  player_name?: string;
+  direction?: string;
+  projection?: number;
+  edge?: number;
+  confidence?: number;
+  signal?: string;
 }
 
 interface BetSlipProps {
@@ -26,18 +42,35 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
 
   const handleConfirm = () => {
     const payload = bets.map((b) => ({
-      event_id: b.event_id,
+      bet_type: b.type,
       sport: b.sport,
-      type: b.type,
-      team: b.team,
-      stat: b.stat,
-      line: b.line,
-      wager,
-      odds: -110,
-      date: new Date().toISOString().slice(0, 10),
+      event_id: b.event_id,
+      game_date: b.game_date || new Date().toISOString().slice(0, 10),
+      home_team: b.home_team || "",
+      away_team: b.away_team || "",
+      lean_team: b.type === "spread" ? b.team : null,
+      spread_at_pick: b.type === "spread" ? b.line : null,
+      action: b.action || null,
+      recommendation: b.recommendation || null,
+      cover_pct: b.cover_pct || null,
+      slot_type: b.slot_type || null,
+      player_name: b.player_name || "",
+      stat_type: b.stat || "",
+      prop_line: b.type === "prop" ? b.line : null,
+      prop_direction: b.direction || (b.edge && b.edge > 0 ? "OVER" : "UNDER"),
+      projection: b.projection || null,
+      edge: b.edge || null,
+      confidence: b.confidence || null,
+      signal: b.signal || null,
     }));
     saveMutation.mutate(payload, {
-      onSuccess: () => onClear(),
+      onSuccess: () => {
+        toast.success(`${payload.length} bet${payload.length > 1 ? "s" : ""} saved`);
+        onClear();
+      },
+      onError: (err) => {
+        toast.error(`Failed to save: ${err instanceof Error ? err.message : "Unknown error"}`);
+      },
     });
   };
 

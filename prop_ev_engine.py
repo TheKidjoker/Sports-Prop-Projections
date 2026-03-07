@@ -13,7 +13,7 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
 
     Args:
         recent_games: list of game log dicts (from balldontlie/ESPN)
-        stat_key: stat to measure ("pts", "reb", "ast")
+        stat_key: stat to measure ("pts", "reb", "ast", or combo like "pts+reb+ast")
         max_games: max games to use (default 15)
 
     Returns:
@@ -22,7 +22,11 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
     if not recent_games:
         return None
 
-    # Map stat_key to game log field names (balldontlie format)
+    # Combo stats: dispatch to combo variance
+    if "+" in stat_key:
+        return compute_combo_variance(recent_games, stat_key.split("+"), max_games)
+
+    # Map stat_key to game log field names (balldontlie format + NHL)
     key_map = {
         "pts": "pts",
         "reb": "reb",
@@ -30,6 +34,10 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
         "points": "pts",
         "rebounds": "reb",
         "assists": "ast",
+        "g": "g",
+        "goals": "g",
+        "sog": "sog",
+        "shots_on_goal": "sog",
     }
     field = key_map.get(stat_key, stat_key)
 
@@ -53,6 +61,58 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
         "std_dev": round(std_dev, 2),
         "mean": round(mean, 2),
         "n_games": len(values),
+    }
+
+
+def compute_combo_variance(recent_games, stat_keys, max_games=15):
+    """
+    Compute variance of summed stats per game (e.g. pts+reb+ast).
+
+    Args:
+        recent_games: list of game log dicts
+        stat_keys: list of stat keys to sum (e.g. ["pts", "reb", "ast"])
+        max_games: max games to use
+
+    Returns:
+        dict {std_dev, mean, n_games} or None if <5 games with all stats
+    """
+    if not recent_games or not stat_keys:
+        return None
+
+    key_map = {
+        "pts": "pts", "reb": "reb", "ast": "ast",
+        "points": "pts", "rebounds": "reb", "assists": "ast",
+        "g": "g", "goals": "g", "goa": "g",
+        "sog": "sog", "shots_on_goal": "sog",
+    }
+    fields = [key_map.get(k, k) for k in stat_keys]
+
+    # Sum stat values per game, only include games where ALL stats are present
+    sums = []
+    for g in recent_games[:max_games]:
+        vals = []
+        for f in fields:
+            val = g.get(f)
+            if val is None or not isinstance(val, (int, float)):
+                break
+            vals.append(float(val))
+        else:
+            sums.append(sum(vals))
+
+    if len(sums) < 5:
+        return None
+
+    mean = sum(sums) / len(sums)
+    variance = sum((v - mean) ** 2 for v in sums) / len(sums)
+    std_dev = math.sqrt(variance)
+
+    # Floor std_dev at 2.0 for combos (higher baseline than individual stats)
+    std_dev = max(std_dev, 2.0)
+
+    return {
+        "std_dev": round(std_dev, 2),
+        "mean": round(mean, 2),
+        "n_games": len(sums),
     }
 
 

@@ -30,7 +30,7 @@ import tracker
 from time_slots import classify_slot, first_game_slot_override
 from line_movement import detect_movement, confirms_slot, score_line_movement
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
-from prism import calculate_prism_projection, get_league_defensive_average
+from prism import calculate_prism_projection, get_league_defensive_average, _apply_slot_integration, _calculate_confidence
 from rank_analysis import (
     _get_rank_tier, _detect_rank_scam, _detect_spread_discrepancy,
 )
@@ -845,6 +845,50 @@ def _try_ev_prediction(sport, current_spread, opening_spread, game_date_str,
         return None
 
 
+def _detect_combo_streak(recent_games, combo_line, stat_keys):
+    """
+    Streak detection for combo stats — 4+/5 games over or under the combo line.
+
+    Args:
+        recent_games: list of game log dicts
+        combo_line: the combined line to compare against
+        stat_keys: list of stat keys to sum (e.g. ["pts", "reb", "ast"])
+
+    Returns:
+        dict {direction, count} or None
+    """
+    if not recent_games or len(recent_games) < 5:
+        return None
+
+    key_map = {"pts": "pts", "reb": "reb", "ast": "ast", "goa": "g", "sog": "sog"}
+    fields = [key_map.get(k, k) for k in stat_keys]
+
+    over_count = 0
+    under_count = 0
+    for g in recent_games[:5]:
+        total = 0
+        valid = True
+        for f in fields:
+            val = g.get(f)
+            if val is None or not isinstance(val, (int, float)):
+                valid = False
+                break
+            total += float(val)
+        if not valid:
+            continue
+        if total > combo_line:
+            over_count += 1
+        elif total < combo_line:
+            under_count += 1
+
+    if over_count >= 4:
+        return {"direction": "OVER", "count": over_count}
+    elif under_count >= 4:
+        return {"direction": "UNDER", "count": under_count}
+
+    return None
+
+
 def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                         event_id, game_date_str, current_spread, slot_type,
                         injured_stars, player_props_lines, sport,
@@ -895,11 +939,13 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
     # Tag each leader with their team info and rank (0=top scorer, 1=2nd, 2=3rd)
     for i, p in enumerate(home_leaders):
         p["_team"] = home_team
+        p["_team_id"] = home_team_id
         p["_is_home"] = True
         p["_opp_team_id"] = away_team_id
         p["_rank"] = i
     for i, p in enumerate(away_leaders):
         p["_team"] = away_team
+        p["_team_id"] = away_team_id
         p["_is_home"] = False
         p["_opp_team_id"] = home_team_id
         p["_rank"] = i
@@ -925,15 +971,24 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
         for player in all_players:
             if player.get("ppg", 0) > 0:
                 game_log_futures[player["name"]] = log_pool.submit(
-                    get_player_game_log, player["name"], count=7, sport=sport
+                    get_player_game_log, player["name"], count=7, sport=sport,
+                    athlete_id=player.get("athlete_id"), team_id=player.get("_team_id")
                 )
 
     # Stat types to analyze: (stat_key, season_avg_key, label, odds_key, min_avg)
-    stat_configs = [
-        ("pts", "ppg", "PTS", "points", 8.0),
-        ("reb", "rpg", "REB", "rebounds", 4.0),
-        ("ast", "apg", "AST", "assists", 3.0),
-    ]
+    if sport == "nhl":
+        stat_configs = [
+            ("pts", "ppg", "PTS", "points", 0.5),       # Points (goals+assists), min 0.5 PPG
+            ("g", "gpg", "GOALS", "goals", 0.2),         # Goals per game, min 0.2
+            ("ast", "apg", "AST", "assists", 0.3),       # Assists per game, min 0.3
+            ("sog", "sogpg", "SOG", "shots_on_goal", 1.5),  # Shots on goal, min 1.5
+        ]
+    else:
+        stat_configs = [
+            ("pts", "ppg", "PTS", "points", 8.0),
+            ("reb", "rpg", "REB", "rebounds", 4.0),
+            ("ast", "apg", "AST", "assists", 3.0),
+        ]
 
     for player in all_players:
         player_name = player["name"]
@@ -943,7 +998,10 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
 
         # Get opponent stats (full team stats, already fetched)
         opp_stats = stats_by_team.get(player["_opp_team_id"]) or {}
-        opp_def_rating = opp_stats.get("avgPointsAgainst") or opp_stats.get("pts_allowed_per_game")
+        if sport == "nhl":
+            opp_def_rating = opp_stats.get("avgGoalsAllowed") or opp_stats.get("avgPointsAgainst")
+        else:
+            opp_def_rating = opp_stats.get("avgPointsAgainst") or opp_stats.get("pts_allowed_per_game")
 
         # Get game log (already fetched in parallel)
         recent_games = game_log_futures[player_name].result() if player_name in game_log_futures else None
@@ -967,6 +1025,13 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
 
         for stat_key, avg_key, label, odds_key, min_avg in stat_configs:
             season_avg = player.get(avg_key, 0)
+
+            # NHL SOG: estimate from game logs if not in season averages
+            if sport == "nhl" and stat_key == "sog" and season_avg == 0 and recent_games:
+                sog_vals = [g.get("sog", 0) for g in recent_games if g.get("sog") is not None]
+                if sog_vals:
+                    season_avg = sum(sog_vals) / len(sog_vals)
+
             if season_avg < min_avg:
                 continue
 
@@ -1016,6 +1081,99 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 "stat_key": stat_key,
             })
 
+    # ── Combo Props ──────────────────────────────────────────────────────────
+    # Sum individual PRISM projections — no new model calls needed.
+    if sport == "nhl":
+        combo_configs = [
+            ("GOALS+AST", ["GOALS", "AST"], "goals_assists"),
+            ("PTS+SOG",   ["PTS", "SOG"],   "points_shots"),
+        ]
+    else:
+        combo_configs = [
+            ("PTS+REB+AST", ["PTS", "REB", "AST"], "points_rebounds_assists"),
+            ("PTS+REB",     ["PTS", "REB"],         "points_rebounds"),
+            ("PTS+AST",     ["PTS", "AST"],         "points_assists"),
+            ("REB+AST",     ["REB", "AST"],         "rebounds_assists"),
+        ]
+
+    # Index individual results by (player_name, stat_type) for fast lookup
+    indiv_by_player = {}
+    for r in results:
+        key = (r["player_name"], r["stat_type"])
+        indiv_by_player[key] = r
+
+    # Collect unique players that have at least one individual result
+    players_with_results = set(r["player_name"] for r in results)
+
+    for player_name in players_with_results:
+        for combo_label, required_stats, odds_key in combo_configs:
+            # Collect individual results for this combo
+            indiv_results = []
+            for stat_label in required_stats:
+                ir = indiv_by_player.get((player_name, stat_label))
+                if ir is None:
+                    break
+                indiv_results.append(ir)
+            else:
+                # All required stats present — build combo
+                combo_projection = sum(r["projection"] for r in indiv_results)
+
+                # Prefer real combo line from odds, fall back to sum of individual lines
+                first_result = indiv_results[0]
+                norm_name = player_name.strip().lower()
+                player_odds = player_props_lines.get(norm_name, {})
+                real_combo_line = player_odds.get(odds_key)
+                if real_combo_line is not None:
+                    combo_line = float(real_combo_line)
+                    combo_line_source = "odds_api"
+                else:
+                    combo_line = sum(r["line"] for r in indiv_results)
+                    combo_line_source = "estimated"
+
+                combo_edge = round(combo_projection - combo_line, 1)
+
+                # Signal via slot integration (same as individual stats)
+                combo_signal = _apply_slot_integration(combo_edge, slot_type)
+                if combo_signal in ("PASS", "SKIP"):
+                    continue
+
+                # Cap estimated lines at LEAN max
+                if combo_line_source == "estimated" and combo_signal.startswith("STRONG"):
+                    combo_signal = combo_signal.replace("STRONG", "LEAN")
+
+                # Confidence: min of individual confidences minus 5 (combo uncertainty penalty)
+                combo_confidence = min(r["confidence"] for r in indiv_results) - 5
+                combo_confidence = max(combo_confidence, 20)
+
+                # Streak detection for combo stats
+                combo_streak = _detect_combo_streak(
+                    first_result.get("recent_games", []),
+                    combo_line,
+                    [s.lower()[:3] for s in required_stats],
+                )
+
+                # stat_key uses "+" separator for EV engine dispatch
+                combo_stat_key = "+".join(s.lower()[:3] for s in required_stats)
+
+                results.append({
+                    "player_name": player_name,
+                    "team": first_result["team"],
+                    "stat_type": combo_label,
+                    "projection": round(combo_projection, 1),
+                    "line": round(combo_line, 1),
+                    "line_source": combo_line_source,
+                    "edge": combo_edge,
+                    "signal": combo_signal,
+                    "confidence": combo_confidence,
+                    "streak": combo_streak,
+                    "minutes_unstable": any(r["minutes_unstable"] for r in indiv_results),
+                    "slot_type": slot_type,
+                    "recent_games": first_result.get("recent_games", []),
+                    "is_b2b": first_result.get("is_b2b", False),
+                    "has_injury_boost": any(r.get("has_injury_boost", False) for r in indiv_results),
+                    "stat_key": combo_stat_key,
+                })
+
     # Sort by abs(edge) descending
     results.sort(key=lambda x: abs(x["edge"]), reverse=True)
 
@@ -1033,7 +1191,7 @@ def get_top_props(sport="nba"):
     Fetch today's games and run PRISM analysis for ALL games in parallel.
     Returns a flat list of prop dicts sorted by confidence, each tagged with matchup info.
     """
-    if sport not in ("nba", "cbb"):
+    if sport not in ("nba", "cbb", "nhl"):
         return []
 
     games = get_todays_games(sport)
@@ -1201,7 +1359,7 @@ def get_prop_ev_analysis(sport="nba"):
     """
     from prop_ev_engine import analyze_prop
 
-    if sport not in ("nba",):
+    if sport not in ("nba", "cbb", "nhl"):
         return []
 
     # Fetch PRISM projections and market odds in parallel
@@ -1227,7 +1385,15 @@ def get_prop_ev_analysis(sport="nba"):
         return []
 
     # Map stat_type labels back to odds keys
-    label_to_odds_key = {"PTS": "points", "REB": "rebounds", "AST": "assists"}
+    label_to_odds_key = {
+        "PTS": "points", "REB": "rebounds", "AST": "assists",
+        "PTS+REB+AST": "points_rebounds_assists",
+        "PTS+REB": "points_rebounds",
+        "PTS+AST": "points_assists",
+        "REB+AST": "rebounds_assists",
+        "GOALS": "goals", "SOG": "shots_on_goal",
+        "GOALS+AST": "goals_assists", "PTS+SOG": "points_shots",
+    }
 
     results = []
     for p in prism_props:
@@ -1319,7 +1485,7 @@ def get_game_props(event_id, sport="nba"):
         List of prop signal dicts, or empty list on failure.
     """
     start = time.time()
-    if sport not in ("nba", "cbb"):
+    if sport not in ("nba", "cbb", "nhl"):
         return []
 
     # Check cache first
@@ -1368,6 +1534,8 @@ def get_game_props(event_id, sport="nba"):
             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
             if sport == "cbb":
                 classify_dt = game_dt - timedelta(hours=5)  # EST for CBB
+            elif sport == "nhl":
+                classify_dt = game_dt - timedelta(hours=6)  # CST for NHL
             else:
                 classify_dt = game_dt - timedelta(hours=8)  # PST for NBA
             hour, minute = classify_dt.hour, classify_dt.minute

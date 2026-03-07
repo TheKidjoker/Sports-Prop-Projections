@@ -12,6 +12,7 @@ import { MyBetsPage } from "./MyBetsPage";
 import { AdminPage } from "./AdminPage";
 import { TestModelPage } from "./TestModelPage";
 import { BetSlip, type BetSlipItem } from "@/components/bets/BetSlip";
+import { LogoLoader } from "@/components/ui/LogoLoader";
 import { useAuth } from "@/lib/auth";
 import type { Sport } from "@/lib/types";
 
@@ -119,11 +120,7 @@ const Index = () => {
   }, []);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-primary font-heading tracking-wider animate-pulse">LOADING...</div>
-      </div>
-    );
+    return <LogoLoader size="lg" fullScreen />;
   }
 
   if (!isAuthenticated) {

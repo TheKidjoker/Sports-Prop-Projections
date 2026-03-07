@@ -15,6 +15,7 @@ export function useSaveBets() {
     mutationFn: (bets: unknown[]) => saveBets(bets),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
     },
   });
 }
@@ -25,6 +26,7 @@ export function useGradeBets() {
     mutationFn: () => gradeBets(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
     },
   });
 }
@@ -35,6 +37,7 @@ export function useDeleteBet() {
     mutationFn: (betId: number) => deleteBet(betId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bets"] });
+      queryClient.invalidateQueries({ queryKey: ["bets-dashboard"] });
     },
   });
 }

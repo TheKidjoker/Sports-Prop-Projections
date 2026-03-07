@@ -217,16 +217,31 @@ export interface TrackedBet {
   id: number;
   event_id: string;
   sport: string;
-  type: string;
-  team: string;
-  stat?: string | null;
-  line: number;
-  wager: number;
-  odds: number;
-  status: string;
-  result?: string | null;
+  bet_type: string;
+  home_team: string;
+  away_team: string;
+  lean_team?: string | null;
+  spread_at_pick?: number | null;
+  action?: string | null;
+  recommendation?: string | null;
+  cover_pct?: number | null;
+  slot_type?: string | null;
+  player_name?: string | null;
+  stat_type?: string | null;
+  prop_line?: number | null;
+  prop_direction?: string | null;
+  projection?: number | null;
+  edge?: number | null;
+  confidence?: number | null;
+  signal?: string | null;
+  result: string;
+  actual_value?: number | null;
+  home_score?: number | null;
+  away_score?: number | null;
   created_at: string;
   graded_at?: string | null;
+  closing_line?: number | null;
+  clv?: number | null;
 }
 
 export interface BetDashboardResponse {

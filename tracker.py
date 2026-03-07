@@ -604,15 +604,17 @@ def get_team_ats_record(team_name, sport):
             )
         else:
             conn = _get_sqlite()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT result FROM predictions "
-                "WHERE lean_team = ? AND sport = ? AND result IN ('HIT', 'MISS')",
-                (team_name, sport)
-            )
-            rows = [dict(row) for row in cur.fetchall()]
-            cur.close()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT result FROM predictions "
+                    "WHERE lean_team = ? AND sport = ? AND result IN ('HIT', 'MISS')",
+                    (team_name, sport)
+                )
+                rows = [dict(row) for row in cur.fetchall()]
+                cur.close()
+            finally:
+                conn.close()
 
         if len(rows) < MIN_SAMPLES["ats"]:
             return None
@@ -648,15 +650,17 @@ def get_factor_performance(sport):
             )
         else:
             conn = _get_sqlite()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT slot_type, result FROM predictions "
-                "WHERE sport = ? AND result IN ('HIT', 'MISS')",
-                (sport,)
-            )
-            rows = [dict(row) for row in cur.fetchall()]
-            cur.close()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT slot_type, result FROM predictions "
+                    "WHERE sport = ? AND result IN ('HIT', 'MISS')",
+                    (sport,)
+                )
+                rows = [dict(row) for row in cur.fetchall()]
+                cur.close()
+            finally:
+                conn.close()
 
         if not rows:
             return None
@@ -786,15 +790,19 @@ def fetch_closing_lines(sport=None):
             rows = query.execute().data
         else:
             conn = _get_sqlite()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM predictions WHERE result = 'PENDING' AND closing_line IS NULL AND sport = ?",
-                (sp,)
-            )
-            rows = [dict(row) for row in cur.fetchall()]
-            cur.close()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM predictions WHERE result = 'PENDING' AND closing_line IS NULL AND sport = ?",
+                    (sp,)
+                )
+                rows = [dict(row) for row in cur.fetchall()]
+                cur.close()
+            finally:
+                conn.close()
 
+        # Collect updates, then batch-write to SQLite with a single connection
+        updates = []
         for row in rows:
             home_norm = _normalize_team_name(row["home_team"])
             away_norm = _normalize_team_name(row["away_team"])
@@ -825,17 +833,24 @@ def fetch_closing_lines(sport=None):
                     update_data["clv_direction"] = clv_dir
                 sb.table("predictions").update(update_data).eq("id", row["id"]).execute()
             else:
-                conn = _get_sqlite()
-                cur = conn.cursor()
-                cur.execute(
-                    "UPDATE predictions SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
-                    (closing, clv, clv_dir, row["id"])
-                )
-                conn.commit()
-                cur.close()
-                conn.close()
+                updates.append((closing, clv, clv_dir, row["id"]))
 
             updated += 1
+
+        # Batch SQLite updates with a single connection
+        if updates and not _use_supabase():
+            conn = _get_sqlite()
+            try:
+                cur = conn.cursor()
+                for closing, clv, clv_dir, row_id in updates:
+                    cur.execute(
+                        "UPDATE predictions SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
+                        (closing, clv, clv_dir, row_id)
+                    )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
 
     return {"updated": updated}
 

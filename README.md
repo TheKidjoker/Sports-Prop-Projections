@@ -1,14 +1,10 @@
 # Joker's Edge
 
-A sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, **CBB**, and **NFL**. Combines time-slot theory, line movement tracking, injury impact analysis, player prop projections, sharp money detection, over/under totals analysis, multi-book line comparison, and sport-specific intelligence signals to produce a confidence score for every game on the board.
+A rules-based sports betting analysis engine that evaluates spread plays across **NBA**, **NHL**, **CFB**, **CBB**, and **NFL**. Combines time-slot theory, line movement tracking, injury impact analysis, player prop projections (PRISM), EV modeling, sharp money detection, and sport-specific intelligence signals to produce a confidence score for every game on the board.
 
-For NBA, NHL, and CBB, an **EV model** (L2-regularized logistic regression) replaces the heuristic scoring system when trained and validated. The EV model outputs calibrated probabilities and edge-based recommendations. The heuristic system remains as a fallback.
+All scoring weights have been calibrated through historical backtesting against real outcomes (NBA: 607 games, NHL: 529, CBB: 1,977, NFL: 105, CFB: 51). NHL is the only sport with validated out-of-sample performance (67.3% accuracy, +28.5% ROI).
 
-**NBA and CBB are marked UNVALIDATED** — walk-forward validation showed both rules models at ~49% OOS (coin flip). Kelly sizing is disabled for these sports without an active EV model. Unvalidated factors (vegas trap, trell, public betting, feedback) are capped at reduced weights. The EV model or PRISM props are recommended for these sports. See [NBA Rebuild Pipeline](#nba-rebuild-pipeline) below.
-
-All scoring weights have been calibrated through historical backtesting against real outcomes (NBA: 607 games, NHL: 529, CBB: 1,977, NFL: 105, CFB: 51).
-
-Built with a dark red/black Gotham-themed UI ("Joker's Edge"), featuring a welcome hero landing page with sport cards, auto-scan on click, and an instant-load background cache system.
+Features a React + Vite frontend with dark red/black Gotham-themed UI ("Joker's Edge"), PRISM player prop projections for NBA/NHL/CBB, variance-based Prop EV engine, personal bet tracker with auto-grading, and an instant-load background scan cache system.
 
 ---
 
@@ -25,11 +21,14 @@ The lean direction is **sport-specific** (see Lean Logic below).
 
 ## How Scoring Works
 
-Each game starts at a base of 50% cover probability. Confirmation factors add points to a composite score, which maps linearly to a cover percentage:
+Each game starts at a base of 50% cover probability. Confirmation factors add points to a composite score, which maps to a cover percentage via sport-specific logistic calibration (where available) or a linear fallback:
 
 ```
-cover_pct = 50 + (score / max_score) * 45
+Logistic:  cover_pct = L + K / (1 + exp(-r * (score - x0)))    (NHL, NBA, CBB)
+Linear:    cover_pct = 50 + (score / max_score) * 45            (NFL, CFB fallback)
 ```
+
+NHL example: `cover% = 65.3 + 16.8 / (1 + exp(-2.0 * (score - 7.68)))`
 
 ### Scoring Factors (Backtested)
 
@@ -37,17 +36,17 @@ Weights are sport-specific. The table shows the default value and sport override
 
 | Factor | Default | NBA V6 | NHL V3 | CBB V4 | NFL V1 | Applies To |
 |--------|---------|--------|--------|--------|--------|------------|
-| Public slot bonus | +3 | +2 | +3 | +3 | +10 | All |
+| Public slot bonus | +3 | +2 | +3 | +3 | +3 | All |
 | Line movement confirms slot | +3/+5/+8 | +2/+3/+5 | default | default | default | All (graduated) |
 | Line direction toward dog | -- | +2 | -- | -- | +3 | NBA, NFL |
 | Line direction toward fav | -- | -1 | -- | -- | -2 | NBA, NFL |
-| Trell Rule (star injury) | +5 | **+3** (capped) | +5 | +5 | +5 | All |
+| Trell Rule (star injury) | +5 | +5 | +5 | +5 | +5 | All |
 | Rank Scam detected | +5 | -- | -- | +5 | -- | CFB, CBB |
 | Spread Discrepancy | +5 | -- | -- | +5 | -- | CFB, CBB |
 | Trend Discrepancy | -- | -- | -- | -- | +5 | NFL |
-| O/U Discrepancy | -- | +3 (capped) | +3 (capped) | -- | +5 | All (sport-specific thresholds) |
+| O/U Discrepancy | -- | -- | -- | -- | +5 | NFL |
 | Weather factor | -- | -- | -- | -- | +5 | NFL |
-| B2B rest advantage | +2 | +2 | **0** | -- | -- | NBA, NHL |
+| B2B rest advantage | +2 | +2 | +2 | -- | -- | NBA, NHL |
 | B2B fatigue penalty | -1 | -1 | -1 | -- | -- | NBA, NHL |
 | ATS record bonus (>60%) | +2 | +2 | +2 | **0** | +2 | All |
 | ATS record penalty (<40%) | **0** | **0** | **0** | **+2** | **0** | All |
@@ -56,9 +55,8 @@ Weights are sport-specific. The table shows the default value and sport override
 | Sharp + public alignment | +3 | +3 | +3 | +3 | +3 | Public slots |
 | H2H revenge bonus | **0** | **0** | **0** | **0** | **0** | All |
 | H2H dominance bonus | **0** | **0** | **0** | **0** | **0** | All |
-| Vegas Trap (cold favorite) | -- | **+2** (capped) | -- | -- | -- | NBA |
-| Public Betting | +3/+5 | **+1** (capped) | default | default | default | All |
-| Feedback loop | -2 to +3 | **0** (zeroed) | same | same | same | All |
+| Vegas Trap (cold favorite) | -- | +5/+7 | -- | -- | -- | NBA |
+| Feedback loop | -2 to +3 | same | same | same | same | All |
 | Tuesday penalty | -- | **-3** | -- | -- | -- | NBA |
 | Sunday penalty | -- | -- | -- | **-4** | -- | CBB |
 | Friday penalty | -- | -- | **-3** | -- | -- | NHL |
@@ -66,7 +64,7 @@ Weights are sport-specific. The table shows the default value and sport override
 | Spread death zone | -- | -3 (5-7) | -- | -3 (<3) | -3 (<3) | NBA, CBB, NFL |
 | Spread blowout penalty | -3 | -3 (13+) | -- | -2 (15+) | -3 (10+) | All |
 
-**Bold** = backtested change from default. **0** = factor removed (backtested as harmful or noise). NBA caps applied via `NBA_UNVALIDATED_CAPS`, CBB caps via `CBB_UNVALIDATED_CAPS` until isolation testing validates each factor. O/U analysis runs for all 5 sports with sport-specific thresholds (see O/U Totals section).
+**Bold** = backtested change from default. **0** = factor removed (backtested as harmful/noise).
 
 ### Max Scores by Sport
 
@@ -140,43 +138,20 @@ When the Trell Rule fires (star player recently injured + out + vegas slot), the
 
 ---
 
-## Over/Under Totals Analysis
-
-O/U analysis is available for all 5 sports (previously NFL-only). The engine flags games with unusually high totals and divergence between the posted total and teams' combined recent scoring averages.
-
-### Sport-Specific Thresholds
-
-| Sport | High Total | Divergence | Recent Games | Score Bonus |
-|-------|-----------|------------|-------------|-------------|
-| NFL | 50.5 | 6 pts | Last 4 | +5 |
-| NBA | 230 | 10 pts | Last 5 | +3 (capped) |
-| CBB | 155 | 8 pts | Last 5 | +3 (capped) |
-| NHL | 6.5 | 1.0 goals | Last 5 | +3 |
-| CFB | 58 | 7 pts | Last 4 | +3 |
-
-For unvalidated sports (NBA, CBB), O/U only runs on vegas/trap slots to avoid adding noise. For validated sports (NHL) and others, O/U runs on all games. O/U alerts appear as badges on game cards when the total exceeds the high threshold or team averages diverge beyond the sport-specific gap.
-
----
-
 ## Sports Supported
 
 ### NBA
-- **Status: UNVALIDATED** — 49% OOS accuracy (coin flip). Kelly sizing disabled without EV model. Unvalidated factors capped. "NO VALIDATED EDGE" banner shown on scan cards. Full rebuild pipeline in progress.
 - **Timezone:** PST (UTC-8) for slot classification, EST for display
 - **Slot rules:** Day-of-week determines the slot schedule. Mon/Wed/Fri = public days, Tue/Thu/Sat/Sun = vegas days. Alternating public/vegas slots at specific tip-off times. 30-min tolerance for classification.
 - **First-game override:** The first game of the day gets the opposite slot of the day type.
-- **Player props (PRISM):** Multi-stat projection engine for PTS, REB, AST on top 3 scorers per team with stat-specific matchup multipliers (see PRISM section below).
-- **Vegas Trap:** Detects heavy favorites (7+ pt spread) on cold streaks in vegas slots. **Capped at +2** (was +5/+7) until validated.
-- **Trell Rule:** Star player injury impact. **Capped at +3** (was +5) until validated with historical injury data.
-- **Public Betting:** **Capped at +1** (was +3/+5) until validated.
-- **Feedback Loop:** **Zeroed permanently** for NBA (circular dependency).
-- **Line direction:** +2 when line moves toward underdog, -1 toward favorite (reduced from +3/-2 for line_movement overlap r=0.68).
+- **Player props (PRISM):** Multi-stat projection engine for PTS, REB, AST on top 3 scorers per team (see PRISM section below).
+- **Vegas Trap:** Detects heavy favorites (7+ pt spread) on cold streaks in vegas slots. +5 if favorite is cold (0-2 wins in last 7), +7 if both teams are cold.
+- **Line direction:** +2 when line moves toward underdog, -1 toward favorite.
 - **Tuesday penalty:** -3 (40.8% dog cover — worst day).
 - **Spread sweet spot:** +2 for 3-4.5pt spreads (57.1%), -3 for 5-6.5 (death zone, 47.6%), -3 for 13+ (blowout, 46.0%).
 - **B2B:** +2 bonus, -1 penalty.
-- **H2H / Home-Away:** Zeroed (noise — 0% marginal lift).
+- **H2H/Home-away:** Removed (backtested as noise).
 - **Moneyline threshold:** 6+ point spreads recommend ML instead of spread.
-- **ATS:** Now uses real team ATS from historical games DB (was tracker ledger).
 
 ### NHL
 - **Timezone:** CST (UTC-6) for slot classification, EST for display
@@ -186,11 +161,10 @@ For unvalidated sports (NBA, CBB), O/U only runs on vegas/trap slots to avoid ad
   - 3+ games = first game opposite of day type, rest time-based
   - Time slots (CST): 12pm=public, 2pm=vegas, 4pm=public, 6pm=public, 7pm=vegas, 8pm=public, 9pm=vegas
   - 60-min tolerance for classification (0% unknown, was 65% unknown)
+- **Player props (PRISM):** Multi-stat projection engine for PTS (points), GOALS, AST (assists), SOG (shots on goal) on top 3 scorers per team.
 - **All spreads are ±1.5** (puck line) — no spread adjustment possible.
 - **Friday penalty:** -3 (57.5% dog cover, Fri_public only 46.2%).
-- **ATS penalty:** Removed (was -3, only -0.9% lift — too harsh for 64.1% accuracy).
-- **B2B bonus:** Removed (was +4, -3.9% lift).
-- **H2H:** Removed (was +3/+2, -7.6% lift).
+- **ATS/B2B/H2H/Home-away:** Removed (backtested as noise or harmful).
 - **Moneyline:** Not used (puck line sport).
 
 ### CFB (College Football)
@@ -230,10 +204,7 @@ For unvalidated sports (NBA, CBB), O/U only runs on vegas/trap slots to avoid ad
 - **Spread sweet spot:** +3 for 6-10pt spreads (67.9%), -3 for <3 (34.7%), -2 for 15+ (47.4%).
 - **Home/away split:** Removed (was +3, -7.9% lift).
 - **H2H:** Removed (was +3/+2, -2.2% lift — noise).
-- **Status: UNVALIDATED** — 49% OOS accuracy (coin flip). Kelly sizing disabled without EV model. Unvalidated factors capped via `CBB_UNVALIDATED_CAPS` (vegas_trap +2, trell +3, public_betting +1, feedback zeroed). "NO VALIDATED EDGE" banner shown on scan cards.
-- **Moneyline threshold:** 7+ points.
-- **Player props (PRISM):** Now supported — same PRISM engine as NBA (PTS, REB, AST projections). Uses Odds API posted lines only (no balldontlie for CBB).
-- **EV Model:** When trained, replaces heuristic scoring with L2-regularized logistic regression (8 features, C=0.05, 4% minimum edge). See EV Models section.
+- **Moneyline threshold:** 7+ points. No player props (excluded from PRISM).
 
 ### NFL
 - **Timezone:** PST (UTC-8) for slot classification, EST for display
@@ -248,7 +219,7 @@ For unvalidated sports (NBA, CBB), O/U only runs on vegas/trap slots to avoid ad
 - **Line direction:** +3 toward dog, -2 toward fav (like NBA).
 - **Spread sweet spot:** +3 for 3-7pt spreads (65.2%), -3 for <3 (47.6%), -3 for 10+ (38.9%).
 - **Trend Discrepancy** (vegas slots only): Analyzes last 4 games for both teams. Teams at 0-1 wins = bounce-back value, 3-4 wins = regression risk. +20% lift after lean flip.
-- **O/U Analysis** (vegas slots only): Flags totals above 50.5 and divergence of 6+ points between the total and teams' combined scoring averages. +6.9% lift. (Now generalized to all sports — see O/U Totals section.)
+- **O/U Analysis** (vegas slots only): Flags totals above 50.5 and divergence of 6+ points between the total and teams' combined scoring averages. +6.9% lift.
 - **Weather:** 3-tier fetch (scoreboard inline, ESPN summary, OpenWeather fallback). Flags wind 15+ mph, temp 32F or below, and precipitation. Dome stadiums are auto-detected and skipped.
 - **Home/away split:** Removed (was +3, -19.6% lift).
 - **H2H:** Removed (was +3/+2, -33% lift — terrible).
@@ -256,9 +227,15 @@ For unvalidated sports (NBA, CBB), O/U only runs on vegas/trap slots to avoid ad
 
 ---
 
-## PRISM Player Prop Engine (NBA + CBB)
+## PRISM Player Prop Engine (NBA, NHL, CBB)
 
-PRISM (Player Rating & Integrated Statistical Model) is a multi-stat projection engine that runs on NBA and CBB games. It analyzes the top 3 scorers on each team across three stat types: **PTS**, **REB**, and **AST**.
+PRISM (Player Rating & Integrated Statistical Model) is a multi-stat projection engine that runs on-demand for NBA, NHL, and CBB games. It analyzes the top 3 scorers on each team across sport-specific stat types.
+
+| Sport | Stats Projected | Min Thresholds |
+|-------|----------------|----------------|
+| NBA | PTS, REB, AST | 8.0 PPG, 4.0 RPG, 3.0 APG |
+| NHL | PTS, GOALS, AST, SOG | 0.5 PPG, 0.2 GPG, 0.3 APG, 1.5 SOG/G |
+| CBB | PTS, REB, AST | 8.0 PPG, 4.0 RPG, 3.0 APG |
 
 ### Projection Formula
 
@@ -268,15 +245,13 @@ projection = (weighted_avg * matchup * pace * rest * home_away * blowout) + usag
 
 | Component | Weight/Range | Description |
 |-----------|-------------|-------------|
-| Weighted average | 60% recent / 40% season | Last 5 games (15+ min) blended with season avg |
-| Matchup multiplier (PTS) | 0.85-1.20 | Opponent pts allowed / league avg defense |
-| Matchup multiplier (REB) | 0.88-1.15 | Inverted opponent rebounding — weak rebounder = more boards available |
-| Matchup multiplier (AST) | 0.90-1.12 | Inverted opponent steals — more steals = disruption = fewer assists |
-| Pace factor | 0.90-1.15 | Game total / league average total (dynamic from historical DB, 24hr cache) |
+| Weighted average | 60% recent / 40% season | Last 5 games (15+ min, 10+ for NHL) blended with season avg |
+| Matchup multiplier | 0.85-1.20 (PTS/GOALS), 0.88-1.15 (SOG), 0.92-1.10 (AST) | Opponent defense vs league average |
+| Pace factor | 0.90-1.15 | Game total / league average total |
 | Rest factor | 0.93 if B2B | Back-to-back fatigue discount |
-| Home/away | 1.03 home, 0.98 away | Home court advantage |
-| Blowout discount | 0.85-1.0 continuous ramp | `max(0.85, 1.0 - max(0, |spread| - 6) * 0.02)` — spread 6=1.0, 10=0.92, 13.5+=0.85 floor (PTS only) |
-| Usage boost | weighted 50/30/20 | Redistributed scoring from injured teammates, weighted by player rank among team's top-3 scorers |
+| Home/away | 1.03 home, 0.98 away | Home court/ice advantage |
+| Blowout discount | Continuous ramp from spread threshold | NHL: starts at 1.5 spread, NBA/CBB: starts at 6 spread |
+| Usage boost | +lost_ppg * 0.6 / weighted rank | Redistributed scoring from injured teammates |
 
 ### Signal Classification
 
@@ -294,9 +269,49 @@ PRISM combines the edge (projection - line) with slot type:
 - **Streak detection:** Flags when 4+ of last 5 games went in the same direction vs the line
 - **Minutes volatility:** Standard deviation of recent minutes; flags instability when stdev > 5
 - **Confidence score:** 0-100 based on edge magnitude, data quality, matchup data, streaks, and minutes stability
-- **Line source:** Uses The-Odds-API posted lines when available, falls back to estimated lines (season avg * discount factor). Estimated lines are capped at LEAN max (no STRONG signals on estimated lines)
-- **CBB support:** Same projection engine as NBA. Uses Odds API posted lines only (no balldontlie player stats for CBB). Star thresholds: 16+ PPG and 30+ MPG, or 12 PPG + 5 APG, or 12 PPG + 8 RPG.
-- **Auto-tracking:** All non-PASS PRISM predictions are automatically saved to `prism_predictions` table for accuracy tracking. Grading compares projections against actual stats via balldontlie game logs (NBA only)
+- **Line source:** Uses The-Odds-API posted lines when available, falls back to estimated lines (season avg * discount factor)
+- **Estimated line cap:** Signals capped at LEAN when line source is estimated (no STRONG on estimated lines)
+- **Combo props:** PTS+REB+AST (NBA/CBB), GOALS+AST and PTS+SOG (NHL)
+
+---
+
+## Prop EV Engine
+
+Variance-based expected value calculation for player props, using PRISM projections combined with real market odds from The-Odds-API.
+
+- **Win probability:** Base confidence + edge boost + signal adjustment, capped 10-95%
+- **EV%:** `(probability - 52.4) / 52.4 * 100` (vs -110 breakeven at 52.4%)
+- **EV units:** `(prob * 90.91) - ((1-prob) * 100)` assuming $100 bet
+- **Variance computation:** Uses actual game log data to compute player stat variance for more accurate probability estimates
+- Filters to positive EV props only, sorted by EV%
+- Supports NBA, NHL, and CBB player prop markets
+
+---
+
+## EV Models (Spread Bets)
+
+L2-regularized logistic regression models that replace heuristic scoring for spread bet evaluation. Trained via walk-forward validation on historical data.
+
+| Sport | Features | Training | AUC Gate |
+|-------|----------|----------|----------|
+| NBA | 12 (spread, CLV, rest, offense, ratings, win%, home/away) | 500/100/100 split, C=0.1 | >= 0.58 |
+| NHL | 8 (spread, CLV, line movement, rest, goals, total) | 250/50/50 rolling, C=0.05 | >= 0.53 |
+| CBB | 8 (spread, CLV, line movement, rest, PPG, efficiency, total) | 250/50/50 rolling, C=0.05 | >= 0.53 |
+
+Models use Bayesian regression (shrinks recent stats toward season average) and isotonic calibration when ECE > 5%.
+
+---
+
+## Bet Tracker
+
+Personal bet slip for admin users with dual Supabase/SQLite persistence:
+
+- **Track spread bets** directly from scan result cards
+- **Track prop bets** from PRISM player prop rows
+- **Auto-grading:** Spread bets graded via ESPN final scores; prop bets graded via player game logs (NBA and NHL)
+- **CLV tracking:** Closing line value computed for spread bets (Odds API + ESPN fallback) and prop bets (closing odds comparison)
+- **Dashboard:** Overall record, win rate with Wilson CI, ROI, streak, breakdowns by sport/type/recommendation/stat
+- **Auto-grade on scan:** Background scan cache triggers grading after each hourly refresh
 
 ---
 
@@ -334,32 +349,6 @@ The system learns from its own history. The Ledger's tracked results feed back i
 - +1/-1 overall sport adjustment (minimum 50 decided games)
 - Cached with 5-minute TTL to avoid DB churn
 
-### Bet Tracker (Admin)
-Personal bet slip for admin users. Track which spread bets and PRISM player props were actually placed, then verify results against actual outcomes.
-
-- **Track Spread:** One-click button on every actionable scan card to add the spread pick to your bet slip
-- **Track Props:** "+" button on each PRISM prop row to add individual player prop bets
-- **My Picks Panel:** Floating bottom panel (shopping cart style) shows all selected bets before confirmation. Remove individual picks or clear all. "Confirm Picks" saves to the database.
-- **My Bets Dashboard:** Sidebar button opens a dedicated dashboard with:
-  - Overall record, win rate (with Wilson CI), ROI at -110 odds, current streak, pending count
-  - Breakdowns by bet type (spread vs prop), sport, recommendation tier, and stat type
-  - Full bet history grouped by date with result badges and delete buttons for pending bets
-- **Auto-Grading:**
-  - Spread bets graded via ESPN final scores using the same ATS logic as The Ledger
-  - Prop bets graded via balldontlie game logs (NBA only) — compares actual stat value against the prop line and direction
-- **Persistence:** Tracked bets persist across sessions. On admin login, existing PENDING bets are loaded so button states reflect what's already been tracked.
-- **Admin-only:** All tracking buttons, the My Picks panel, and the My Bets dashboard are invisible to non-admin users.
-
-### Line Shop (Multi-Book Comparison)
-Compare spreads and totals across all available sportsbooks to find the best line. Accessed via the sidebar "Line Shop" button.
-
-- **On-demand fetch:** Calls The-Odds-API once per sport when opened (not on every scan)
-- **Per-game breakdown:** Shows a table per game with columns: Book, Spread, Odds, Total, Over Odds, Under Odds
-- **Best line highlighting:** Best spread and best total lines highlighted in green per game
-- **Best Line summary:** Shows the best spread book (most favorable to dog) and best over/under books at the top of each game card
-- **Supported books:** FanDuel, DraftKings, BetMGM, Pinnacle, Caesars, BetRivers, and others (whatever The-Odds-API returns)
-- **Requires** `THE_ODDS_API_KEY` environment variable
-
 ### ATS Record Factor
 Checks the Ledger for the lean team's historical against-the-spread record:
 - +4 if >60% ATS (minimum 3 decided games)
@@ -387,23 +376,14 @@ Replays the production scoring system against historical outcomes to validate an
 ### Today + Tomorrow Slate
 The scanner automatically fetches both today's active games and tomorrow's full slate. Tomorrow's games get a lightweight analysis (skip expensive API calls like PRISM, B2B, H2H, NFL weather/trends) since deep analysis isn't needed yet.
 
-### Pace Mismatch Detection
-Flags games with extreme pace gaps between two teams. Pace proxy = `(avgPoints + avgPointsAgainst) / 2` from ESPN team statistics. Threshold: 5+ ppg gap for NBA/CBB, 3+ ppg for NHL. Displayed as an orange badge on game cards showing fast team pace vs slow team pace and the gap.
-
-### Signal Freshness
-Cached scan results are annotated with decay awareness based on cache age:
-- **Fresh** (< 30 min): No badge shown
-- **Aging** (30-120 min): Orange "AGING DATA" badge — line movement and public betting signals may have decayed
-- **Stale** (> 120 min): Red "STALE DATA" badge — fast-decay signals likely unreliable
-
-Scoring factors decay at different speeds: `fast` (line movement, public betting), `slow` (trell, ATS, vegas trap), or `none` (schedule facts like B2B, slot type).
-
 ### Background Scan Cache
-Results are pre-computed and cached for instant page loads:
+Two-tier cache (in-memory + Supabase persistent) for instant page loads:
+- On startup: queues all sports for immediate warm-up scan
 - On visitor arrival (`/api/games`): queues an immediate background refresh for that sport
 - `/api/scan` returns cached results instantly, then triggers a background re-scan
-- Periodic full refresh every hour for all cached sports
-- No startup warm-up (avoids slow deploy loads)
+- Periodic full refresh every hour for all cached sports (2 at a time with stagger delay)
+- Daily 6 AM EST pre-scan of all sports + auto-grading of tracked bets
+- File lock prevents duplicate scan threads across gunicorn workers
 
 ---
 
@@ -422,39 +402,33 @@ Optional Supabase authentication gate:
 
 ```
 app.py                Flask routes + API endpoints
-game_scanner.py       Analysis engine — scans and scores all games
-api_client.py         ESPN API integration (scoreboard, summary, injuries, stats)
-api_players.py        BallDontLie NBA player stats (game logs, player ID lookup)
-api_odds.py           The-Odds-API spreads, totals, player props, multi-book lines, ESPN weather
-api_cache.py          Shared HTTP caching (10-min TTL) + ESPN URL builder
+game_scanner.py       Analysis engine — scans and scores all games, PRISM orchestration
+api_client.py         ESPN API integration (scoreboard, summary, injuries, stats, game logs)
+api_players.py        BallDontLie NBA player stats + ESPN game logs for NHL/CBB
+api_odds.py           The-Odds-API spreads, player props (NBA/NHL/CBB), ESPN weather
+api_cache.py          Shared HTTP caching (10-min TTL, bounded to 500 entries)
 time_slots.py         Slot classification rules per sport
 line_movement.py      Spread movement detection + confirmation logic
 trell_rule.py         Star player injury analysis (per-sport thresholds)
 rank_analysis.py      CFB/CBB rank tiers, spread discrepancy, rank scam detection
 analysis_factors.py   All scoring factors, NFL helpers, lean determination
-constants.py          Recommendation thresholds, max scores, ML thresholds, signal decay classes
+constants.py          Recommendation thresholds, max scores, ML thresholds
 prism.py              PRISM player prop projection engine (pure math, no API calls)
+prop_ev_engine.py     Variance-based EV calculation for player props
 projections.py        Manual prediction math (over/under probability)
-tracker.py            SQLite/PostgreSQL prediction storage + grading + dashboard stats
-bet_tracker.py        Admin bet slip — track, grade, and dashboard personal spread/prop bets
+calibration.py        Logistic calibration for cover probability (replaces linear formula)
+tracker.py            SQLite/Supabase prediction storage + grading + dashboard stats
+bet_tracker.py        Personal bet slip — track, grade, CLV for spread + prop bets
+pick_curation.py      Pick curation and sync from scan results
 scan_cache.py         Background scan cache daemon (thread-safe, hourly refresh)
-calibration.py        Logistic/isotonic calibration for heuristic cover percentages
-nba_ev_model.py       NBA EV model — L2-regularized logistic regression (12 features)
-nhl_ev_model.py       NHL EV model — L2-regularized logistic regression (8 features)
-cbb_ev_model.py       CBB EV model — L2-regularized logistic regression (8 features)
-factor_analysis.py    Factor correlation, VIF, standalone/marginal lift analysis
-templates/            index.html (single-page app)
-static/               app.js (frontend logic), style.css (dark Gotham theme)
-test_model/           Backtesting engine (collector, features, rules backtest, ML scanner)
-test_model/nba_rebuild/   NBA systematic rebuild pipeline (Phases 2-7)
-  base_lean.py          Phase 2: Dog cover rate, slot splits, bare walk-forward floor
-  factor_isolation.py   Phase 3: 8 factor isolation tests with walk-forward
-  combined_model.py     Phase 4: Grid search weights, L2 reg, threshold sweep
-  ensemble_test.py      Phase 5: EV-only vs rules-only vs averaged vs stacked
-  calibration_check.py  Phase 7: Brier, ECE, reliability diagram, parlay tier validation
-test_model/slot_validation.py Slot hypothesis testing (z-test, chi-squared, permutation test)
-test_model/prism_backtest.py  PRISM accuracy analysis by stat/signal/source/slot
-test_model/data_quality.py    Data completeness report (spreads, venue, pinnacle)
+cache_manager.py      Supabase persistent cache for scan results across deploys
+nba_ev_model.py       L2-regularized logistic EV model for NBA spreads
+nhl_ev_model.py       L2-regularized logistic EV model for NHL spreads
+cbb_ev_model.py       L2-regularized logistic EV model for CBB spreads
+frontend/             React + Vite SPA (TypeScript, Tailwind, shadcn/ui)
+templates/            Legacy Flask templates (index.html)
+static/               Legacy frontend (app.js, style.css)
+test_model/           Backtesting engine (collector, rules backtest, EV models, NBA rebuild)
 ```
 
 ### API Endpoints
@@ -463,22 +437,20 @@ test_model/data_quality.py    Data completeness report (spreads, venue, pinnacle
 |----------|--------|-------------|
 | `/api/games` | GET | Today + tomorrow games for ticker, autocomplete, and hero cards |
 | `/api/scan` | POST | Scan all games for a sport (or `"all"` for all 5). Returns cached results instantly |
-| `/api/props` | GET | Load PRISM player props for a specific game (NBA + CBB, on-demand) |
-| `/api/lines` | GET | Multi-book line comparison (on-demand Line Shop) |
+| `/api/props` | GET | Load PRISM player props for a specific game (NBA, NHL, CBB) |
+| `/api/top-props` | GET | Top props across all games for a sport, sorted by confidence |
+| `/api/ev/player-props` | GET | Positive EV player props with variance-based probability |
+| `/api/prop-ev` | GET | Detailed prop EV analysis for a specific game |
 | `/api/predict` | POST | Manual player prop prediction (NBA) |
 | `/api/dashboard` | GET | Ledger stats, breakdowns, and all predictions (auto-grades pending) |
 | `/api/grade` | POST | Manually trigger grading of pending predictions |
+| `/api/bets/save` | POST | Save tracked bets (spread or prop) |
+| `/api/bets` | GET | Fetch tracked bets with optional sport/status filters |
+| `/api/bets/grade` | POST | Grade all pending tracked bets |
+| `/api/bets/dashboard` | GET | Bet tracker dashboard with aggregated stats |
+| `/api/bets/<id>` | DELETE | Delete a pending tracked bet |
 | `/api/auth/config` | GET | Supabase configuration (public, no auth required) |
-
-### Bet Tracker Endpoints (Admin)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/bets/save` | POST | Save confirmed bets from the frontend |
-| `/api/bets` | GET | List tracked bets (optional `?sport=&status=` filters) |
-| `/api/bets/grade` | POST | Grade all PENDING bets against actual outcomes |
-| `/api/bets/dashboard` | GET | Dashboard aggregation stats (optional `?sport=` filter) |
-| `/api/bets/<id>` | DELETE | Delete a PENDING bet |
+| `/api/auth/me` | GET | Current user info and admin status |
 
 ### Test Model Endpoints
 
@@ -486,50 +458,12 @@ test_model/data_quality.py    Data completeness report (spreads, venue, pinnacle
 |----------|--------|-------------|
 | `/api/tm/collect` | POST | Start background historical data collection |
 | `/api/tm/collect/status` | GET | Poll collection progress |
-| `/api/tm/features` | POST | Compute features for collected data |
-| `/api/tm/backtest` | POST | Start walk-forward backtest |
-| `/api/tm/backtest/status` | GET | Poll backtest progress |
 | `/api/tm/rules-backtest` | POST/GET | Start/get rules replay backtest |
 | `/api/tm/rules-backtest/status` | GET | Poll rules backtest progress |
-| `/api/tm/slot-validation` | POST | Start background slot hypothesis validation |
-| `/api/tm/slot-validation/status` | GET | Poll slot validation progress |
-| `/api/tm/slot-validation/metrics` | GET | Get saved slot validation results |
-| `/api/tm/scan` | POST | Scan today's games with ML model overlay |
 | `/api/tm/metrics` | GET | Get backtest performance metrics |
-| `/api/tm/data-quality` | GET | Data completeness report (spreads, venue, pinnacle) |
-| `/api/tm/nba-ev/train` | POST | Start background NBA EV model training |
-| `/api/tm/nba-ev/status` | GET | Poll NBA EV training progress |
-| `/api/tm/nba-ev/metrics` | GET | Get latest NBA EV model metrics |
-| `/api/tm/nhl-ev/train` | POST | Start background NHL EV model training |
-| `/api/tm/nhl-ev/status` | GET | Poll NHL EV training progress |
-| `/api/tm/nhl-ev/metrics` | GET | Get latest NHL EV model metrics |
-| `/api/tm/cbb-ev/train` | POST | Start background CBB EV model training |
-| `/api/tm/cbb-ev/status` | GET | Poll CBB EV training progress |
-| `/api/tm/cbb-ev/metrics` | GET | Get latest CBB EV model metrics |
-
-### NBA Rebuild Pipeline Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/tm/nba-rebuild/base-lean` | POST | Phase 2: Start base lean analysis |
-| `/api/tm/nba-rebuild/base-lean/status` | GET | Poll base lean progress |
-| `/api/tm/nba-rebuild/factor-isolation` | POST | Phase 3: Start factor isolation testing |
-| `/api/tm/nba-rebuild/factor-isolation/status` | GET | Poll factor isolation progress |
-| `/api/tm/nba-rebuild/combined` | POST | Phase 4: Start combined model rebuild |
-| `/api/tm/nba-rebuild/combined/status` | GET | Poll combined model progress |
-| `/api/tm/nba-rebuild/ensemble` | POST | Phase 5: Start ensemble comparison test |
-| `/api/tm/nba-rebuild/ensemble/status` | GET | Poll ensemble test progress |
-| `/api/tm/nba-rebuild/calibration` | POST | Phase 7: Start calibration validation |
-| `/api/tm/nba-rebuild/calibration/status` | GET | Poll calibration progress |
-| `/api/tm/prism-backtest` | POST | Start PRISM accuracy backtest |
-| `/api/tm/prism-backtest/status` | GET | Poll PRISM backtest progress |
-
-### PRISM Tracking Endpoints (Admin)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/prism/grade` | POST | Grade PENDING PRISM predictions against actual stats |
-| `/api/prism/dashboard` | GET | PRISM accuracy dashboard with Wilson CI |
+| `/api/tm/nba-ev/train` | POST | Train NBA EV logistic model |
+| `/api/tm/nhl-ev/train` | POST | Train NHL EV logistic model |
+| `/api/tm/cbb-ev/train` | POST | Train CBB EV logistic model |
 
 ### Data Sources
 
@@ -540,29 +474,31 @@ test_model/data_quality.py    Data completeness report (spreads, venue, pinnacle
 | **ESPN Injuries API** | Team injury reports with player IDs and status |
 | **ESPN Player Stats API** | Season averages for star player identification |
 | **ESPN Game Log API** | Recent game-by-game stats for PRISM projections |
-| **ESPN Team Stats API** | Roster leaders, defensive ratings, full team statistics (64 stats: rebounding, steals, shooting splits, efficiency) for PRISM matchup multipliers and pace mismatch detection |
+| **ESPN Team Stats API** | Roster leaders, defensive ratings for PRISM |
 | **ESPN Previous Matchup API** | Head-to-head history for revenge/dominance detection |
 | **balldontlie.io** | NBA player game logs for manual predictions |
-| **The-Odds-API** | Multi-book spreads (Pinnacle vs consensus), totals (Pinnacle vs consensus), player prop lines (PTS/REB/AST), multi-book line comparison (Line Shop) |
+| **The-Odds-API** | Multi-book spreads (Pinnacle vs consensus), player prop lines (NBA: PTS/REB/AST, NHL: goals/assists/points/SOG) |
 | **OpenWeatherMap** | Fallback weather data for NFL outdoor games |
 
 ### Caching Strategy
 
-| Layer | TTL | Purpose |
-|-------|-----|---------|
-| HTTP response cache | 10 minutes | Avoid hammering ESPN/Odds APIs during concurrent analysis |
-| Scan results cache | 1 hour | Instant page loads, background refresh on demand |
-| Feedback loop cache | 5 minutes | Avoid repeated Ledger DB queries during scan |
-| Player ID cache | Session | Avoid redundant balldontlie lookups |
-| Thread-safe | All layers | Locks prevent race conditions during parallel game analysis |
+| Layer | TTL | Max Size | Purpose |
+|-------|-----|----------|---------|
+| HTTP response cache | 10 minutes | 500 entries | Avoid hammering ESPN/Odds APIs during concurrent analysis |
+| Scan results cache | 1 hour | Per-sport | Instant page loads, background refresh on demand |
+| Persistent scan cache | 1 hour | Per-sport | Supabase-backed cache survives deploys |
+| Feedback loop cache | 5 minutes | ~50 entries | Avoid repeated Ledger DB queries during scan |
+| Player ID cache | Session | 500 entries | Avoid redundant balldontlie lookups (evicts oldest 20%) |
+| Game log cache | 30 minutes | 200 entries | Avoid re-fetching player game logs between prop loads |
+| Props cache | On-demand | 50 entries | Cache PRISM results per event |
+| Thread-safe | All layers | -- | Locks prevent race conditions during parallel game analysis |
 
 ### Concurrency
 
 The scanner uses configurable thread pools for maximum throughput:
 - `SCAN_GAME_WORKERS` (default 10): parallel game analysis
 - `SCAN_API_WORKERS` (default 8): parallel API calls within each game
-- PRISM fires all roster leader, game log, B2B, and full team stats lookups in parallel
-- Pace mismatch detection uses team stats fetched in parallel during game analysis
+- PRISM fires all roster leader, game log, B2B, and defensive stat lookups in parallel
 - `scan_all_games("all")` scans all 5 sports in parallel with `ThreadPoolExecutor`
 
 ### Stale Game Handling
@@ -662,107 +598,6 @@ Walk-forward validation derives weights from training data only and evaluates on
 
 ---
 
-## Calibration
-
-The model outputs `cover_pct = 50 + (score / max_score) * 45`, a linear mapping from score to claimed cover probability. Calibration analysis measures whether these claimed probabilities match reality, and corrects them when they don't.
-
-### Calibration Metrics
-
-| Sport | Raw ECE | Calibrated ECE | Raw Brier | Calibrated Brier | Method | Status |
-|-------|---------|----------------|-----------|------------------|--------|--------|
-| NHL | **12.4%** | **0.37%** | 0.2406 | 0.2239 | Logistic | **Applied** — ECE > 5% |
-| CBB | 4.37% | 0.52% | 0.2533 | 0.2487 | Logistic | Applied — improvement |
-| NBA | 3.59% | 1.78% | 0.2466 | 0.2457 | Logistic | Applied — improvement |
-| NFL | 25.08% | -- | 0.306 | -- | None | Not applied — logistic failed (n=76) |
-| CFB | -- | -- | -- | -- | None | No data |
-
-### NHL Miscalibration (Critical Fix)
-
-The linear formula was massively underconfident for NHL. Dogs cover ~66% of the time regardless of score, but the formula claimed 50% at score 0.
-
-| Score | Raw cover_pct | Calibrated cover_pct | Actual cover rate |
-|-------|--------------|----------------------|-------------------|
-| 0 | 50.0% | 65.3% | 64.9% |
-| 6 | 56.4% | 65.3% | 80.0% |
-| 10 | 60.7% | 69.4% | -- |
-| 12 | 62.9% | 84.7% | -- |
-
-The logistic model: `cover% = 65.3 + 20.9 / (1 + exp(-2.0 * (score - 10.71)))`
-
-### Logistic vs Isotonic
-
-Isotonic regression was the original calibration approach but overfits badly at sparse high-end bins (e.g., mapping raw 66% → 100% based on 3-11 games). The logistic curve is constrained by its sigmoid shape and provides smooth, bounded calibration.
-
-### Parlay Threshold Impact
-
-Parlay tiers depend on `cover_pct` accuracy. With calibration:
-
-| Tier | Threshold | Before Calibration | After Calibration |
-|------|-----------|-------------------|-------------------|
-| Two-Face's Safe Bet | 80%+ | **Dead tier** — no games ever reached 80% raw | NHL score ≥ 12 (cal 84.7%) — now functional |
-| Gotham Gambit | 67.5%+ | Required raw ≥ 67.5% (score ~17+ per sport) | NHL score ≥ 10 (cal 69.4%), NBA score ≥ 14 (cal 71.3%) |
-| Gotham Breakout | 60%+ | Gated by 68.5% actionable filter | NHL score ≥ 10, NBA score ≥ 11, CBB score ≥ 11 |
-
-Parlay thresholds remain unchanged — they now represent honest probabilities.
-
----
-
-## EV Models (Logistic Regression)
-
-For NBA, NHL, and CBB, an L2-regularized logistic regression model can replace the heuristic scoring system. When trained and validated (AUC gate passed), the EV model overrides the heuristic score, cover percentage, and recommendation tier for every game in that sport.
-
-### How It Works
-
-1. **Training**: Walk-forward rolling validation (250-train / 50-test windows) on historical game data
-2. **Prediction**: Model outputs P(underdog covers) for each game
-3. **Edge**: `edge = model_probability - 0.5238` (implied probability at -110 odds)
-4. **EV**: `ev_per_unit = P * (100/110) - (1-P)` — expected value per dollar wagered
-5. **Recommendation**: Tiered by edge size (STRONG 8%+, CONFIDENT 5%+, LEAN at sport-specific minimum)
-6. **Fallback**: If AUC < gate or model not trained, the heuristic system runs unchanged
-
-### Sport-Specific Configuration
-
-| Setting | NBA | NHL | CBB |
-|---------|-----|-----|-----|
-| Features | 12 | 8 | 8 |
-| Regularization (C) | 0.1 | 0.05 | 0.05 |
-| AUC gate | 0.58 | 0.53 | 0.53 |
-| AUC gate (standalone) | 0.60 | -- | -- |
-| LEAN edge minimum | 3% | 3% | 4% |
-| Regressed prior weight | 15 | 12 | 15 |
-| Warmup games | 20 | 20 | 30 |
-| Training mode | 70/30 split | Walk-forward rolling | Walk-forward rolling |
-| Walk-forward windows | 500/100/100 | 250/50/50 | 250/50/50 |
-
-### Features
-
-**NBA** (12): spread_abs, clv, rest_diff, days_rest_dog, days_rest_fav, dog_off_regressed, fav_off_regressed, net_rating_diff, dog_win_pct_10, fav_win_pct_10, home_away, spread_squared
-
-**NHL** (8): spread_abs, clv, line_movement_abs, rest_diff, dog_gf_regressed, fav_gf_regressed, goal_diff_net, total
-
-**CBB** (8): spread_abs, clv, line_movement_abs, rest_diff, dog_ppg_regressed, fav_ppg_regressed, net_efficiency_diff, total
-
-All offensive/defensive stats use Bayesian shrinkage (shrink recent performance toward season average, weighted by sport-specific prior) to reduce noise from small samples. NBA dropped `line_movement_abs` (redundant with CLV) and `total`, added `home_away`, individual rest days, and `spread_squared` for non-linear effects.
-
-### Calibration
-
-Isotonic calibration is applied post-hoc only when ECE > 5% and the AUC gate has been passed (ranking integrity confirmed first). NBA uses Platt scaling instead.
-
-### Edge Tiers
-
-| Tier | Edge | Description |
-|------|------|-------------|
-| STRONG PLAY | 8%+ | High-confidence edge |
-| CONFIDENT | 5-8% | Solid edge |
-| LEAN | 3-4%+ | Minimum actionable edge (4% for CBB, 3% for NBA/NHL) |
-| MONITOR | < min | Below threshold — no bet recommended |
-
-### Frontend Integration
-
-EV model games display an edge badge showing edge% and EV cents. The actionable threshold shifts from 68.5% (heuristic) to 55.4% (NBA/NHL) or 56.4% (CBB) for EV games, reflecting the tighter probability range of calibrated models.
-
----
-
 ## Overfitting Protection
 
 Every sport-specific weight override (day penalties, spread buckets, lean direction, factor weights) was derived from the same historical data it's evaluated on, creating overfitting risk. A regularization framework constrains weight derivation and requires statistical evidence before applying overrides.
@@ -815,58 +650,6 @@ The walk-forward engine (`walkforward.py`) applies proportion z-tests at every d
 
 ---
 
-## NBA Rebuild Pipeline
-
-A systematic, phased rebuild of the NBA prediction system after walk-forward validation revealed 49% OOS accuracy (coin flip). Each phase has a clear decision gate and builds on the previous one.
-
-### Phase Overview
-
-| Phase | Purpose | Key File(s) | Decision Gate |
-|-------|---------|-------------|---------------|
-| 0 | Production safeguards | `constants.py`, `analysis_factors.py` | Cap unvalidated factors, add EXPERIMENTAL badge |
-| 1 | Expand data to 2,500+ games | `test_model/collector.py`, `test_model/db.py` | Data quality report confirms coverage. Schema now includes `pinnacle_total`, `consensus_total`, `over_under_result` columns |
-| 2 | Validate base lean thesis | `test_model/nba_rebuild/base_lean.py` | Dog cover rate CI includes/excludes 50% |
-| 3 | Factor isolation testing | `test_model/nba_rebuild/factor_isolation.py` | Each factor: 3%+ lift, p < 0.10 to survive |
-| 4 | Rebuild from survivors | `test_model/nba_rebuild/combined_model.py` | Walk-forward 53%+, CI lower > 50% |
-| 5 | Fix EV model | `nba_ev_model.py` | AUC >= 0.58 (override) or >= 0.60 (standalone) |
-| 6 | Fix PRISM props | `prism.py`, `test_model/prism_backtest.py` | MAE improvement per multiplier |
-| 7 | Calibration | `test_model/nba_rebuild/calibration_check.py` | ECE < 5%, parlay tiers within 3% |
-
-### Phase 0: Production Safeguards (Implemented)
-- **NBA_UNVALIDATED_CAPS**: vegas_trap capped at +2 (was +5/+7), trell at +3 (was +5), public_betting at +1 (was +3/+5), feedback zeroed permanently
-- **EXPERIMENTAL badge**: amber warning badge on all NBA scan cards showing "EXPERIMENTAL MODEL — 49% OOS"
-- **PRISM auto-tracking**: all non-PASS predictions saved to `prism_predictions` table for accuracy tracking
-- **Real ATS**: `_analyze_ats_record()` now queries actual team ATS from `tm_historical_games` instead of tracker ledger
-
-### Phase 3: Factor Isolation Tests
-Tests 8 factors independently via walk-forward (500-train/100-test):
-1. **Line movement (merged)** — grid search thresholds × weights
-2. **Spread size** — 1.5pt bin analysis
-3. **Day of week** — 7-day analysis, 150+ game minimum
-4. **Vegas trap** — fire count threshold (40+ required)
-5. **B2B** — consecutive date detection
-6. **Trell rule** — requires historical injury data
-7. **ATS record** — mean-reversion analysis
-8. **Sharp money** — Pinnacle correlation with line movement
-
-### Phase 4: Rebuild Decision
-- If survivors pass walk-forward (CI lower > 50%): update production weights, remove EXPERIMENTAL badge
-- If no survivors pass: deprecate rules model, NBA defaults to EV-only (`model_status = "EV_ONLY"`)
-
-### Phase 5: EV Model Fixes
-- Bayesian regression fixed (was shrinking toward volatile recent-5, now shrinks toward season avg)
-- Dropped redundant features (line_movement_abs ↔ CLV), added home_away, spread_squared, individual rest days
-- Walk-forward windows enlarged (500/100/100 from 350/50/50) with Brier score
-- Ensemble test compares EV-only vs rules-only vs simple average vs stacked
-
-### Phase 6: PRISM Fixes
-- Dynamic league averages from historical DB (24hr cache) replace hardcoded constants
-- Blowout discount: continuous ramp (spread 6=1.0, 10=0.92, 13.5+=0.85) replaces cliff at 10
-- Usage boost: weighted 50/30/20 by player rank instead of flat 1/3 split
-- Estimated lines capped at LEAN (no STRONG signals on estimated lines)
-
----
-
 ## Usage
 
 ```bash
@@ -898,9 +681,8 @@ requests
 gunicorn
 psycopg2-binary
 scikit-learn
-scipy
-vaderSentiment
 numpy
 PyJWT
 cryptography
+supabase
 ```

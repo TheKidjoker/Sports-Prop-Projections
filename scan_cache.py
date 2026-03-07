@@ -9,6 +9,7 @@ Background scan cache — keeps game analysis pre-computed for instant page load
 - Two-tier cache: in-memory for speed + Supabase for persistence across deploys
 """
 
+import os
 import threading
 import time
 import logging
@@ -32,14 +33,60 @@ DAILY_REFRESH_HOUR = 6  # 6 AM EST
 EST = timezone(timedelta(hours=-5))
 
 
+STAGGER_DELAY = 15   # seconds between sport scan pairs to avoid rate limit bursts
+SCAN_PARALLEL = 2    # scan this many sports concurrently
+
+# File lock to prevent duplicate scan threads across gunicorn workers
+_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".scan_cache_lock")
+
+
 def init():
-    """Start background refresh daemon. Safe to call multiple times."""
+    """Start background refresh daemon. Safe to call multiple times.
+    Uses a file lock so only one gunicorn worker runs the scan thread.
+    """
     global _started
     if _started:
         return
+
+    # Acquire file lock — only one worker wins
+    try:
+        fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            os.write(fd, str(os.getpid()).encode())
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        # Another worker already owns the scan thread — check if still alive
+        try:
+            with open(_LOCK_FILE, "r") as f:
+                pid = int(f.read().strip())
+            # On Unix, os.kill(pid, 0) checks if process exists
+            # On Windows, this will raise an error if the process doesn't exist
+            os.kill(pid, 0)
+            logger.info("[scan_cache] Scan thread owned by worker pid=%d, skipping", pid)
+            _started = True  # Don't retry
+            return
+        except (OSError, ValueError):
+            # Stale lock file — reclaim it
+            try:
+                os.unlink(_LOCK_FILE)
+                fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                try:
+                    os.write(fd, str(os.getpid()).encode())
+                finally:
+                    os.close(fd)
+            except (FileExistsError, OSError):
+                _started = True
+                return
+
+    import atexit
+    atexit.register(lambda: os.unlink(_LOCK_FILE) if os.path.exists(_LOCK_FILE) else None)
+
     _started = True
     threading.Thread(target=_loop, daemon=True, name="scan-cache").start()
-    logger.info("[scan_cache] Background refresh thread started")
+    # Queue all sports for immediate warm-up on startup
+    request_refresh(*ALL_SPORTS)
+    logger.info("[scan_cache] Background thread started (pid=%d), queued startup warm-up", os.getpid())
 
 
 def get(sport):
@@ -122,6 +169,21 @@ def _scan(sport):
         return None
 
 
+def _scan_sports_parallel(sports):
+    """Scan multiple sports in parallel batches of SCAN_PARALLEL with stagger between batches."""
+    from concurrent.futures import ThreadPoolExecutor
+    for i in range(0, len(sports), SCAN_PARALLEL):
+        batch = sports[i:i + SCAN_PARALLEL]
+        if len(batch) == 1:
+            _scan(batch[0])
+        else:
+            with ThreadPoolExecutor(max_workers=SCAN_PARALLEL) as pool:
+                list(pool.map(_scan, batch))
+        # Stagger between batches (not after the last one)
+        if i + SCAN_PARALLEL < len(sports):
+            time.sleep(STAGGER_DELAY)
+
+
 def _seconds_until_next_daily():
     """Return seconds until the next 6 AM EST."""
     now = datetime.now(EST)
@@ -151,8 +213,7 @@ def _loop():
         # Daily 6 AM EST: pre-scan all sports for the day
         if time.monotonic() >= next_daily:
             logger.info("[scan_cache] Daily 6 AM EST refresh — scanning all sports")
-            for sport in ALL_SPORTS:
-                _scan(sport)
+            _scan_sports_parallel(list(ALL_SPORTS))
             # Auto-grade all tracked bets after daily scan
             try:
                 import bet_tracker
@@ -162,11 +223,8 @@ def _loop():
             next_daily = time.monotonic() + _seconds_until_next_daily()
             continue  # skip hourly refresh since we just did everything
 
-        # Periodic: refresh everything that has been cached
-        with _cache_lock:
-            sports = list(_cache.keys())
-        for sport in sports:
-            _scan(sport)
+        # Periodic: refresh all sports every hour (2 at a time)
+        _scan_sports_parallel(list(ALL_SPORTS))
         # Auto-grade after hourly refresh to catch late-finishing games
         try:
             import bet_tracker

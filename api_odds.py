@@ -1,9 +1,15 @@
 # ─── Odds API & Weather ───────────────────────────────────────────────────────
-# The-Odds-API spread comparison, player props, and weather lookups.
+# Primary: odds-api.io (250+ books, free tier)
+# Fallback: The-Odds-API (theoddsapi.com)
+# Weather lookups remain unchanged.
 
 import os
+import logging
 import requests
 from api_cache import _cached_request, _espn_url
+import api_odds_io
+
+logger = logging.getLogger(__name__)
 
 ODDS_API_SPORT_MAP = {
     "nba": "basketball_nba",
@@ -14,17 +20,69 @@ ODDS_API_SPORT_MAP = {
 }
 
 
+# ─── Primary/Fallback Wrappers ──────────────────────────────────────────────
+
+
 def get_odds_comparison(sport="nba"):
+    """Try odds-api.io first, fall back to The Odds API."""
+    if api_odds_io.is_available():
+        try:
+            result = api_odds_io.get_odds_comparison_io(sport)
+            if result:
+                logger.debug("[odds] Using odds-api.io for %s spreads (%d games)", sport, len(result))
+                return result
+        except Exception as e:
+            logger.warning("[odds] odds-api.io failed for %s: %s", sport, e)
+    return _get_odds_comparison_theodds(sport)
+
+
+def get_player_props_odds(sport="nba"):
+    """Try odds-api.io first, fall back to The Odds API.
+    Note: odds-api.io doesn't support player props, so this always falls back."""
+    if api_odds_io.is_available():
+        try:
+            result = api_odds_io.get_player_props_odds_io(sport)
+            if result:
+                return result
+        except Exception:
+            pass
+    return _get_player_props_odds_theodds(sport)
+
+
+def get_player_props_odds_full(sport="nba"):
+    """Try odds-api.io first, fall back to The Odds API.
+    Note: odds-api.io doesn't support player props, so this always falls back."""
+    if api_odds_io.is_available():
+        try:
+            result = api_odds_io.get_player_props_odds_full_io(sport)
+            if result:
+                return result
+        except Exception:
+            pass
+    return _get_player_props_odds_full_theodds(sport)
+
+
+def get_multibook_lines(sport="nba"):
+    """Try odds-api.io first, fall back to The Odds API."""
+    if api_odds_io.is_available():
+        try:
+            result = api_odds_io.get_multibook_lines_io(sport)
+            if result:
+                logger.debug("[odds] Using odds-api.io for %s line shop (%d games)", sport, len(result))
+                return result
+        except Exception as e:
+            logger.warning("[odds] odds-api.io line shop failed for %s: %s", sport, e)
+    return _get_multibook_lines_theodds(sport)
+
+
+# ─── The Odds API (Fallback) ────────────────────────────────────────────────
+
+
+def _get_odds_comparison_theodds(sport="nba"):
     """
     Fetches spreads and totals from The-Odds-API for multiple sportsbooks.
     Returns per-game data with Pinnacle (sharp) vs consensus spread + totals.
     Gracefully returns empty list if THE_ODDS_API_KEY is not set.
-
-    Called once per sport per scan (not per game).
-
-    Returns:
-        List of dicts: [{home_team, away_team, pinnacle_spread, consensus_spread,
-                         pinnacle_total, consensus_total}, ...]
     """
     api_key = os.environ.get("THE_ODDS_API_KEY")
     if not api_key:
@@ -127,14 +185,9 @@ def _match_odds_to_game(odds_data, home_team, away_team):
     return None
 
 
-def get_player_props_odds(sport="nba"):
+def _get_player_props_odds_theodds(sport="nba"):
     """
     Fetches player points props from The-Odds-API.
-    Called once per scan (like get_odds_comparison).
-
-    Returns:
-        dict: {normalized_name: {"points": line_float}}
-        Empty dict if no API key.
     """
     api_key = os.environ.get("THE_ODDS_API_KEY")
     if not api_key:
@@ -146,22 +199,36 @@ def get_player_props_odds(sport="nba"):
 
     try:
         url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+
+        if sport == "nhl":
+            markets_str = "player_points,player_goals,player_assists,player_shots_on_goal"
+            market_to_stat = {
+                "player_points": "points",
+                "player_goals": "goals",
+                "player_assists": "assists",
+                "player_shots_on_goal": "shots_on_goal",
+            }
+        else:
+            markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"
+            market_to_stat = {
+                "player_points": "points",
+                "player_rebounds": "rebounds",
+                "player_assists": "assists",
+                "player_points_rebounds_assists": "points_rebounds_assists",
+                "player_points_rebounds": "points_rebounds",
+                "player_points_assists": "points_assists",
+                "player_rebounds_assists": "rebounds_assists",
+            }
+
         params = {
             "apiKey": api_key,
             "regions": "us",
-            "markets": "player_points,player_rebounds,player_assists",
+            "markets": markets_str,
             "oddsFormat": "american",
         }
         data = _cached_request(url, params=params, timeout=15)
         if data is None:
             return {}
-
-        # Map market keys to our stat names
-        market_to_stat = {
-            "player_points": "points",
-            "player_rebounds": "rebounds",
-            "player_assists": "assists",
-        }
 
         props = {}
         for game in data:
@@ -185,14 +252,9 @@ def get_player_props_odds(sport="nba"):
         return {}
 
 
-def get_player_props_odds_full(sport="nba"):
+def _get_player_props_odds_full_theodds(sport="nba"):
     """
-    Fetches player prop lines WITH odds (over_odds, under_odds) from The-Odds-API.
-    Same API call as get_player_props_odds() but captures price fields.
-
-    Returns:
-        dict: {normalized_name: {stat: {line, over_odds, under_odds, bookmaker}}}
-        Empty dict if no API key.
+    Fetches player prop lines WITH odds from The-Odds-API.
     """
     api_key = os.environ.get("THE_ODDS_API_KEY")
     if not api_key:
@@ -204,21 +266,36 @@ def get_player_props_odds_full(sport="nba"):
 
     try:
         url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+
+        if sport == "nhl":
+            markets_str = "player_points,player_goals,player_assists,player_shots_on_goal"
+            market_to_stat = {
+                "player_points": "points",
+                "player_goals": "goals",
+                "player_assists": "assists",
+                "player_shots_on_goal": "shots_on_goal",
+            }
+        else:
+            markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"
+            market_to_stat = {
+                "player_points": "points",
+                "player_rebounds": "rebounds",
+                "player_assists": "assists",
+                "player_points_rebounds_assists": "points_rebounds_assists",
+                "player_points_rebounds": "points_rebounds",
+                "player_points_assists": "points_assists",
+                "player_rebounds_assists": "rebounds_assists",
+            }
+
         params = {
             "apiKey": api_key,
             "regions": "us",
-            "markets": "player_points,player_rebounds,player_assists",
+            "markets": markets_str,
             "oddsFormat": "american",
         }
         data = _cached_request(url, params=params, timeout=15)
         if data is None:
             return {}
-
-        market_to_stat = {
-            "player_points": "points",
-            "player_rebounds": "rebounds",
-            "player_assists": "assists",
-        }
 
         # Collect all odds per player/stat, keep best odds per side
         props = {}
@@ -357,13 +434,9 @@ def get_game_weather_openweather(city, state):
         return None
 
 
-def get_multibook_lines(sport="nba"):
+def _get_multibook_lines_theodds(sport="nba"):
     """
     Fetch per-book spreads and totals for all games from The-Odds-API.
-    Called on-demand when user opens Line Shop (not on every scan).
-
-    Returns:
-        List of game dicts with per-book lines and best-line highlights.
     """
     api_key = os.environ.get("THE_ODDS_API_KEY")
     if not api_key:

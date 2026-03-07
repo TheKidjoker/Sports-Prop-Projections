@@ -140,7 +140,7 @@ export function gradePredictions(sport?: SportLower) {
 
 // ─── Bets ──────────────────────────────────────────────
 export function saveBets(bets: unknown[]) {
-  return post<{ success: boolean; saved_count: number; bet_ids: number[] }>(
+  return post<{ success: boolean; saved: number }>(
     "/api/bets/save",
     { bets }
   );

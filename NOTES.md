@@ -323,3 +323,12 @@ Each sport needs its own data collection + rules replay cycle:
 5. **Conference game detection** — low-hanging fruit for CBB/CFB
 6. **Historical public betting** — validates sharp money signal
 7. **ML model layer** — after 2000+ games collected per sport
+
+
+## aggresive bet misplaced
+1. currently if there is a bet we suggest a spread as the best play but suggest the moneyline as the agressive play whcih doesnt make sense because in the case of a spread a -7.5 spread is much more risky than just straight up taking the money line. 
+
+
+
+## Minor Fixes 
+- currently the tracking bets feature does not work properly there needs to be something implemented to track bets for each user and then also something for me as a the admin to publish what bets I had.

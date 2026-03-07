@@ -29,8 +29,6 @@ try:
     from test_model import db as tm_db
     from test_model.collector import start_collection_thread, get_collection_status
     from test_model.features import compute_all_features
-    from test_model.backtest import start_backtest_thread, get_backtest_status
-    from test_model.scanner import scan_today_with_model
     from test_model.rules_backtest import start_rules_backtest_thread, get_rules_backtest_status
     from test_model.walkforward import start_walkforward_thread, get_walkforward_status
     from calibration import load_calibration, is_loaded, get_calibration_type
@@ -418,7 +416,24 @@ def api_scan():
                 "featured_mode": featured_only,
             })
 
-        # No cache — blocking scan
+        # No cache — wait briefly for background warm-up before blocking
+        import time as _time
+        for _ in range(6):  # 6 x 0.5s = 3s max
+            _time.sleep(0.5)
+            cached, age = scan_cache.get(sport)
+            if cached is not None:
+                scan_cache.request_refresh(sport)
+                games = _apply_approval_filter(cached, sport, is_admin, featured_only)
+                if games is None:
+                    return jsonify({"success": True, "games": [],
+                                    "picks_pending_review": True})
+                return jsonify({
+                    "success": True, "games": games,
+                    "cached": True, "cache_age": round(age),
+                    "featured_mode": featured_only,
+                })
+
+        # Still empty — blocking scan (safety net)
         results = scan_all_games(sport)
         scan_cache.put(sport, results)
         try:
@@ -432,6 +447,29 @@ def api_scan():
         return jsonify({"success": True, "games": games, "featured_mode": featured_only})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/odds-status", methods=["GET"])
+@require_auth
+def api_odds_status():
+    """Admin-only diagnostic: rate limit status for both odds providers."""
+    if not _is_admin():
+        return jsonify({"error": "Admin only"}), 403
+    import api_odds_io
+    io_status = api_odds_io.get_rate_limit_status()
+    return jsonify({
+        "primary": {
+            "provider": "odds-api.io",
+            "available": api_odds_io.is_available(),
+            "remaining": io_status.get("remaining"),
+            "reset_time": io_status.get("reset_time"),
+            "has_key": io_status.get("has_key"),
+        },
+        "fallback": {
+            "provider": "The Odds API",
+            "available": bool(os.environ.get("THE_ODDS_API_KEY")),
+        },
+    })
 
 
 def _today_est():
@@ -508,7 +546,7 @@ def api_props():
         sport = request.args.get("sport", "nba").lower()
         if not event_id:
             return jsonify({"success": False, "error": "event_id required"}), 400
-        if sport not in ("nba", "cbb"):
+        if sport not in ("nba", "cbb", "nhl"):
             return jsonify({"success": True, "props": []})
 
         # Run with timeout to prevent indefinite hangs
@@ -549,7 +587,7 @@ def api_top_props():
     """Generate PRISM player props for ALL today's games at once."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "cbb"):
+        if sport not in ("nba", "cbb", "nhl"):
             return jsonify({"success": True, "props": []})
 
         # Check persistent cache first
@@ -579,7 +617,7 @@ def api_ev_player_props():
     """Get player props with EV calculations for EV Engine."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "cbb"):
+        if sport not in ("nba", "cbb", "nhl"):
             return jsonify({"success": True, "props": []})
 
         # Check persistent cache first (use separate cache key for EV props)
@@ -635,7 +673,7 @@ def api_prop_ev():
     """Prop EV Engine — variance-based probability + actual market odds → true EV."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba",):
+        if sport not in ("nba", "nhl"):
             return jsonify({"success": True, "props": []})
 
         # Check persistent cache (10 min TTL)
@@ -1233,59 +1271,6 @@ def api_tm_features():
             sport = "nba"
         count = compute_all_features(sport)
         return jsonify({"success": True, "features_computed": count})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route("/api/tm/backtest", methods=["POST"])
-@require_auth
-def api_tm_backtest():
-    """Start background walk-forward backtest for a sport."""
-    err = _require_test_model()
-    if err:
-        return err
-    try:
-        data = request.get_json(silent=True) or {}
-        sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
-            sport = "nba"
-        started = start_backtest_thread(sport)
-        return jsonify({"success": True, "started": started})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route("/api/tm/backtest/status", methods=["GET"])
-@require_auth
-def api_tm_backtest_status():
-    """Poll backtest progress for a sport."""
-    err = _require_test_model()
-    if err:
-        return err
-    try:
-        sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
-            sport = "nba"
-        progress = get_backtest_status(sport)
-        return jsonify({"success": True, "progress": progress})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route("/api/tm/scan", methods=["POST"])
-@require_auth
-def api_tm_scan():
-    """Scan today's games with ML model overlay."""
-    err = _require_test_model()
-    if err:
-        return err
-    try:
-        data = request.get_json(silent=True) or {}
-        sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
-            sport = "nba"
-        results = scan_today_with_model(sport)
-        return jsonify({"success": True, "games": results})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

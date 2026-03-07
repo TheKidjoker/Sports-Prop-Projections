@@ -9,12 +9,13 @@ high-edge player prop signals.
 import math
 
 # League average defaults (fallback if dynamic fetch fails)
-LEAGUE_AVG_TOTALS = {"nba": 224.0}
-LEAGUE_AVG_DEF = {"nba": 112.0}
+LEAGUE_AVG_TOTALS = {"nba": 224.0, "nhl": 6.0}
+LEAGUE_AVG_DEF = {"nba": 112.0, "nhl": 3.0}
 
 # League averages for stat-specific matchup multipliers (hardcoded fallbacks)
 _LEAGUE_AVG_STATS_DEFAULTS = {
     "nba": {"reb": 43.5, "steals": 7.5},
+    "nhl": {"goals_allowed": 3.0, "shots_allowed": 30.0},
 }
 
 # Dynamic league averages cache for matchup stats
@@ -23,7 +24,7 @@ _league_matchup_ts = 0
 
 
 def _get_league_matchup_avgs(sport="nba"):
-    """Get league-wide avgRebounds and avgSteals, cached 24 hours."""
+    """Get league-wide matchup averages, cached 24 hours."""
     import time
     global _league_matchup_avgs, _league_matchup_ts
     now = time.time()
@@ -32,11 +33,18 @@ def _get_league_matchup_avgs(sport="nba"):
     try:
         from api_client import get_league_avg_stats
         avgs = get_league_avg_stats(sport)
-        if avgs and avgs.get("avgRebounds") and avgs.get("avgSteals"):
-            result = {"reb": avgs["avgRebounds"], "steals": avgs["avgSteals"]}
-            _league_matchup_avgs[sport] = result
-            _league_matchup_ts = now
-            return result
+        if sport == "nhl":
+            if avgs and avgs.get("avgGoalsAllowed") and avgs.get("avgShotsAllowed"):
+                result = {"goals_allowed": avgs["avgGoalsAllowed"], "shots_allowed": avgs["avgShotsAllowed"]}
+                _league_matchup_avgs[sport] = result
+                _league_matchup_ts = now
+                return result
+        else:
+            if avgs and avgs.get("avgRebounds") and avgs.get("avgSteals"):
+                result = {"reb": avgs["avgRebounds"], "steals": avgs["avgSteals"]}
+                _league_matchup_avgs[sport] = result
+                _league_matchup_ts = now
+                return result
     except Exception:
         pass
     return _LEAGUE_AVG_STATS_DEFAULTS.get(sport, {})
@@ -124,7 +132,8 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
 
     # ── 1. Weighted Average ──
     stat_key = _stat_key(stat_type)
-    valid_recent = [g for g in (recent_games or []) if g.get("min", 0) >= 15]
+    min_minutes = 10 if sport == "nhl" else 15
+    valid_recent = [g for g in (recent_games or []) if g.get("min", 0) >= min_minutes]
 
     if len(valid_recent) >= 3:
         recent_vals = [g.get(stat_key, 0) for g in valid_recent[:5]]
@@ -168,6 +177,26 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
         else:
             matchup_mult = 1.0
             matchup_available = False
+    elif stat_type == "g":
+        # Goals: opponent goals-allowed / league avg
+        if opponent_def_rating and league_avg_def:
+            matchup_mult = opponent_def_rating / league_avg_def
+            matchup_mult = max(0.85, min(1.20, matchup_mult))
+            matchup_available = True
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
+    elif stat_type == "sog":
+        # Shots on goal: opponent shots-allowed / league avg
+        opp_shots_allowed = opp.get("avgShotsAllowed")
+        league_avg_sa = league_stats.get("shots_allowed", 30.0)
+        if opp_shots_allowed and opp_shots_allowed > 0:
+            matchup_mult = opp_shots_allowed / league_avg_sa
+            matchup_mult = max(0.88, min(1.15, matchup_mult))
+            matchup_available = True
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
     else:
         matchup_mult = 1.0
         matchup_available = False
@@ -185,10 +214,14 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     # ── 5. Home/Away Adjustment ──
     home_away_adj = 1.03 if is_home else 0.98
 
-    # ── 6. Blowout Discount (points only — continuous ramp, not cliff) ──
-    # spread 6=1.0, 7=0.98, 10=0.92, 13.5+=0.85 floor
-    if stat_type == "pts" and spread is not None:
-        blowout_disc = max(0.85, 1.0 - max(0, abs(spread) - 6) * 0.02)
+    # ── 6. Blowout Discount (points/goals — continuous ramp, not cliff) ──
+    if stat_type in ("pts", "g") and spread is not None:
+        if sport == "nhl" and stat_type == "g":
+            # NHL spreads are tighter: 1.5 = big favorite
+            blowout_disc = max(0.90, 1.0 - max(0, abs(spread) - 1.5) * 0.04)
+        else:
+            # NBA/CBB: spread 6=1.0, 7=0.98, 10=0.92, 13.5+=0.85 floor
+            blowout_disc = max(0.85, 1.0 - max(0, abs(spread) - 6) * 0.02)
     else:
         blowout_disc = 1.0
 
@@ -334,7 +367,7 @@ def estimate_line_from_average(season_avg, stat_type="pts"):
     """
     if season_avg is None or season_avg <= 0:
         return None
-    discount = {"pts": 0.97, "reb": 0.94, "ast": 0.93}.get(stat_type, 0.97)
+    discount = {"pts": 0.97, "reb": 0.94, "ast": 0.93, "g": 0.95, "sog": 0.97}.get(stat_type, 0.97)
     return round(season_avg * discount, 1)
 
 
@@ -380,7 +413,7 @@ def _calculate_confidence(edge, num_recent_games, matchup_available,
 
 def _stat_key(stat_type):
     """Map stat_type to game log dict key."""
-    return {"pts": "pts", "reb": "reb", "ast": "ast"}.get(stat_type, "pts")
+    return {"pts": "pts", "reb": "reb", "ast": "ast", "g": "g", "sog": "sog"}.get(stat_type, stat_type)
 
 
 def get_league_defensive_average(sport="nba"):

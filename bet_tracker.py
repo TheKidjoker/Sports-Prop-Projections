@@ -126,8 +126,8 @@ def save_tracked_bets(bets, user_email):
             "recommendation": b.get("recommendation"),
             "cover_pct": b.get("cover_pct"),
             "slot_type": b.get("slot_type"),
-            "player_name": b.get("player_name"),
-            "stat_type": b.get("stat_type"),
+            "player_name": b.get("player_name") or "",
+            "stat_type": b.get("stat_type") or "",
             "prop_line": b.get("prop_line"),
             "prop_direction": b.get("prop_direction"),
             "projection": b.get("projection"),
@@ -153,55 +153,57 @@ def save_tracked_bets(bets, user_email):
         ).execute()
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        for r in rows:
-            cur.execute(f"""
-                INSERT INTO {TABLE}
-                    (user_email, bet_type, sport, event_id, game_date,
-                     home_team, away_team, lean_team, spread_at_pick,
-                     action, recommendation, cover_pct, slot_type,
-                     player_name, stat_type, prop_line, prop_direction,
-                     projection, edge, confidence, signal,
-                     kelly_fraction, suggested_units,
-                     model_probability, implied_probability,
-                     over_odds, under_odds, expected_value,
-                     result, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_email, event_id, bet_type, player_name, stat_type)
-                DO UPDATE SET
-                    spread_at_pick = excluded.spread_at_pick,
-                    action = excluded.action,
-                    recommendation = excluded.recommendation,
-                    cover_pct = excluded.cover_pct,
-                    slot_type = excluded.slot_type,
-                    prop_line = excluded.prop_line,
-                    prop_direction = excluded.prop_direction,
-                    projection = excluded.projection,
-                    edge = excluded.edge,
-                    confidence = excluded.confidence,
-                    signal = excluded.signal,
-                    kelly_fraction = excluded.kelly_fraction,
-                    suggested_units = excluded.suggested_units,
-                    model_probability = excluded.model_probability,
-                    implied_probability = excluded.implied_probability,
-                    over_odds = excluded.over_odds,
-                    under_odds = excluded.under_odds,
-                    expected_value = excluded.expected_value
-            """, (
-                r["user_email"], r["bet_type"], r["sport"], r["event_id"],
-                r["game_date"], r["home_team"], r["away_team"], r["lean_team"],
-                r["spread_at_pick"], r["action"], r["recommendation"],
-                r["cover_pct"], r["slot_type"], r["player_name"],
-                r["stat_type"], r["prop_line"], r["prop_direction"],
-                r["projection"], r["edge"], r["confidence"], r["signal"],
-                r["kelly_fraction"], r["suggested_units"],
-                r["model_probability"], r["implied_probability"],
-                r["over_odds"], r["under_odds"], r["expected_value"],
-                r["result"], r["created_at"],
-            ))
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            for r in rows:
+                cur.execute(f"""
+                    INSERT INTO {TABLE}
+                        (user_email, bet_type, sport, event_id, game_date,
+                         home_team, away_team, lean_team, spread_at_pick,
+                         action, recommendation, cover_pct, slot_type,
+                         player_name, stat_type, prop_line, prop_direction,
+                         projection, edge, confidence, signal,
+                         kelly_fraction, suggested_units,
+                         model_probability, implied_probability,
+                         over_odds, under_odds, expected_value,
+                         result, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_email, event_id, bet_type, player_name, stat_type)
+                    DO UPDATE SET
+                        spread_at_pick = excluded.spread_at_pick,
+                        action = excluded.action,
+                        recommendation = excluded.recommendation,
+                        cover_pct = excluded.cover_pct,
+                        slot_type = excluded.slot_type,
+                        prop_line = excluded.prop_line,
+                        prop_direction = excluded.prop_direction,
+                        projection = excluded.projection,
+                        edge = excluded.edge,
+                        confidence = excluded.confidence,
+                        signal = excluded.signal,
+                        kelly_fraction = excluded.kelly_fraction,
+                        suggested_units = excluded.suggested_units,
+                        model_probability = excluded.model_probability,
+                        implied_probability = excluded.implied_probability,
+                        over_odds = excluded.over_odds,
+                        under_odds = excluded.under_odds,
+                        expected_value = excluded.expected_value
+                """, (
+                    r["user_email"], r["bet_type"], r["sport"], r["event_id"],
+                    r["game_date"], r["home_team"], r["away_team"], r["lean_team"],
+                    r["spread_at_pick"], r["action"], r["recommendation"],
+                    r["cover_pct"], r["slot_type"], r["player_name"],
+                    r["stat_type"], r["prop_line"], r["prop_direction"],
+                    r["projection"], r["edge"], r["confidence"], r["signal"],
+                    r["kelly_fraction"], r["suggested_units"],
+                    r["model_probability"], r["implied_probability"],
+                    r["over_odds"], r["under_odds"], r["expected_value"],
+                    r["result"], r["created_at"],
+                ))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
 
     return {"saved": len(rows)}
 
@@ -222,20 +224,22 @@ def get_tracked_bets(user_email, sport=None, status=None):
         return resp.data or []
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        sql = f"SELECT * FROM {TABLE} WHERE user_email = ?"
-        params = [user_email]
-        if sport:
-            sql += " AND sport = ?"
-            params.append(sport)
-        if status:
-            sql += " AND result = ?"
-            params.append(status)
-        sql += " ORDER BY created_at DESC"
-        cur.execute(sql, params)
-        rows = [dict(r) for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            sql = f"SELECT * FROM {TABLE} WHERE user_email = ?"
+            params = [user_email]
+            if sport:
+                sql += " AND sport = ?"
+                params.append(sport)
+            if status:
+                sql += " AND result = ?"
+                params.append(status)
+            sql += " ORDER BY created_at DESC"
+            cur.execute(sql, params)
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+        finally:
+            conn.close()
         return rows
 
 
@@ -311,7 +315,7 @@ def grade_tracked_bets(user_email):
 
 def _grade_prop_bet(bet, event_id, sport):
     """Grade a prop bet by looking up actual player stats. Returns (result, actual_value) or (None, None)."""
-    if sport != "nba":
+    if sport not in ("nba", "nhl"):
         return None, None
 
     try:
@@ -320,14 +324,35 @@ def _grade_prop_bet(bet, event_id, sport):
         if not logs:
             return None, None
 
-        stat_map = {"PTS": "pts", "REB": "reb", "AST": "ast"}
-        stat_key = stat_map.get(bet["stat_type"])
-        if not stat_key:
-            return None, None
+        stat_map = {
+            # NBA
+            "PTS": "pts", "REB": "reb", "AST": "ast",
+            # NHL
+            "GOALS": "g", "SOG": "sog",
+            # Shared (NHL points = pts, NHL assists = ast)
+        }
+        stat_type = bet["stat_type"] or ""
 
-        actual = logs[0].get(stat_key)
-        if actual is None:
-            return None, None
+        # Handle combo stats (e.g. "PTS+REB+AST", "GOALS+AST")
+        if "+" in stat_type:
+            parts = stat_type.split("+")
+            total = 0
+            for part in parts:
+                key = stat_map.get(part.strip())
+                if not key:
+                    return None, None
+                val = logs[0].get(key)
+                if val is None:
+                    return None, None
+                total += val
+            actual = total
+        else:
+            stat_key = stat_map.get(stat_type)
+            if not stat_key:
+                return None, None
+            actual = logs[0].get(stat_key)
+            if actual is None:
+                return None, None
 
         prop_line = bet["prop_line"]
         direction = (bet["prop_direction"] or "").upper()
@@ -360,15 +385,17 @@ def _update_bet_result(bet_id, user_email, result, actual_value,
         sb.table(TABLE).update(update).eq("id", bet_id).eq("user_email", user_email).execute()
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        cur.execute(f"""
-            UPDATE {TABLE}
-            SET result = ?, actual_value = ?, home_score = ?, away_score = ?, graded_at = ?
-            WHERE id = ? AND user_email = ?
-        """, (result, actual_value, home_score, away_score, graded_at, bet_id, user_email))
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"""
+                UPDATE {TABLE}
+                SET result = ?, actual_value = ?, home_score = ?, away_score = ?, graded_at = ?
+                WHERE id = ? AND user_email = ?
+            """, (result, actual_value, home_score, away_score, graded_at, bet_id, user_email))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
 
 
 # ─── get_tracked_dashboard ────────────────────────────────────────────────────
@@ -508,15 +535,17 @@ def delete_tracked_bet(bet_id, user_email):
         return bool(resp.data)
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        cur.execute(
-            f"DELETE FROM {TABLE} WHERE id = ? AND user_email = ? AND result = 'PENDING'",
-            (bet_id, user_email),
-        )
-        deleted = cur.rowcount > 0
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"DELETE FROM {TABLE} WHERE id = ? AND user_email = ? AND result = 'PENDING'",
+                (bet_id, user_email),
+            )
+            deleted = cur.rowcount > 0
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
         return deleted
 
 
@@ -534,11 +563,13 @@ def grade_all_tracked_bets():
         emails = list(set(r["user_email"] for r in (resp.data or [])))
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        cur.execute(f"SELECT DISTINCT user_email FROM {TABLE} WHERE result = 'PENDING'")
-        emails = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT DISTINCT user_email FROM {TABLE} WHERE result = 'PENDING'")
+            emails = [r[0] for r in cur.fetchall()]
+            cur.close()
+        finally:
+            conn.close()
 
     total_graded = 0
     total_wins = 0
@@ -598,14 +629,16 @@ def fetch_closing_lines_for_bets(sport=None):
             rows = q.execute().data or []
         else:
             conn = _get_sqlite()
-            cur = conn.cursor()
-            cur.execute(
-                f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'spread' AND closing_line IS NULL AND sport = ?",
-                (sp,)
-            )
-            rows = [dict(r) for r in cur.fetchall()]
-            cur.close()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'spread' AND closing_line IS NULL AND sport = ?",
+                    (sp,)
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+                cur.close()
+            finally:
+                conn.close()
 
         for row in rows:
             home_norm = _normalize_team_name(row["home_team"])
@@ -648,14 +681,16 @@ def _update_bet_clv(bet_id, closing_line, clv, clv_direction):
         sb.table(TABLE).update(update).eq("id", bet_id).execute()
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        cur.execute(
-            f"UPDATE {TABLE} SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
-            (closing_line, clv, clv_direction, bet_id)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {TABLE} SET closing_line = ?, clv = ?, clv_direction = ? WHERE id = ?",
+                (closing_line, clv, clv_direction, bet_id)
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
 
 
 def fetch_closing_props_for_bets(sport="nba"):
@@ -679,7 +714,10 @@ def fetch_closing_props_for_bets(sport="nba"):
     if not current_odds:
         return {"updated": 0}
 
-    stat_label_to_key = {"PTS": "points", "REB": "rebounds", "AST": "assists"}
+    stat_label_to_key = {
+        "PTS": "points", "REB": "rebounds", "AST": "assists",
+        "GOALS": "goals", "SOG": "shots_on_goal",
+    }
 
     # Get PENDING prop bets without closing_odds
     if _use_supabase():
@@ -692,15 +730,17 @@ def fetch_closing_props_for_bets(sport="nba"):
         rows = q.execute().data or []
     else:
         conn = _get_sqlite()
-        cur = conn.cursor()
-        cur.execute(
-            f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'prop' "
-            f"AND closing_odds IS NULL AND sport = ?",
-            (sport,)
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT * FROM {TABLE} WHERE result = 'PENDING' AND bet_type = 'prop' "
+                f"AND closing_odds IS NULL AND sport = ?",
+                (sport,)
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+        finally:
+            conn.close()
 
     updated = 0
     for row in rows:
@@ -743,14 +783,16 @@ def fetch_closing_props_for_bets(sport="nba"):
             sb.table(TABLE).update(update_data).eq("id", row["id"]).execute()
         else:
             conn = _get_sqlite()
-            cur = conn.cursor()
-            cur.execute(
-                f"UPDATE {TABLE} SET closing_odds = ?, clv_prob_delta = ? WHERE id = ?",
-                (closing, clv_prob_delta, row["id"])
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE {TABLE} SET closing_odds = ?, clv_prob_delta = ? WHERE id = ?",
+                    (closing, clv_prob_delta, row["id"])
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
 
         updated += 1
 

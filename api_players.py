@@ -1,6 +1,7 @@
 # ─── BallDontLie NBA Player Stats ─────────────────────────────────────────────
 # Player ID lookups, recent game points, and game logs via balldontlie.io.
 
+import time as _time
 import threading
 import requests
 from api_cache import _cached_request
@@ -10,6 +11,13 @@ BASE_URL = "https://www.balldontlie.io/api/v1"
 # In-memory cache for player ID lookups (avoids redundant HTTP requests)
 _player_id_cache = {}
 _player_id_lock = threading.Lock()
+_PLAYER_ID_MAX = 500
+
+# Game log cache — longer TTL than general HTTP cache since logs don't change intraday
+_game_log_cache = {}
+_game_log_lock = threading.Lock()
+_GAME_LOG_TTL = 1800  # 30 minutes
+_GAME_LOG_MAX = 200
 
 
 def get_player_id(player_name):
@@ -32,6 +40,11 @@ def get_player_id(player_name):
         result = data["data"][0]["id"]
 
     with _player_id_lock:
+        if len(_player_id_cache) >= _PLAYER_ID_MAX:
+            # Evict oldest ~20% of entries
+            keys = list(_player_id_cache.keys())
+            for k in keys[:len(keys) // 5]:
+                del _player_id_cache[k]
         _player_id_cache[player_name] = result
     return result
 
@@ -68,16 +81,38 @@ def get_player_recent_points(player_name, games=5):
     return get_recent_game_points(player_id, games)
 
 
-def get_player_game_log(player_name, count=7, sport="nba"):
+def get_player_game_log(player_name, count=7, sport="nba", athlete_id=None, team_id=None):
     """
-    Fetches recent game log with full stat lines via balldontlie.io.
-    NBA only — returns None for other sports.
+    Fetches recent game log with full stat lines.
+    NBA uses balldontlie.io; CBB uses ESPN schedule + boxscore.
+    Uses a 30-min dedicated cache to avoid re-fetching between prop loads.
 
     Returns:
         List of dicts: [{pts, reb, ast, min, date}, ...] or None
     """
+    if sport in ("cbb", "nhl"):
+        from api_client import get_player_game_log_espn
+        cache_key = f"{player_name}|{count}|{sport}"
+        now = _time.time()
+        with _game_log_lock:
+            entry = _game_log_cache.get(cache_key)
+            if entry and (now - entry["ts"]) < _GAME_LOG_TTL:
+                return entry["data"]
+        result = get_player_game_log_espn(player_name, athlete_id, team_id, sport, count)
+        with _game_log_lock:
+            _game_log_cache[cache_key] = {"data": result, "ts": _time.time()}
+        return result
+
     if sport != "nba":
         return None
+
+    # Check dedicated game log cache first
+    cache_key = f"{player_name}|{count}"
+    now = _time.time()
+    with _game_log_lock:
+        entry = _game_log_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _GAME_LOG_TTL:
+            return entry["data"]
 
     player_id = get_player_id(player_name)
     if not player_id:
@@ -122,7 +157,17 @@ def get_player_game_log(player_name, count=7, sport="nba"):
                 "date": game_date,
             })
 
-        return games if games else None
+        result = games if games else None
+
+        # Store in dedicated cache
+        with _game_log_lock:
+            _game_log_cache[cache_key] = {"data": result, "ts": _time.time()}
+            if len(_game_log_cache) > _GAME_LOG_MAX:
+                oldest = sorted(_game_log_cache, key=lambda k: _game_log_cache[k]["ts"])
+                for old_key in oldest[:len(_game_log_cache) - _GAME_LOG_MAX]:
+                    del _game_log_cache[old_key]
+
+        return result
 
     except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None

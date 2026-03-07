@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle } from "lucide-react";
 import { PickCard } from "./PickCard";
 import { PickCardSkeleton } from "./PickCardSkeleton";
+import { LogoLoader } from "@/components/ui/LogoLoader";
 import { useScan } from "@/hooks/use-scan";
 import { toLowerSport, type Sport } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
@@ -65,6 +66,7 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
 
       {isScanning ? (
         <div className="space-y-4">
+          <LogoLoader text="SCANNING GAMES..." />
           {[1, 2, 3].map((i) => (
             <PickCardSkeleton key={i} />
           ))}

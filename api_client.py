@@ -642,6 +642,88 @@ def get_game_boxscore_players(event_id, sport="nba"):
         return None
 
 
+def get_player_game_log_espn(player_name, athlete_id, team_id, sport, count=7):
+    """
+    Fetches recent game stats for a player via ESPN team schedule + boxscore data.
+    Works for any ESPN-supported sport (CBB, CFB, NHL, etc.).
+
+    Args:
+        player_name: Player display name for matching in boxscores
+        athlete_id: ESPN athlete ID (not used for matching, reserved for future)
+        team_id: ESPN team ID to fetch schedule from
+        sport: Sport key ("cbb", "nhl", etc.)
+        count: Number of recent games to fetch (default 7)
+
+    Returns:
+        List of dicts: [{pts, reb, ast, min, date}, ...] or None
+    """
+    if not team_id:
+        return None
+
+    try:
+        events = get_team_schedule(team_id, sport)
+        if not events:
+            return None
+
+        # Filter to completed games, sort by date descending
+        completed = []
+        for event in reversed(events):
+            comps = event.get("competitions", [{}])
+            if not comps:
+                continue
+            status = comps[0].get("status", {}).get("type", {}).get("name", "")
+            if status == "STATUS_FINAL":
+                completed.append(event)
+            if len(completed) >= count:
+                break
+
+        if not completed:
+            return None
+
+        name_lower = player_name.lower()
+        game_log = []
+
+        for event in completed:
+            event_id = event.get("id")
+            event_date = event.get("date", "")
+            if not event_id:
+                continue
+
+            box = get_game_boxscore_players(event_id, sport)
+            if not box:
+                continue
+
+            # Search both home and away players for this player
+            found = None
+            for side in ("home_players", "away_players"):
+                for p in box.get(side, []):
+                    if p.get("name", "").lower() == name_lower:
+                        found = p
+                        break
+                if found:
+                    break
+
+            if not found:
+                continue
+
+            entry = {
+                "pts": found.get("pts", 0),
+                "reb": found.get("reb", 0),
+                "ast": found.get("ast", 0) or found.get("a", 0),
+                "min": found.get("min", 0) or found.get("toi", 0),
+                "date": event_date[:10] if event_date else "",
+            }
+            if sport == "nhl":
+                entry["g"] = found.get("g", 0)
+                entry["sog"] = found.get("sog", 0)
+            game_log.append(entry)
+
+        return game_log if game_log else None
+
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
 def get_team_schedule(team_id, sport="nba"):
     """
     Fetches a team's schedule from ESPN.
@@ -816,15 +898,27 @@ def get_team_roster_leaders(team_id, sport="nba", limit=3):
             for future in futures:
                 cand = futures[future]
                 stats = future.result()
-                if stats and stats.get("ppg", 0) > 0:
-                    leaders.append({
-                        "athlete_id": cand["athlete_id"],
-                        "name": cand["name"],
-                        "ppg": stats.get("ppg", 0),
-                        "rpg": stats.get("rpg", 0),
-                        "apg": stats.get("apg", 0),
-                        "mpg": stats.get("mpg", 0),
-                    })
+                if sport == "nhl":
+                    if stats and stats.get("ptspg", 0) > 0:
+                        leaders.append({
+                            "athlete_id": cand["athlete_id"],
+                            "name": cand["name"],
+                            "ppg": stats.get("ptspg", 0),   # Map ptspg → ppg for PRISM compat
+                            "gpg": stats.get("gpg", 0),      # Goals per game
+                            "rpg": 0,                         # No rebounds in hockey
+                            "apg": stats.get("apg", 0),
+                            "mpg": stats.get("toi", 0),       # Time on ice → minutes
+                        })
+                else:
+                    if stats and stats.get("ppg", 0) > 0:
+                        leaders.append({
+                            "athlete_id": cand["athlete_id"],
+                            "name": cand["name"],
+                            "ppg": stats.get("ppg", 0),
+                            "rpg": stats.get("rpg", 0),
+                            "apg": stats.get("apg", 0),
+                            "mpg": stats.get("mpg", 0),
+                        })
 
         leaders.sort(key=lambda x: x["ppg"], reverse=True)
         return leaders[:limit]
@@ -990,10 +1084,14 @@ def get_league_avg_stats(sport="nba"):
             all_stats = {tid: f.result() for tid, f in futures.items()}
 
         # Average key stats across all teams
-        stat_keys = ["avgRebounds", "avgSteals", "avgAssists", "avgBlocks",
-                     "avgPoints", "avgPointsAgainst", "avgTurnovers",
-                     "avgFieldGoalsAttempted", "avgFreeThrowsAttempted",
-                     "avgOffensiveRebounds"]
+        if sport == "nhl":
+            stat_keys = ["avgGoals", "avgGoalsAllowed", "avgShots", "avgShotsAllowed",
+                         "avgAssists", "avgPoints", "avgPointsAgainst"]
+        else:
+            stat_keys = ["avgRebounds", "avgSteals", "avgAssists", "avgBlocks",
+                         "avgPoints", "avgPointsAgainst", "avgTurnovers",
+                         "avgFieldGoalsAttempted", "avgFreeThrowsAttempted",
+                         "avgOffensiveRebounds"]
         averages = {}
         for key in stat_keys:
             vals = [s[key] for s in all_stats.values() if s and key in s]
