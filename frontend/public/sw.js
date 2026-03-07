@@ -1,11 +1,7 @@
-const CACHE_NAME = "jokers-edge-v1";
-const PRECACHE_URLS = ["/", "/index.html"];
+const CACHE_NAME = "jokers-edge-v2";
 
-// Install — precache shell
+// Install — skip waiting to activate immediately
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
-  );
   self.skipWaiting();
 });
 
@@ -19,7 +15,10 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch — network-first for API, cache-first for assets
+// Fetch strategy:
+// - API calls: always network (no SW interception)
+// - Navigation (HTML): network-first (prevents stale index.html after deploys)
+// - Assets (JS/CSS/images): cache-first (hashed filenames handle versioning)
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
@@ -33,18 +32,34 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Navigation requests (HTML pages) — network-first to always get latest index.html
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Static assets — cache-first (Vite hashed filenames ensure freshness)
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)
         .then((response) => {
-          // Cache successful GET responses
           if (response.ok && event.request.method === "GET") {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return response;
         })
-        .catch(() => cached); // Offline fallback to cache
+        .catch(() => cached);
 
       return cached || fetchPromise;
     })
