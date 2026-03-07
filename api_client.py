@@ -890,7 +890,7 @@ def get_team_roster_leaders(team_id, sport="nba", limit=3):
         # Limit to first 5 to speed up on-demand props loading
         top_candidates = candidates[:5]
         leaders = []
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
                 pool.submit(get_player_season_averages, cand["athlete_id"], sport): cand
                 for cand in top_candidates

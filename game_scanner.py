@@ -1205,12 +1205,18 @@ def get_top_props(sport="nba"):
     if not games:
         return []
 
+    # Fetch league-wide player prop odds ONCE (not per-game)
+    try:
+        shared_props_odds = get_player_props_odds(sport)
+    except Exception:
+        shared_props_odds = {}
+
     def _fetch_props(game):
         eid = str(game["event_id"])
         matchup = game["away_team"] + " @ " + game["home_team"]
         game_date = game.get("game_date", "")
         try:
-            props = get_game_props(eid, sport)
+            props = get_game_props(eid, sport, player_props_lines=shared_props_odds)
         except Exception as e:
             print(f"[get_top_props] Failed for {matchup}: {type(e).__name__}: {str(e)[:100]}", flush=True)
             props = []
@@ -1224,7 +1230,9 @@ def get_top_props(sport="nba"):
     max_total_time = 45  # Max 45 seconds total to avoid web server timeout
     start_time = time.time()
 
-    with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
+    # Use fewer workers for batch to avoid thread explosion (each game spawns sub-pools)
+    batch_workers = min(2, len(games))
+    with ThreadPoolExecutor(max_workers=batch_workers) as pool:
         futures = {pool.submit(_fetch_props, g): g for g in games}
         for future in as_completed(futures):
             # Check if we've exceeded total time budget
@@ -1476,10 +1484,13 @@ def get_prop_ev_analysis(sport="nba"):
     return results
 
 
-def get_game_props(event_id, sport="nba"):
+def get_game_props(event_id, sport="nba", player_props_lines=None):
     """
     Standalone PRISM analysis for a single game, invoked on-demand.
     Fetches all needed context from ESPN API and runs _run_prism_analysis().
+
+    Args:
+        player_props_lines: Pre-fetched odds dict to avoid redundant league-wide API calls.
 
     Returns:
         List of prop signal dicts, or empty list on failure.
@@ -1544,24 +1555,26 @@ def get_game_props(event_id, sport="nba"):
         except (ValueError, TypeError):
             pass
 
-    # Parallel fetch: spread, B2B, O/U, player props odds
+    # Parallel fetch: spread, B2B, O/U, and optionally player props odds
     # NOTE: Injuries removed from parallel fetch - too slow for league-wide fetch
     t2 = time.time()
+    need_odds = player_props_lines is None
     with ThreadPoolExecutor(max_workers=_API_WORKERS) as pool:
         spread_f = pool.submit(get_game_spread, event_id, sport)
         b2b_home_f = pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
         b2b_away_f = pool.submit(check_back_to_back, away_team_id, game_date_str, sport)
         ou_f = pool.submit(get_game_overunder, event_id, sport=sport)
-        props_odds_f = pool.submit(get_player_props_odds, sport)
+        props_odds_f = pool.submit(get_player_props_odds, sport) if need_odds else None
 
         opening, current = spread_f.result()
         home_b2b = b2b_home_f.result()
         away_b2b = b2b_away_f.result()
         game_total = ou_f.result()
-        try:
-            player_props_lines = props_odds_f.result()
-        except Exception:
-            player_props_lines = {}
+        if props_odds_f is not None:
+            try:
+                player_props_lines = props_odds_f.result()
+            except Exception:
+                player_props_lines = {}
     print(f"[get_game_props] Context fetch completed in {time.time()-t2:.2f}s", flush=True)
 
     # Build injured_stars list (skip injuries for props - not critical for PRISM)
