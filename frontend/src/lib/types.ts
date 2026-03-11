@@ -131,7 +131,7 @@ export interface PickData {
 export interface PropSignal {
   player_name: string;
   player_id?: string | null;
-  stat: string;
+  stat_type: string;
   line: number;
   projection: number;
   edge: number;

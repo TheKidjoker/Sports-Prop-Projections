@@ -100,6 +100,85 @@ if HAS_TEST_MODEL:
         print(f"[cbb_ev] Startup load skipped: {_cbb_ev_err}", flush=True)
 scan_cache.init()
 
+# ─── Auto-run Test Model on Startup ─────────────────────────────────────
+if HAS_TEST_MODEL:
+    def _auto_run_test_model():
+        """Background thread: run backtests + EV training + walkforward on startup."""
+        import time
+        time.sleep(5)  # Let app finish startup
+
+        sports = ["nba", "nhl", "cbb"]
+
+        for sport in sports:
+            try:
+                # 1. Rules backtest
+                print(f"[auto-tm] {sport}: starting rules backtest...", flush=True)
+                start_rules_backtest_thread(sport)
+                while True:
+                    status = get_rules_backtest_status(sport)
+                    if status.get("status") in ("complete", "error"):
+                        break
+                    time.sleep(3)
+
+                if status.get("status") == "complete":
+                    # Reload calibration from fresh results
+                    run = tm_db.get_latest_model_run(sport, "rules_backtest")
+                    if run and run.get("model_params", {}).get("calibration"):
+                        load_calibration(sport, run["model_params"]["calibration"])
+                        print(f"[auto-tm] {sport}: calibration reloaded", flush=True)
+                else:
+                    print(f"[auto-tm] {sport}: backtest error — {status.get('message', '?')}", flush=True)
+
+                # 2. EV model training
+                print(f"[auto-tm] {sport}: starting EV training...", flush=True)
+                try:
+                    if sport == "nba":
+                        from nba_ev_model import start_ev_training_thread as nba_ev_start, get_ev_training_status as nba_ev_status
+                        nba_ev_start()
+                        while True:
+                            st = nba_ev_status()
+                            if st.get("status") in ("complete", "error"):
+                                break
+                            time.sleep(3)
+                    elif sport == "nhl":
+                        from nhl_ev_model import start_ev_training_thread as nhl_ev_start, get_ev_training_status as nhl_ev_status
+                        nhl_ev_start()
+                        while True:
+                            st = nhl_ev_status()
+                            if st.get("status") in ("complete", "error"):
+                                break
+                            time.sleep(3)
+                    elif sport == "cbb":
+                        from cbb_ev_model import start_ev_training_thread as cbb_ev_start, get_ev_training_status as cbb_ev_status
+                        cbb_ev_start()
+                        while True:
+                            st = cbb_ev_status()
+                            if st.get("status") in ("complete", "error"):
+                                break
+                            time.sleep(3)
+                    print(f"[auto-tm] {sport}: EV training done", flush=True)
+                except Exception as ev_err:
+                    print(f"[auto-tm] {sport}: EV training skipped — {ev_err}", flush=True)
+
+                # 3. Walk-forward validation
+                print(f"[auto-tm] {sport}: starting walkforward...", flush=True)
+                start_walkforward_thread(sport)
+                while True:
+                    wf = get_walkforward_status(sport)
+                    if wf.get("status") in ("complete", "error"):
+                        break
+                    time.sleep(3)
+                print(f"[auto-tm] {sport}: walkforward done", flush=True)
+
+                print(f"[auto-tm] {sport} complete", flush=True)
+            except Exception as e:
+                print(f"[auto-tm] {sport} failed: {e}", flush=True)
+
+        print("[auto-tm] All sports finished.", flush=True)
+
+    import threading as _auto_tm_threading
+    _auto_tm_threading.Thread(target=_auto_run_test_model, daemon=True).start()
+
 # ─── Supabase Auth ──────────────────────────────────────────────────────
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")

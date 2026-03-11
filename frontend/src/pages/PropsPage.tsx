@@ -33,9 +33,9 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       sport: activeSport,
       type: "prop",
       team: prop.team,
-      stat: prop.stat,
+      stat: prop.stat_type,
       line: prop.line,
-      label: `${prop.player_name} ${prop.stat} ${dirLabel}${prop.line}`,
+      label: `${prop.player_name} ${prop.stat_type} ${dirLabel}${prop.line}`,
       home_team,
       away_team,
       player_name: prop.player_name,
@@ -99,7 +99,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
           </div>
           {sortedProps.map((prop, i) => (
             <PropRow
-              key={`${prop.player_name}-${prop.stat}-${i}`}
+              key={`${prop.player_name}-${prop.stat_type}-${i}`}
               prop={prop}
               onTrack={onTrackBet ? handleTrackProp : undefined}
             />

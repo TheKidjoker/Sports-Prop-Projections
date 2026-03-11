@@ -25,7 +25,7 @@ export function PropRow({ prop, onTrack }: PropRowProps) {
       </div>
 
       <span className="text-[10px] font-mono text-muted-foreground w-12 text-center">
-        {prop.stat}
+        {prop.stat_type}
       </span>
 
       <span className="font-mono text-xs text-foreground w-10 text-right">

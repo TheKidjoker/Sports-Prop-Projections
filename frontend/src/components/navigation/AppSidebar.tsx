@@ -7,7 +7,6 @@ import {
   Layers,
   BookOpen,
   DollarSign,
-  FlaskConical,
   Shield,
   ChevronLeft,
   ChevronRight,
@@ -20,7 +19,6 @@ const sidebarItems = [
   { icon: Layers, label: "Parlays", id: "parlays" },
   { icon: BookOpen, label: "The Ledger", id: "ledger" },
   { icon: DollarSign, label: "My Bets", id: "bets" },
-  { icon: FlaskConical, label: "Test Model", id: "test" },
   { icon: Shield, label: "Admin", id: "admin", adminOnly: true },
 ];
 
