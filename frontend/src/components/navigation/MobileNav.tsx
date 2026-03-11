@@ -1,4 +1,4 @@
-import { Home, Zap, BookOpen, DollarSign, FlaskConical, User } from "lucide-react";
+import { Home, Zap, BookOpen, DollarSign, FlaskConical, User, Layers } from "lucide-react";
 
 interface MobileNavProps {
   activeSection: string;
@@ -9,6 +9,7 @@ const items = [
   { icon: Home, label: "Home", id: "home" },
   { icon: Zap, label: "Picks", id: "picks" },
   { icon: User, label: "Props", id: "props" },
+  { icon: Layers, label: "Parlays", id: "parlays" },
   { icon: BookOpen, label: "Ledger", id: "ledger" },
   { icon: DollarSign, label: "Bets", id: "bets" },
   { icon: FlaskConical, label: "Test", id: "test" },

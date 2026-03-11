@@ -7,6 +7,7 @@ import { HeroSection } from "../components/home/HeroSection";
 import { ScanResults } from "../components/picks/ScanResults";
 import { SportPills } from "../components/navigation/SportPills";
 import { PropsPage } from "./PropsPage";
+import { ParlayPage } from "./ParlayPage";
 import { LedgerPage } from "./LedgerPage";
 import { MyBetsPage } from "./MyBetsPage";
 import { AdminPage } from "./AdminPage";
@@ -162,6 +163,8 @@ const Index = () => {
     switch (activeSection) {
       case "props":
         return <PropsPage sport={selectedSport} onTrackBet={addBet} />;
+      case "parlays":
+        return <ParlayPage onTrackBet={addBet} />;
       case "ledger":
         return <LedgerPage sport={selectedSport} />;
       case "bets":
