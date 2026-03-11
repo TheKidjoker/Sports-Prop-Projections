@@ -758,7 +758,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         _unval_keys = ("trell", "vegas_trap", "public_betting")
         crossed_unvalidated = any(score_breakdown.get(k, 0) != 0 for k in _unval_keys)
 
-    # ── EV Model Override (NBA + NHL) ─────────────────────────────────
+    # ── EV Model Integration (ensemble for NBA/CBB, pure override for NHL)
     ev_model_data = None
     if sport in ("nba", "nhl", "cbb") and not lightweight:
         ev_result = _try_ev_prediction(
@@ -766,17 +766,52 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             home_team, away_team,
         )
         if ev_result:
-            score = ev_result["confirmation_score"]
-            cover_pct = ev_result["model_probability"]
-            cover_pct_cal = ev_result["model_probability"]
-            recommendation = ev_result["recommendation"]
-            ev_model_data = {
-                "probability": ev_result["model_probability"],
-                "edge": ev_result["edge"],
-                "ev_per_unit": ev_result["ev_per_unit"],
-                "auc": ev_result["auc"],
-                "active": True,
-            }
+            if sport in ("nba", "cbb"):
+                # Ensemble: 60% rules / 40% EV — rules more stable (EV unvalidated OOS)
+                rules_pct = cover_pct_cal or cover_pct
+                ev_pct = ev_result["model_probability"]
+                blended_pct = round(rules_pct * 0.6 + ev_pct * 0.4, 1)
+                cover_pct = blended_pct
+                cover_pct_cal = blended_pct
+                # Keep rules-based recommendation (not EV's compressed one)
+                ev_model_data = {
+                    "probability": ev_result["model_probability"],
+                    "edge": ev_result["edge"],
+                    "ev_per_unit": ev_result["ev_per_unit"],
+                    "auc": ev_result["auc"],
+                    "active": True,
+                    "blended": True,
+                    "rules_pct": rules_pct,
+                    "ev_pct": ev_pct,
+                }
+            else:
+                # NHL: pure EV override (validated at 67% OOS)
+                # Rescale display: raw sigmoid clusters 52-70% due to strong
+                # regularization. Stretch edge proportionally so the display
+                # range differentiates games (52 → 52, 55 → 60, 60 → 72, 65 → 80).
+                raw_prob = ev_result["model_probability"]  # 0-100 scale
+                breakeven = 52.4
+                # Scale factor: 2.5× stretches the edge above breakeven
+                # so a 5% raw edge displays as ~12.5% above breakeven
+                if raw_prob > breakeven:
+                    edge_pct = raw_prob - breakeven
+                    display_pct = round(breakeven + edge_pct * 2.5, 1)
+                    display_pct = min(display_pct, 85.0)  # cap at 85%
+                else:
+                    display_pct = raw_prob
+
+                score = ev_result["confirmation_score"]
+                cover_pct = display_pct
+                cover_pct_cal = display_pct
+                recommendation = ev_result["recommendation"]
+                ev_model_data = {
+                    "probability": raw_prob,
+                    "edge": ev_result["edge"],
+                    "ev_per_unit": ev_result["ev_per_unit"],
+                    "auc": ev_result["auc"],
+                    "active": True,
+                    "blended": False,
+                }
 
     action = _build_action_string(lean_team, current_spread, home_team, moneyline_recommend)
 
