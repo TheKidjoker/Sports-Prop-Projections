@@ -260,8 +260,12 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
             </span>
 
             {/* Type badge */}
-            <span className="text-[8px] font-heading tracking-wider text-muted-foreground w-6 text-center">
-              {leg.type === "spread" ? "SPR" : "PROP"}
+            <span className={`text-[8px] font-heading tracking-wider w-8 text-center ${
+              leg.type === "prop"
+                ? "px-1 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30"
+                : "text-muted-foreground"
+            }`}>
+              {leg.type === "spread" ? "SPR" : (leg.statType ?? "PROP")}
             </span>
 
             {/* Label */}

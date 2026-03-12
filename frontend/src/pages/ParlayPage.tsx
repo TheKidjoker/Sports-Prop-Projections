@@ -64,9 +64,14 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
     <div className="py-6 px-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h2 className="font-heading text-xl tracking-wider text-foreground">
-          CROSS-SPORT <span className="text-secondary">PARLAYS</span>
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-heading text-xl tracking-wider text-foreground">
+            CROSS-SPORT <span className="text-secondary">PARLAYS</span>
+          </h2>
+          <span className="text-[9px] font-heading px-1.5 py-0.5 border rounded-sm bg-success/15 text-success border-success/30">
+            PROPS VALIDATED
+          </span>
+        </div>
 
         {/* Props loading indicator */}
         {propsLoading && (

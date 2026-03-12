@@ -116,11 +116,15 @@ DATA_CONFIDENCE_LEVELS = {
 }
 
 SPORT_VALIDATION_STATUS = {
-    "nhl": {"badge": "VALIDATED",    "css_class": "badge-validated",    "text": "VALIDATED \u2014 67% OOS"},
-    "nba": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 49% OOS"},
-    "cbb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 49% OOS"},
-    "nfl": {"badge": "LIMITED DATA", "css_class": "badge-limited",      "text": "LIMITED DATA \u2014 34% OOS (n=29)"},
-    "cfb": {"badge": "UNVALIDATED",  "css_class": "badge-unvalidated",  "text": "UNVALIDATED \u2014 No OOS data"},
+    "nhl": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+    "nba": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+    "cbb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+    "nfl": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+    "cfb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+}
+
+PRISM_VALIDATION_STATUS = {
+    "badge": "VALIDATED", "css_class": "badge-validated", "text": "VALIDATED \u2014 Player Props (PRISM)"
 }
 
 # ─── Validation Tier Configuration ─────────────────────────────────────────

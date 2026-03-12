@@ -14,10 +14,10 @@ interface SportConfig {
 }
 
 export const SPORTS: SportConfig[] = [
-  { id: "NHL", label: "NHL", subtitle: "Gotham Ice", confidence: "validated", confidenceLabel: "Validated Model", gamesCount: 0 },
+  { id: "NHL", label: "NHL", subtitle: "Gotham Ice", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "NBA", label: "NBA", subtitle: "Gotham Court", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
-  { id: "NFL", label: "NFL", subtitle: "Gotham Gridiron", confidence: "limited", confidenceLabel: "Limited Data", gamesCount: 0 },
-  { id: "CFB", label: "CFB", subtitle: "Gotham College", confidence: "limited", confidenceLabel: "Limited Data", gamesCount: 0 },
+  { id: "NFL", label: "NFL", subtitle: "Gotham Gridiron", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
+  { id: "CFB", label: "CFB", subtitle: "Gotham College", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "CBB", label: "CBB", subtitle: "Gotham Hardwood", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
 ];
 

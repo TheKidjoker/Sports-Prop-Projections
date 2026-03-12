@@ -4,7 +4,7 @@ A rules-based sports betting analysis engine that evaluates spread plays across 
 
 All scoring weights have been calibrated through historical backtesting against real outcomes (NBA: 607 games, NHL: 529, CBB: 1,977, NFL: 105, CFB: 51). NHL is the only sport with validated out-of-sample performance (67.3% accuracy, +28.5% ROI).
 
-Features a React + Vite frontend with dark red/black Gotham-themed UI ("Joker's Edge"), PRISM player prop projections for NBA/NHL/CBB, variance-based Prop EV engine, personal bet tracker with auto-grading, and an instant-load background scan cache system.
+Features a React + Vite + TypeScript frontend (Tailwind CSS, shadcn/ui, TanStack Query) with dark red/black Gotham-themed UI ("Joker's Edge"). Includes PRISM player prop projections for NBA/NHL/CBB, variance-based Prop EV engine, cross-sport parlay builder with progressive loading, personal bet tracker with auto-grading, admin pick curation, and an instant-load background scan cache system.
 
 ---
 
@@ -300,6 +300,10 @@ L2-regularized logistic regression models that replace heuristic scoring for spr
 
 Models use Bayesian regression (shrinks recent stats toward season average) and isotonic calibration when ECE > 5%.
 
+### Model Selection
+
+`model_selection.py` compares rules-based vs EV model out-of-sample performance per sport and provides a cached validation tier for production gating. The best-performing model (by OOS accuracy) is used for each sport's scan results.
+
 ---
 
 ## Bet Tracker
@@ -323,14 +327,14 @@ Scans all games for the selected sport, analyzes each one, and ranks them by con
 ### ALL Mode
 Scans all five sports simultaneously using parallel threads. Displays results grouped by sport with cross-sport parlay suggestions.
 
-### Parlay Suggestions
-Auto-generated from the day's picks:
+### Parlay Builder (Cross-Sport)
+Dedicated Parlays tab with progressive loading — scans all five sports in parallel and builds parlays as results arrive:
 - **Two-Face's Safe Bet** -- 2 legs, both 80%+ cover
 - **Gotham Gambit** -- 4-6 legs, all 67.5%+ cover
 - **Gotham Breakout** -- 4-10 legs, all 60%+ cover
+- **Joker's Lotto** -- Cross-sport mega parlay: best pick (72%+ cover) from each sport. Requires at least 2 qualifying sports.
 
-### Joker's Lotto
-Cross-sport mega parlay. Takes the single best pick (72%+ cover) from each sport and combines them into one ticket. Requires at least 2 qualifying sports.
+Includes player prop parlays from PRISM (NBA, NHL, CBB) alongside spread picks.
 
 ### Manual Prediction (NBA only)
 Enter a player name, team, and Vegas line to get an individual over/under projection based on recent game averages, slot type, line movement, and injury context.
@@ -373,6 +377,14 @@ Replays the production scoring system against historical outcomes to validate an
 - Generates threshold sweeps, slot breakdowns, recommendation breakdowns
 - Factors NOT replayable: Trell Rule (no historical injury data), Public betting (no Pinnacle history), Feedback loop (no ledger at game time), NFL weather (no historical weather)
 
+### Pick Curation (Admin)
+Admin approval gate for scan results. Picks go PENDING on scan, then admin approves or rejects before non-admin users see them. Only approved picks flow into the prediction tracker.
+
+### Automated Daily Job
+Two-mode scheduled job (`daily_job.py`):
+- **Scan mode** (11 AM): Scans all sports, saves qualifying predictions
+- **Grade mode** (1 AM): Grades all pending predictions with final scores
+
 ### Today + Tomorrow Slate
 The scanner automatically fetches both today's active games and tomorrow's full slate. Tomorrow's games get a lightweight analysis (skip expensive API calls like PRISM, B2B, H2H, NFL weather/trends) since deep analysis isn't needed yet.
 
@@ -404,8 +416,9 @@ Optional Supabase authentication gate:
 app.py                Flask routes + API endpoints
 game_scanner.py       Analysis engine — scans and scores all games, PRISM orchestration
 api_client.py         ESPN API integration (scoreboard, summary, injuries, stats, game logs)
-api_players.py        BallDontLie NBA player stats + ESPN game logs for NHL/CBB
+api_players.py        BallDontLie v2 NBA player stats + ESPN game logs for NHL/CBB
 api_odds.py           The-Odds-API spreads, player props (NBA/NHL/CBB), ESPN weather
+api_odds_io.py        odds-api.io client (250+ bookmakers, primary odds source with fallback)
 api_cache.py          Shared HTTP caching (10-min TTL, bounded to 500 entries)
 time_slots.py         Slot classification rules per sport
 line_movement.py      Spread movement detection + confirmation logic
@@ -417,15 +430,21 @@ prism.py              PRISM player prop projection engine (pure math, no API cal
 prop_ev_engine.py     Variance-based EV calculation for player props
 projections.py        Manual prediction math (over/under probability)
 calibration.py        Logistic calibration for cover probability (replaces linear formula)
+model_selection.py    Rules vs EV model OOS comparison and production gating
 tracker.py            SQLite/Supabase prediction storage + grading + dashboard stats
 bet_tracker.py        Personal bet slip — track, grade, CLV for spread + prop bets
-pick_curation.py      Pick curation and sync from scan results
+pick_curation.py      Admin pick approval gate — PENDING → approved/rejected workflow
 scan_cache.py         Background scan cache daemon (thread-safe, hourly refresh)
 cache_manager.py      Supabase persistent cache for scan results across deploys
+daily_job.py          Automated daily scan (11 AM) and grade (1 AM) job
 nba_ev_model.py       L2-regularized logistic EV model for NBA spreads
 nhl_ev_model.py       L2-regularized logistic EV model for NHL spreads
 cbb_ev_model.py       L2-regularized logistic EV model for CBB spreads
-frontend/             React + Vite SPA (TypeScript, Tailwind, shadcn/ui)
+frontend/             React + Vite SPA (TypeScript, Tailwind, shadcn/ui, TanStack Query)
+  src/pages/          Index, PropsPage, ParlayPage, LedgerPage, MyBetsPage, AdminPage, TestModelPage
+  src/components/     picks/, bets/, navigation/, home/, dashboard/, test-model/
+  src/hooks/          use-scan, use-picks, use-props, use-bets, use-dashboard, use-games
+  src/lib/            api (authFetch), auth (Supabase provider), types
 templates/            Legacy Flask templates (index.html)
 static/               Legacy frontend (app.js, style.css)
 test_model/           Backtesting engine (collector, rules backtest, EV models, NBA rebuild)
@@ -449,6 +468,11 @@ test_model/           Backtesting engine (collector, rules backtest, EV models, 
 | `/api/bets/grade` | POST | Grade all pending tracked bets |
 | `/api/bets/dashboard` | GET | Bet tracker dashboard with aggregated stats |
 | `/api/bets/<id>` | DELETE | Delete a pending tracked bet |
+| `/api/picks/pending` | GET | Pending picks awaiting admin approval |
+| `/api/picks/approve` | POST | Approve a pending pick (admin only) |
+| `/api/picks/reject` | POST | Reject a pending pick (admin only) |
+| `/api/picks/approve-all` | POST | Approve all pending picks (admin only) |
+| `/api/picks/status` | GET | Current pick curation status |
 | `/api/auth/config` | GET | Supabase configuration (public, no auth required) |
 | `/api/auth/me` | GET | Current user info and admin status |
 
@@ -476,8 +500,9 @@ test_model/           Backtesting engine (collector, rules backtest, EV models, 
 | **ESPN Game Log API** | Recent game-by-game stats for PRISM projections |
 | **ESPN Team Stats API** | Roster leaders, defensive ratings for PRISM |
 | **ESPN Previous Matchup API** | Head-to-head history for revenge/dominance detection |
-| **balldontlie.io** | NBA player game logs for manual predictions |
-| **The-Odds-API** | Multi-book spreads (Pinnacle vs consensus), player prop lines (NBA: PTS/REB/AST, NHL: goals/assists/points/SOG) |
+| **balldontlie.io (v2)** | NBA player game logs for manual predictions and PRISM |
+| **odds-api.io** | Primary odds source (250+ bookmakers), spreads and player props |
+| **The-Odds-API** | Fallback multi-book spreads (Pinnacle vs consensus), player prop lines (NBA: PTS/REB/AST, NHL: goals/assists/points/SOG) |
 | **OpenWeatherMap** | Fallback weather data for NFL outdoor games |
 
 ### Caching Strategy
@@ -666,7 +691,8 @@ Open `http://localhost:5000`. Click a sport card on the hero page to auto-scan, 
 | `SUPABASE_ANON_KEY` | No | Supabase anonymous key for client-side auth |
 | `SUPABASE_JWT_SECRET` | No | JWT secret for server-side verification (empty = bypass auth) |
 | `OPENWEATHER_API_KEY` | No | Enables fallback weather data for NFL outdoor games |
-| `THE_ODDS_API_KEY` | No | Enables sharp money detection and posted player prop lines |
+| `ODDS_API_IO_KEY` | No | Primary odds source (odds-api.io, 250+ bookmakers) |
+| `THE_ODDS_API_KEY` | No | Fallback sharp money detection and posted player prop lines |
 | `ODDS_API_KEY` | No | Odds API key for historical spread backfill in backtesting |
 | `DATABASE_URL` | No | PostgreSQL connection string for production (defaults to local SQLite) |
 | `PORT` | No | Server port (default 5000) |
@@ -679,10 +705,11 @@ Open `http://localhost:5000`. Click a sport card on the hero page to auto-scan, 
 flask
 requests
 gunicorn
-psycopg2-binary
-scikit-learn
-numpy
-PyJWT
-cryptography
 supabase
+scikit-learn
+scipy
+numpy
+PyJWT[crypto]
+python-dotenv
+vaderSentiment
 ```

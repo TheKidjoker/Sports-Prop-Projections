@@ -50,9 +50,14 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   return (
     <div className="py-6 px-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="font-heading text-xl tracking-wider text-foreground">
-          PLAYER <span className="text-secondary">PROPS</span>
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-heading text-xl tracking-wider text-foreground">
+            PLAYER <span className="text-secondary">PROPS</span>
+          </h2>
+          <span className="text-[9px] font-heading px-1.5 py-0.5 border rounded-sm bg-success/15 text-success border-success/30">
+            VALIDATED
+          </span>
+        </div>
         {propsAvailable && (
           <button
             onClick={() => setLoadAll(true)}
