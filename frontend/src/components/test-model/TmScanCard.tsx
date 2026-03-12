@@ -6,7 +6,7 @@ interface TmScanCardProps {
 
 export function TmScanCard({ game }: TmScanCardProps) {
   const coverColor =
-    game.cover_pct >= 65 ? "text-green-400" : game.cover_pct >= 55 ? "text-yellow-400" : "text-red-400";
+    game.cover_pct >= 65 ? "text-success" : game.cover_pct >= 55 ? "text-warning" : "text-primary";
 
   return (
     <div className="card-surface rounded-sm p-4">
@@ -20,9 +20,9 @@ export function TmScanCard({ game }: TmScanCardProps) {
         <span
           className={`text-xs font-heading tracking-wider px-2 py-0.5 rounded-sm ${
             game.recommendation === "STRONG PLAY"
-              ? "bg-green-500/20 text-green-400"
+              ? "bg-success/20 text-success"
               : game.recommendation === "LEAN"
-              ? "bg-yellow-500/20 text-yellow-400"
+              ? "bg-warning/20 text-warning"
               : "bg-muted text-muted-foreground"
           }`}
         >
@@ -69,7 +69,7 @@ export function TmScanCard({ game }: TmScanCardProps) {
               <span className="text-muted-foreground">Edge:</span>{" "}
               <span
                 className={`font-mono ${
-                  game.ml_overlay.edge > 0 ? "text-green-400" : "text-red-400"
+                  game.ml_overlay.edge > 0 ? "text-success" : "text-primary"
                 }`}
               >
                 {game.ml_overlay.edge > 0 ? "+" : ""}
@@ -82,7 +82,7 @@ export function TmScanCard({ game }: TmScanCardProps) {
               <span className="text-muted-foreground">EV:</span>{" "}
               <span
                 className={`font-mono ${
-                  game.ml_overlay.ev > 0 ? "text-green-400" : "text-red-400"
+                  game.ml_overlay.ev > 0 ? "text-success" : "text-primary"
                 }`}
               >
                 {game.ml_overlay.ev > 0 ? "+" : ""}

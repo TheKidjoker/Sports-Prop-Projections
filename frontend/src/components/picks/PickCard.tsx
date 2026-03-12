@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import {
   Zap, RefreshCw, BarChart3, Target, AlertTriangle, Cloud, Users, Clock, Plus,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { approvePick, rejectPick } from "@/lib/api";
 import type { PickData, Tier, SportLower } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
@@ -19,23 +20,18 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   zap: Zap,
 };
 
-const tierConfig: Record<Tier, { className: string; borderClass: string }> = {
-  "STRONG PLAY": {
-    className: "bg-primary/20 text-primary border-primary/40",
-    borderClass: "border-l-tier-strong",
-  },
-  CONFIDENT: {
-    className: "bg-secondary/20 text-secondary border-secondary/40",
-    borderClass: "border-l-tier-confident",
-  },
-  LEAN: {
-    className: "bg-foreground/10 text-foreground border-foreground/20",
-    borderClass: "border-l-tier-lean",
-  },
-  MONITOR: {
-    className: "bg-muted-foreground/10 text-muted-foreground border-muted-foreground/20",
-    borderClass: "border-l-tier-monitor",
-  },
+const tierBadgeVariant: Record<Tier, "strong" | "confident" | "lean" | "monitor"> = {
+  "STRONG PLAY": "strong",
+  CONFIDENT: "confident",
+  LEAN: "lean",
+  MONITOR: "monitor",
+};
+
+const tierBorderClass: Record<Tier, string> = {
+  "STRONG PLAY": "border-l-tier-strong",
+  CONFIDENT: "border-l-tier-confident",
+  LEAN: "border-l-tier-lean",
+  MONITOR: "border-l-tier-monitor",
 };
 
 interface PickCardProps {
@@ -46,7 +42,8 @@ interface PickCardProps {
 }
 
 export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardProps) {
-  const config = tierConfig[pick.tier] ?? tierConfig.MONITOR;
+  const badgeVariant = tierBadgeVariant[pick.tier] ?? "monitor";
+  const borderClass = tierBorderClass[pick.tier] ?? "border-l-tier-monitor";
 
   const handleApprove = async () => {
     if (!pick.eventId || !pick.sport) return;
@@ -92,13 +89,13 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.35 }}
-      className={`card-surface rounded-sm ${config.borderClass} transition-all duration-200 group hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_hsla(0,72%,51%,0.15)]`}
+      className={`card-surface rounded-sm ${borderClass} transition-all duration-200 group hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_hsla(0,72%,51%,0.15)]`}
     >
       {/* Header row */}
       <div className="flex items-center justify-between px-3 sm:px-4 pt-3 pb-2">
-        <span className={`text-[10px] font-heading tracking-wider px-2 py-0.5 border rounded-sm ${config.className}`}>
+        <Badge variant={badgeVariant}>
           {pick.tier}
-        </span>
+        </Badge>
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm text-foreground">
             {pick.coverPct.toFixed(1)}%

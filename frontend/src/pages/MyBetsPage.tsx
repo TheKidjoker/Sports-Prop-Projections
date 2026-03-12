@@ -1,31 +1,30 @@
 import { useState, useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
 import { useGradeBets, useDeleteBet, useBetsCombined } from "@/hooks/use-bets";
-import { toLowerSport, type Sport, type TrackedBet } from "@/lib/types";
+import { toLowerSport, type Sport, type SportLower, type TrackedBet } from "@/lib/types";
+import { LogoLoader } from "@/components/ui/LogoLoader";
 import { toast } from "sonner";
 
 interface MyBetsPageProps {
   sport: Sport | null;
 }
 
-const resultBadge = (result: string) => {
+import { Badge } from "@/components/ui/badge";
+
+const resultBadgeVariant = (result: string): "win" | "loss" | "push" | "pending" => {
   switch (result) {
-    case "WIN":
-      return "bg-success/15 text-success border-success/30";
-    case "LOSS":
-      return "bg-primary/15 text-primary border-primary/30";
-    case "PUSH":
-      return "bg-warning/15 text-warning border-warning/30";
-    default:
-      return "bg-muted text-muted-foreground border-border";
+    case "WIN": return "win";
+    case "LOSS": return "loss";
+    case "PUSH": return "push";
+    default: return "pending";
   }
 };
 
-const recBadge = (rec: string | null | undefined) => {
+const recBadgeVariant = (rec: string | null | undefined): "strong" | "confident" | "lean" | null => {
   if (!rec) return null;
-  if (rec === "STRONG PLAY") return "bg-primary/15 text-primary border-primary/30";
-  if (rec === "CONFIDENT") return "bg-secondary/15 text-secondary border-secondary/30";
-  return "bg-foreground/10 text-foreground border-foreground/20";
+  if (rec === "STRONG PLAY") return "strong";
+  if (rec === "CONFIDENT") return "confident";
+  return "lean";
 };
 
 function BetLine({ bet }: { bet: TrackedBet }) {
@@ -43,10 +42,10 @@ function BetLine({ bet }: { bet: TrackedBet }) {
           <span className="font-mono text-xs text-foreground truncate">
             {bet.away_team} @ {bet.home_team}
           </span>
-          {bet.recommendation && (
-            <span className={`text-[9px] font-heading px-1.5 py-0.5 border rounded-sm shrink-0 ${recBadge(bet.recommendation)}`}>
+          {bet.recommendation && recBadgeVariant(bet.recommendation) && (
+            <Badge variant={recBadgeVariant(bet.recommendation)!} size="sm" className="shrink-0">
               {bet.recommendation}
-            </span>
+            </Badge>
           )}
         </div>
 
@@ -98,9 +97,9 @@ function BetLine({ bet }: { bet: TrackedBet }) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-[10px] font-heading px-1.5 py-0.5 border rounded-sm ${resultBadge(bet.result)}`}>
+        <Badge variant={resultBadgeVariant(bet.result)}>
           {bet.result}
-        </span>
+        </Badge>
         {bet.result === "PENDING" && (
           <button
             onClick={() => deleteBet.mutate(bet.id)}
@@ -114,8 +113,20 @@ function BetLine({ bet }: { bet: TrackedBet }) {
   );
 }
 
+const SPORT_FILTERS: { label: string; value: SportLower | undefined }[] = [
+  { label: "ALL", value: undefined },
+  { label: "NBA", value: "nba" },
+  { label: "NHL", value: "nhl" },
+  { label: "NFL", value: "nfl" },
+  { label: "CBB", value: "cbb" },
+  { label: "CFB", value: "cfb" },
+];
+
 export function MyBetsPage({ sport }: MyBetsPageProps) {
-  const activeSport = sport ? toLowerSport(sport) : undefined;
+  const [sportFilter, setSportFilter] = useState<SportLower | undefined>(
+    sport ? toLowerSport(sport) : undefined
+  );
+  const activeSport = sportFilter;
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   const { data: combinedData, isLoading } = useBetsCombined(activeSport, statusFilter);
@@ -202,6 +213,24 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
         </div>
       )}
 
+      {/* Sport filter */}
+      <div className="flex items-center gap-1 mb-2">
+        <span className="text-[10px] font-heading tracking-wider text-muted-foreground mr-1">SPORT:</span>
+        {SPORT_FILTERS.map((sf) => (
+          <button
+            key={sf.label}
+            onClick={() => setSportFilter(sf.value)}
+            className={`px-2 py-1 text-[10px] font-heading tracking-wider rounded-sm transition-colors ${
+              activeSport === sf.value
+                ? "bg-secondary text-secondary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+            }`}
+          >
+            {sf.label}
+          </button>
+        ))}
+      </div>
+
       {/* Status filter */}
       <div className="flex items-center gap-1 mb-4">
         {statuses.map((s) => (
@@ -220,11 +249,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
       </div>
 
       {isLoading && (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider animate-pulse">
-            LOADING BETS...
-          </p>
-        </div>
+        <LogoLoader text="LOADING BETS..." size="sm" />
       )}
 
       {bets.length > 0 && (

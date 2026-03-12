@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { RefreshCw } from "lucide-react";
 import { useParlays } from "@/hooks/use-parlays";
 import {
   buildCrossSportParlays,
@@ -73,6 +74,19 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
           </span>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => triggerScan()}
+            disabled={scanLoading}
+            className="px-3 py-1.5 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <RefreshCw className="w-3 h-3" />
+            RESCAN
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end mb-4">
         {/* Props loading indicator */}
         {propsLoading && (
           <span className="text-[10px] font-heading tracking-wider text-muted-foreground animate-pulse">

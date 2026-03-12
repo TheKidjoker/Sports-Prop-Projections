@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { SPORTS } from "../navigation/SportPills";
 import { ArrowRight } from "lucide-react";
 import { useAllGameCounts } from "@/hooks/use-games";
@@ -18,6 +18,7 @@ interface HeroSectionProps {
 
 export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectionProps) {
   const gameCounts = useAllGameCounts();
+  const prefersReducedMotion = useReducedMotion();
 
   return (
     <div className="py-8 sm:py-16 px-3 sm:px-6">
@@ -32,8 +33,8 @@ export function HeroSection({ onSelectSport, onScan, selectedSport }: HeroSectio
           src="/static/logo.png"
           alt="Joker's Edge"
           className="w-32 h-32 sm:w-44 sm:h-44 md:w-56 md:h-56 mx-auto mb-4 sm:mb-6 drop-shadow-[0_0_25px_rgba(220,38,38,0.3)]"
-          animate={{ rotate: [0, 2, -2, 0] }}
-          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          animate={prefersReducedMotion ? {} : { rotate: [0, 2, -2, 0] }}
+          transition={prefersReducedMotion ? {} : { duration: 6, repeat: Infinity, ease: "easeInOut" }}
         />
         <h2 className="text-3xl sm:text-5xl md:text-7xl font-heading tracking-[0.1em] text-foreground mb-2 sm:mb-3">
           WHY SO <span className="text-primary">SERIOUS</span>?

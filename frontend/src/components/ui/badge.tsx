@@ -4,26 +4,50 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center border font-heading tracking-wider transition-colors",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
-        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        default: "border-transparent bg-primary text-primary-foreground",
+        secondary: "border-transparent bg-secondary text-secondary-foreground",
+        destructive: "border-transparent bg-destructive text-destructive-foreground",
         outline: "text-foreground",
+        // Tier badges (spread picks)
+        strong: "bg-primary/20 text-primary border-primary/40",
+        confident: "bg-secondary/20 text-secondary border-secondary/40",
+        lean: "bg-foreground/10 text-foreground border-foreground/20",
+        monitor: "bg-muted-foreground/10 text-muted-foreground border-muted-foreground/20",
+        // Result badges (bet tracker)
+        win: "bg-success/15 text-success border-success/30",
+        loss: "bg-primary/15 text-primary border-primary/30",
+        push: "bg-warning/15 text-warning border-warning/30",
+        pending: "bg-muted text-muted-foreground border-border",
+        // Signal badges (props)
+        "signal-strong": "bg-success/15 text-success border-success/30",
+        "signal-lean": "bg-secondary/15 text-secondary border-secondary/30",
+        "signal-pass": "bg-muted text-muted-foreground border-border",
+        // Validation badges
+        validated: "bg-success/15 text-success border-success/30",
+        experimental: "bg-warning/15 text-warning border-warning/30",
+        limited: "bg-primary/15 text-primary border-primary/30",
+      },
+      size: {
+        default: "text-[10px] px-2 py-0.5 rounded-sm",
+        sm: "text-[9px] px-1.5 py-0.5 rounded-sm",
+        xs: "text-[8px] px-1 py-0.5 rounded-sm",
       },
     },
     defaultVariants: {
       variant: "default",
+      size: "default",
     },
   },
 );
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+function Badge({ className, variant, size, ...props }: BadgeProps) {
+  return <div className={cn(badgeVariants({ variant, size }), className)} {...props} />;
 }
 
 export { Badge, badgeVariants };

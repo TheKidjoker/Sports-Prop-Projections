@@ -39,8 +39,8 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
   // Sort all picks by confidence descending
   const sorted = [...picks].sort((a, b) => b.coverPct - a.coverPct);
 
-  const topPicks = sorted.filter((p) => p.coverPct >= 68.5);
-  const watchPicks = sorted.filter((p) => p.coverPct >= 55 && p.coverPct < 68.5);
+  const topPicks = sorted.filter((p) => p.coverPct >= 65);
+  const watchPicks = sorted.filter((p) => p.coverPct >= 55 && p.coverPct < 65);
   const otherGames = sorted.filter((p) => p.coverPct < 55);
 
   return (

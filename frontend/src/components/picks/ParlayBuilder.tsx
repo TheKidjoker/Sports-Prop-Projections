@@ -37,11 +37,11 @@ export interface ParlayTier {
 // ─── Sport badge colors ───────────────────────────────
 
 const SPORT_COLORS: Record<string, string> = {
-  nba: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  nhl: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  cbb: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  nfl: "bg-green-500/20 text-green-400 border-green-500/30",
-  cfb: "bg-red-500/20 text-red-400 border-red-500/30",
+  nba: "bg-warning/20 text-warning border-warning/30",
+  nhl: "bg-secondary/20 text-secondary border-secondary/30",
+  cbb: "bg-accent-foreground/20 text-accent-foreground border-accent-foreground/30",
+  nfl: "bg-success/20 text-success border-success/30",
+  cfb: "bg-primary/20 text-primary border-primary/30",
 };
 
 // ─── Build parlays from cross-sport data ──────────────

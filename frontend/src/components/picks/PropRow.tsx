@@ -1,9 +1,12 @@
+import { Badge } from "@/components/ui/badge";
 import type { PropSignal } from "@/lib/types";
 
-const signalColors: Record<string, string> = {
-  STRONG: "bg-success/15 text-success border-success/30",
-  LEAN: "bg-secondary/15 text-secondary border-secondary/30",
-  PASS: "bg-muted text-muted-foreground border-border",
+const signalBadgeVariant = (signal: string): "signal-strong" | "signal-lean" | "signal-pass" => {
+  switch (signal) {
+    case "STRONG": return "signal-strong";
+    case "LEAN": return "signal-lean";
+    default: return "signal-pass";
+  }
 };
 
 interface PropRowProps {
@@ -40,9 +43,9 @@ export function PropRow({ prop, onTrack }: PropRowProps) {
         {edge > 0 ? "+" : ""}{edge.toFixed(1)}
       </span>
 
-      <span className={`text-[9px] font-heading px-1.5 py-0.5 border rounded-sm ${signalColors[prop.signal] ?? signalColors.PASS}`}>
+      <Badge variant={signalBadgeVariant(prop.signal)} size="sm">
         {prop.signal}
-      </span>
+      </Badge>
 
       <span className="font-mono text-[10px] text-muted-foreground w-8 text-right">
         {prop.confidence}

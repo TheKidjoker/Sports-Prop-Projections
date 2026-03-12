@@ -5,6 +5,8 @@ import { LogoLoader } from "@/components/ui/LogoLoader";
 import { toLowerSport, type Sport, type PropSignal } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
 
+const PROPS_PER_PAGE = 25;
+
 interface PropsPageProps {
   sport: Sport | null;
   onTrackBet?: (bet: BetSlipItem) => void;
@@ -12,15 +14,19 @@ interface PropsPageProps {
 
 export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   const [loadAll, setLoadAll] = useState(false);
+  const [page, setPage] = useState(0);
   const activeSport = sport ? toLowerSport(sport) : "nba";
-  const { data, isLoading, error } = useTopProps(activeSport, loadAll);
+  const { data, isLoading, error, refetch } = useTopProps(activeSport, loadAll);
 
-  const propsAvailable = activeSport === "nba" || activeSport === "nhl";
+  const propsAvailable = activeSport === "nba" || activeSport === "nhl" || activeSport === "cbb";
 
   const sortedProps = useMemo(
     () => data?.props ? [...data.props].sort((a, b) => b.confidence - a.confidence) : [],
     [data?.props]
   );
+
+  const totalPages = Math.ceil(sortedProps.length / PROPS_PER_PAGE);
+  const pagedProps = sortedProps.slice(page * PROPS_PER_PAGE, (page + 1) * PROPS_PER_PAGE);
 
   const handleTrackProp = (prop: PropSignal) => {
     if (!onTrackBet) return;
@@ -48,7 +54,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   };
 
   return (
-    <div className="py-6 px-6 max-w-5xl mx-auto">
+    <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <h2 className="font-heading text-xl tracking-wider text-foreground">
@@ -60,7 +66,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         </div>
         {propsAvailable && (
           <button
-            onClick={() => setLoadAll(true)}
+            onClick={() => { setLoadAll(true); setPage(0); }}
             disabled={isLoading}
             className="px-4 py-2 text-xs font-heading tracking-wider bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors disabled:opacity-50"
           >
@@ -72,16 +78,22 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       {!propsAvailable && (
         <div className="text-center py-10">
           <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            Props are available for NBA and NHL only
+            Props are available for NBA, NHL, and CBB
           </p>
         </div>
       )}
 
       {error && (
-        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm">
+        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm flex items-center justify-between">
           <span className="text-xs text-primary font-mono">
             Error: {(error as Error).message}
           </span>
+          <button
+            onClick={() => refetch()}
+            className="text-xs text-primary font-heading tracking-wider hover:underline ml-4"
+          >
+            RETRY
+          </button>
         </div>
       )}
 
@@ -89,8 +101,9 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         <LogoLoader text="LOADING PROPS..." />
       )}
 
-      {sortedProps.length > 0 && (
-        <div className="card-surface rounded-sm overflow-hidden">
+      {/* Desktop table view */}
+      {pagedProps.length > 0 && (
+        <div className="hidden sm:block card-surface rounded-sm overflow-hidden">
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-muted/30 text-[10px] font-heading tracking-wider text-muted-foreground">
             <div className="flex-1">PLAYER</div>
@@ -102,13 +115,97 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
             <span className="w-8 text-right">CONF</span>
             <span className="w-6" />
           </div>
-          {sortedProps.map((prop, i) => (
+          {pagedProps.map((prop, i) => (
             <PropRow
-              key={`${prop.player_name}-${prop.stat_type}-${i}`}
+              key={`${prop.player_name}-${prop.stat_type}-${page}-${i}`}
               prop={prop}
               onTrack={onTrackBet ? handleTrackProp : undefined}
             />
           ))}
+        </div>
+      )}
+
+      {/* Mobile card view */}
+      {pagedProps.length > 0 && (
+        <div className="sm:hidden space-y-2">
+          {pagedProps.map((prop, i) => {
+            const edge = prop.edge;
+            const edgeColor = edge > 0 ? "text-success" : edge < 0 ? "text-primary" : "text-muted-foreground";
+            const signalColors: Record<string, string> = {
+              STRONG: "bg-success/15 text-success border-success/30",
+              LEAN: "bg-secondary/15 text-secondary border-secondary/30",
+              PASS: "bg-muted text-muted-foreground border-border",
+            };
+
+            return (
+              <div
+                key={`mobile-${prop.player_name}-${prop.stat_type}-${page}-${i}`}
+                className="card-surface rounded-sm p-3"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="min-w-0">
+                    <span className="font-heading text-xs tracking-wider text-foreground truncate">
+                      {prop.player_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{prop.team}</span>
+                  </div>
+                  <span className={`text-[9px] font-heading px-1.5 py-0.5 border rounded-sm ${signalColors[prop.signal] ?? signalColors.PASS}`}>
+                    {prop.signal}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-heading font-semibold tracking-wider px-1.5 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30">
+                    {prop.stat_type}
+                  </span>
+                  <span className="font-mono text-xs text-foreground">
+                    Line: {prop.line}
+                  </span>
+                  <span className="font-mono text-xs text-foreground">
+                    Proj: {prop.projection.toFixed(1)}
+                  </span>
+                  <span className={`font-mono text-xs ${edgeColor}`}>
+                    {edge > 0 ? "+" : ""}{edge.toFixed(1)}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {prop.confidence}%
+                  </span>
+                </div>
+
+                {onTrackBet && (
+                  <button
+                    onClick={() => handleTrackProp(prop)}
+                    className="mt-2 w-full px-2 py-1.5 text-[10px] font-heading text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/15 transition-colors text-center"
+                  >
+                    + TRACK
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 mt-4">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="px-3 py-1.5 text-xs font-heading tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >
+            PREV
+          </button>
+          <span className="text-xs font-mono text-muted-foreground">
+            {page + 1} / {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+            className="px-3 py-1.5 text-xs font-heading tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >
+            NEXT
+          </button>
         </div>
       )}
 

@@ -75,7 +75,7 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: 9999;
+    z-index: 10;
     background: repeating-linear-gradient(
       0deg,
       transparent,
@@ -194,14 +194,14 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: hsl(240, 20%, 4%);
+  background: hsl(var(--background));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(0, 30%, 15%);
+  background: hsl(var(--border));
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(0, 72%, 35%);
+  background: hsl(var(--primary));
 }
