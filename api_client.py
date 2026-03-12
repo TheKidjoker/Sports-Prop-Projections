@@ -412,9 +412,12 @@ def _map_espn_stat_names(raw_stats, sport):
             "avgGoals": "gpg",
             "avgAssists": "apg",
             "avgTimeOnIce": "toi",
+            "avgShotsOnGoal": "sogpg",
+            "shotsOnGoalPerGame": "sogpg",
+            "avgShots": "sogpg",
         }
         for espn_name, our_key in mappings.items():
-            if espn_name in raw_stats:
+            if espn_name in raw_stats and our_key not in result:
                 result[our_key] = raw_stats[espn_name]
         if result.get("ptspg") is not None:
             return result
@@ -908,6 +911,7 @@ def get_team_roster_leaders(team_id, sport="nba", limit=3):
                             "rpg": 0,                         # No rebounds in hockey
                             "apg": stats.get("apg", 0),
                             "mpg": stats.get("toi", 0),       # Time on ice → minutes
+                            "sogpg": stats.get("sogpg", 0),   # Shots on goal per game
                         })
                 else:
                     if stats and stats.get("ppg", 0) > 0:

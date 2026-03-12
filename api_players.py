@@ -1,12 +1,20 @@
 # ─── BallDontLie NBA Player Stats ─────────────────────────────────────────────
 # Player ID lookups, recent game points, and game logs via balldontlie.io.
 
+import os
 import time as _time
 import threading
 import requests
 from api_cache import _cached_request
 
-BASE_URL = "https://www.balldontlie.io/api/v1"
+BASE_URL = "https://api.balldontlie.io/v1"
+
+def _bdl_headers():
+    """Return authorization headers for BallDontLie API v2."""
+    key = os.environ.get("BALLDONTLIE_API_KEY", "")
+    if key:
+        return {"Authorization": key}
+    return {}
 
 # In-memory cache for player ID lookups (avoids redundant HTTP requests)
 _player_id_cache = {}
@@ -25,51 +33,61 @@ def get_player_id(player_name):
         if player_name in _player_id_cache:
             return _player_id_cache[player_name]
 
-    response = requests.get(
-        f"{BASE_URL}/players",
-        params={"search": player_name}
-    )
+    try:
+        response = requests.get(
+            f"{BASE_URL}/players",
+            params={"search": player_name},
+            headers=_bdl_headers(),
+            timeout=10
+        )
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+
+        result = None
+        if data.get("data"):
+            result = data["data"][0]["id"]
+
+        with _player_id_lock:
+            if len(_player_id_cache) >= _PLAYER_ID_MAX:
+                # Evict oldest ~20% of entries
+                keys = list(_player_id_cache.keys())
+                for k in keys[:len(keys) // 5]:
+                    del _player_id_cache[k]
+            _player_id_cache[player_name] = result
+        return result
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return None
-
-    data = response.json()
-
-    result = None
-    if data["data"]:
-        result = data["data"][0]["id"]
-
-    with _player_id_lock:
-        if len(_player_id_cache) >= _PLAYER_ID_MAX:
-            # Evict oldest ~20% of entries
-            keys = list(_player_id_cache.keys())
-            for k in keys[:len(keys) // 5]:
-                del _player_id_cache[k]
-        _player_id_cache[player_name] = result
-    return result
 
 
 def get_recent_game_points(player_id, games=5):
-    response = requests.get(
-        f"{BASE_URL}/stats",
-        params={
-            "player_ids[]": player_id,
-            "per_page": games,
-            "sort": "-game.date"
-        }
-    )
+    try:
+        response = requests.get(
+            f"{BASE_URL}/stats",
+            params={
+                "player_ids[]": player_id,
+                "per_page": games,
+                "sort": "-game.date"
+            },
+            headers=_bdl_headers(),
+            timeout=10
+        )
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+        points = []
+
+        for game in data.get("data", []):
+            if game.get("min") and game.get("min") != "00":
+                points.append(game.get("pts", 0))
+
+        return points
+    except (requests.RequestException, KeyError, IndexError, ValueError, TypeError):
         return []
-
-    data = response.json()
-    points = []
-
-    for game in data["data"]:
-        if game["min"] and game["min"] != "00":
-            points.append(game["pts"])
-
-    return points
 
 
 def get_player_recent_points(player_name, games=5):
@@ -124,7 +142,7 @@ def get_player_game_log(player_name, count=7, sport="nba", athlete_id=None, team
             "player_ids[]": player_id,
             "per_page": count,
             "sort": "-game.date",
-        }, timeout=10)
+        }, timeout=10, headers=_bdl_headers())
 
         if data is None:
             return None

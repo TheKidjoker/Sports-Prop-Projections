@@ -12,7 +12,7 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 
-def _cached_request(url, params=None, timeout=10):
+def _cached_request(url, params=None, timeout=10, headers=None):
     """
     Thread-safe cached HTTP GET. Returns parsed JSON or None.
     Cache key = URL + sorted query params. TTL = CACHE_TTL seconds.
@@ -26,7 +26,7 @@ def _cached_request(url, params=None, timeout=10):
             return entry["data"]
 
     try:
-        response = requests.get(url, params=params, timeout=timeout)
+        response = requests.get(url, params=params, timeout=timeout, headers=headers)
         if response.status_code != 200:
             return None
         data = response.json()
