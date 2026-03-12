@@ -1,6 +1,8 @@
 
 
 
+.env
+node_modules/
 predictions.db
 __pycache__/
 daily_job.log
