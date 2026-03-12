@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Zap, RefreshCw, BarChart3, Target, AlertTriangle, Cloud, Users, Clock, Plus,
@@ -44,22 +46,35 @@ interface PickCardProps {
 export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardProps) {
   const badgeVariant = tierBadgeVariant[pick.tier] ?? "monitor";
   const borderClass = tierBorderClass[pick.tier] ?? "border-l-tier-monitor";
+  const queryClient = useQueryClient();
+  const [approveState, setApproveState] = useState<"idle" | "loading" | "done">("idle");
+  const [rejectState, setRejectState] = useState<"idle" | "loading" | "done">("idle");
 
   const handleApprove = async () => {
-    if (!pick.eventId || !pick.sport) return;
+    if (!pick.eventId || !pick.sport || approveState !== "idle") return;
+    setApproveState("loading");
     try {
       await approvePick(pick.eventId, pick.sport as SportLower);
+      setApproveState("done");
+      queryClient.invalidateQueries({ queryKey: ["pending-picks"] });
+      queryClient.invalidateQueries({ queryKey: ["scan", pick.sport] });
     } catch (e) {
       console.error("Approve failed:", e);
+      setApproveState("idle");
     }
   };
 
   const handleReject = async () => {
-    if (!pick.eventId || !pick.sport) return;
+    if (!pick.eventId || !pick.sport || rejectState !== "idle") return;
+    setRejectState("loading");
     try {
       await rejectPick(pick.eventId, pick.sport as SportLower);
+      setRejectState("done");
+      queryClient.invalidateQueries({ queryKey: ["pending-picks"] });
+      queryClient.invalidateQueries({ queryKey: ["scan", pick.sport] });
     } catch (e) {
       console.error("Reject failed:", e);
+      setRejectState("idle");
     }
   };
 
@@ -196,22 +211,28 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
               <Plus className="w-2.5 h-2.5" /> TRACK
             </button>
           )}
-          {isAdmin && (
+          {isAdmin && rejectState === "done" ? (
+            <span className="text-[10px] font-heading text-primary tracking-wider">REJECTED</span>
+          ) : isAdmin && approveState === "done" ? (
+            <span className="text-[10px] font-heading text-success tracking-wider">APPROVED</span>
+          ) : isAdmin ? (
             <>
               <button
                 onClick={handleApprove}
-                className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 rounded-sm hover:bg-success/25 transition-colors"
+                disabled={approveState === "loading" || rejectState === "loading"}
+                className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 rounded-sm hover:bg-success/25 transition-colors disabled:opacity-50"
               >
-                APPROVE
+                {approveState === "loading" ? "..." : "APPROVE"}
               </button>
               <button
                 onClick={handleReject}
-                className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors"
+                disabled={approveState === "loading" || rejectState === "loading"}
+                className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors disabled:opacity-50"
               >
-                REJECT
+                {rejectState === "loading" ? "..." : "REJECT"}
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </motion.div>

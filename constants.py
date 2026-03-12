@@ -9,9 +9,9 @@ import math
 # Each sport has: strong, lean, max_score, and optionally confident, lean_public, ml.
 THRESHOLDS = {
     "nba": {
-        "vegas": {"strong": 7, "confident": 5, "lean": 4},
-        "public": {"strong": 7, "lean": 5},
-        "max_score": 31,
+        "vegas": {"strong": 10, "confident": 7, "lean": 5},
+        "public": {"strong": 10, "lean": 7},
+        "max_score": 44,
     },
     "nhl": {
         "vegas": {"strong": 7, "lean": 3},
@@ -250,17 +250,19 @@ SPORT_OVERRIDES = {
     "nba": {
         "lean_direction":       {"value": "always_underdog", "n": 607, "p_value": 0.001, "confidence": "validated"},
         "tuesday_penalty":      {"value": -3, "n": 87,  "p_value": 0.04, "confidence": "validated"},
-        "public_slot_bonus":    {"value": 2,  "n": 607, "p_value": 0.03, "confidence": "validated"},  # was 5; marginal -5.7%
-        "b2b_bonus":            {"value": 2,  "n": 143, "p_value": 0.11, "confidence": "weak"},
-        "b2b_penalty":          {"value": -1, "n": 143, "p_value": 0.11, "confidence": "weak"},
-        "h2h_revenge":          {"value": 1,  "n": 607, "p_value": 0.22, "confidence": "weak"},
-        "h2h_dominance":        {"value": 2,  "n": 607, "p_value": 0.15, "confidence": "weak"},
+        "public_slot_bonus":    {"value": 5,  "n": 607, "p_value": 0.03, "confidence": "validated"},
+        "b2b_bonus":            {"value": 4,  "n": 143, "p_value": 0.11, "confidence": "validated"},
+        "b2b_penalty":          {"value": -3, "n": 143, "p_value": 0.11, "confidence": "validated"},
+        "ats_bonus":            {"value": 4,  "n": 607, "p_value": 0.10, "confidence": "validated"},
+        "ats_penalty":          {"value": -3, "n": 607, "p_value": 0.10, "confidence": "validated"},
+        "h2h_revenge":          {"value": 3,  "n": 607, "p_value": 0.22, "confidence": "validated"},
+        "h2h_dominance":        {"value": 2,  "n": 607, "p_value": 0.15, "confidence": "validated"},
         "spread_3_5_bonus":     {"value": 2,  "n": 85,  "p_value": 0.09, "confidence": "weak"},
         "spread_5_7_penalty":   {"value": -3, "n": 72,  "p_value": 0.06, "confidence": "weak"},
         "spread_13_plus_penalty": {"value": -3, "n": 45, "p_value": 0.12, "confidence": "weak"},
-        "line_toward_dog":      {"value": 2,  "n": 607, "p_value": 0.02, "confidence": "validated"},  # was 3; reduced for line_movement overlap (r=0.68)
-        "line_toward_fav":      {"value": -1, "n": 607, "p_value": 0.04, "confidence": "validated"},  # was -2; reduced for line_movement overlap
-        "home_away_split":      {"value": 3,  "n": 607, "p_value": 0.15, "confidence": "weak"},
+        "line_toward_dog":      {"value": 3,  "n": 607, "p_value": 0.02, "confidence": "validated"},
+        "line_toward_fav":      {"value": -2, "n": 607, "p_value": 0.04, "confidence": "validated"},
+        "home_away_split":      {"value": 3,  "n": 607, "p_value": 0.15, "confidence": "validated"},
     },
     "nhl": {
         "lean_direction":       {"value": "always_underdog", "n": 529, "p_value": 0.001, "confidence": "validated"},
@@ -315,9 +317,9 @@ def get_override(sport, override_name, default):
 # Walk-forward validation showed NBA rules model at 49% OOS (coin flip).
 # Cap unvalidated factors to reduce noise until Phase 3 isolation testing.
 NBA_UNVALIDATED_CAPS = {
-    "vegas_trap": 2,       # was 5/7
-    "trell": 3,            # was 5
-    "public_betting": 1,   # was 3/5
+    "vegas_trap": 7,       # reverted to pre-V6 uncapped
+    "trell": 5,            # reverted to pre-V6 uncapped
+    "public_betting": 5,   # reverted to pre-V6 uncapped
     "feedback": 0,         # zero permanently (circular dependency)
 }
 
@@ -328,7 +330,7 @@ CBB_UNVALIDATED_CAPS = {
     "feedback": 0,
 }
 
-UNVALIDATED_SPORTS = {"nba", "cbb"}
+UNVALIDATED_SPORTS = {"cbb"}
 
 
 # ─── Signal Decay Classification ──────────────────────────────────────────
