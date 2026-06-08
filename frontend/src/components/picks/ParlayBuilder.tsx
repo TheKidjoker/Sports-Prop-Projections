@@ -39,6 +39,7 @@ export interface ParlayTier {
 const SPORT_COLORS: Record<string, string> = {
   nba: "bg-warning/20 text-warning border-warning/30",
   nhl: "bg-secondary/20 text-secondary border-secondary/30",
+  mlb: "bg-primary/20 text-primary border-primary/30",
   cbb: "bg-accent-foreground/20 text-accent-foreground border-accent-foreground/30",
   nfl: "bg-success/20 text-success border-success/30",
   cfb: "bg-primary/20 text-primary border-primary/30",

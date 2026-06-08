@@ -1,5 +1,5 @@
-export type Sport = "NHL" | "NBA" | "NFL" | "CFB" | "CBB";
-export type SportLower = "nhl" | "nba" | "nfl" | "cfb" | "cbb";
+export type Sport = "NHL" | "NBA" | "NFL" | "CFB" | "CBB" | "MLB";
+export type SportLower = "nhl" | "nba" | "nfl" | "cfb" | "cbb" | "mlb";
 
 export function toLowerSport(s: Sport): SportLower {
   return s.toLowerCase() as SportLower;

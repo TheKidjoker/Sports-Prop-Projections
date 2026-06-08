@@ -8,7 +8,7 @@ import {
   type ScanAllResponse,
 } from "@/lib/types";
 
-const PROP_SPORTS: SportLower[] = ["nba", "nhl", "cbb"];
+const PROP_SPORTS: SportLower[] = ["nba", "nhl", "cbb", "mlb"];
 
 export function useParlays() {
   const scanMutation = useMutation({

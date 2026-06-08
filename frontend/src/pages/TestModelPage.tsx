@@ -9,7 +9,7 @@ import { RulesPanel } from "@/components/test-model/RulesPanel";
 import { TmLegend } from "@/components/test-model/TmLegend";
 import type { Sport, SportLower } from "@/lib/types";
 
-const SPORTS: Sport[] = ["NBA", "NHL", "NFL", "CFB", "CBB"];
+const SPORTS: Sport[] = ["NBA", "NHL", "MLB", "NFL", "CFB", "CBB"];
 
 interface TestModelPageProps {
   sport: Sport | null;

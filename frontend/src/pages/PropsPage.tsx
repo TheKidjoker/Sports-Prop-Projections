@@ -18,7 +18,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   const activeSport = sport ? toLowerSport(sport) : "nba";
   const { data, isLoading, error, refetch } = useTopProps(activeSport, loadAll);
 
-  const propsAvailable = activeSport === "nba" || activeSport === "nhl" || activeSport === "cbb";
+  const propsAvailable = activeSport === "nba" || activeSport === "nhl" || activeSport === "cbb" || activeSport === "mlb";
 
   const sortedProps = useMemo(
     () => data?.props ? [...data.props].sort((a, b) => b.confidence - a.confidence) : [],
@@ -78,7 +78,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       {!propsAvailable && (
         <div className="text-center py-10">
           <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            Props are available for NBA, NHL, and CBB
+            Props are available for NBA, NHL, CBB, and MLB
           </p>
         </div>
       )}

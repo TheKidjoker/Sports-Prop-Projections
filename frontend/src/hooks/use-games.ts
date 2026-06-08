@@ -10,7 +10,7 @@ export function useGames(sport: SportLower) {
   });
 }
 
-const ALL_SPORTS: SportLower[] = ["nhl", "nba", "nfl", "cfb", "cbb"];
+const ALL_SPORTS: SportLower[] = ["nhl", "nba", "mlb", "nfl", "cfb", "cbb"];
 
 export function useAllGameCounts() {
   const results = useQueries({

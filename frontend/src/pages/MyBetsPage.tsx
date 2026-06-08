@@ -117,6 +117,7 @@ const SPORT_FILTERS: { label: string; value: SportLower | undefined }[] = [
   { label: "ALL", value: undefined },
   { label: "NBA", value: "nba" },
   { label: "NHL", value: "nhl" },
+  { label: "MLB", value: "mlb" },
   { label: "NFL", value: "nfl" },
   { label: "CBB", value: "cbb" },
   { label: "CFB", value: "cfb" },

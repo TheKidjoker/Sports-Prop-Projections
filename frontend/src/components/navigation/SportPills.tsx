@@ -16,6 +16,7 @@ interface SportConfig {
 export const SPORTS: SportConfig[] = [
   { id: "NHL", label: "NHL", subtitle: "Gotham Ice", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "NBA", label: "NBA", subtitle: "Gotham Court", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
+  { id: "MLB", label: "MLB", subtitle: "Gotham Diamond", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "NFL", label: "NFL", subtitle: "Gotham Gridiron", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "CFB", label: "CFB", subtitle: "Gotham College", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "CBB", label: "CBB", subtitle: "Gotham Hardwood", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
