@@ -14,9 +14,9 @@ backlog = 2048
 workers = int(os.getenv("GUNICORN_WORKERS", multiprocessing.cpu_count() * 2 + 1))
 worker_class = "sync"  # Use "gevent" for async if needed
 worker_connections = 1000
-max_requests = 1000  # Restart workers after N requests to prevent memory leaks
+max_requests = 500  # Restart workers after N requests to prevent memory leaks
 max_requests_jitter = 50
-timeout = 90  # 90 seconds for slow prop endpoints (was 30s default)
+timeout = 120  # 2 minutes — props are cache-only now so requests should be fast
 graceful_timeout = 30
 keepalive = 5
 

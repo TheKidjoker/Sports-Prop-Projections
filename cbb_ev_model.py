@@ -36,12 +36,12 @@ from test_model.date_utils import parse_iso_date
 # ─── CBB-Specific Configuration ─────────────────────────────────────────────
 
 CBB_EV_CONFIG = {
-    "auc_gate": 0.53,
+    "auc_gate": 0.55,               # Raised from 0.53 with elo_diff feature
     "implied_prob": 110 / (100 + 110),  # 0.5238 at -110
     "edge_tiers": {
-        "strong": 0.08,
-        "confident": 0.05,
-        "lean": 0.04,       # Higher than NBA/NHL's 3% — CBB variance
+        "strong": 0.06,             # Was 0.08
+        "confident": 0.04,          # Was 0.05
+        "lean": 0.03,               # Was 0.04
     },
     "regularization_C": 0.05,       # Strong regularization (347 teams, sparse)
     "warmup_games": 30,             # Higher: many teams, fewer games each
@@ -52,6 +52,7 @@ CBB_EV_CONFIG = {
     "feature_names": [
         "spread_abs", "clv", "line_movement_abs", "rest_diff",
         "dog_ppg_regressed", "fav_ppg_regressed", "net_efficiency_diff", "total",
+        "elo_diff",
     ],
     # Walk-forward rolling parameters
     "rolling_train_size": 250,
@@ -174,6 +175,19 @@ def _extract_features(game, team_state):
     # Feature 8: total (over/under — pace proxy)
     total = over_under if over_under is not None else CBB_EV_CONFIG["default_total"]
 
+    # Feature 9: elo_diff (Elo rating difference, dog - fav)
+    from constants import USE_ELO_FEATURES
+    if USE_ELO_FEATURES:
+        try:
+            from power_ratings import get_elo
+            dog_elo = get_elo(dog_team, "cbb")
+            fav_elo = get_elo(fav_team, "cbb")
+            elo_diff = (dog_elo - fav_elo) / 100.0
+        except Exception:
+            elo_diff = 0.0
+    else:
+        elo_diff = 0.0
+
     return {
         "spread_abs": spread_abs,
         "clv": clv,
@@ -183,6 +197,7 @@ def _extract_features(game, team_state):
         "fav_ppg_regressed": fav_ppg_regressed,
         "net_efficiency_diff": net_efficiency_diff,
         "total": total,
+        "elo_diff": elo_diff,
     }
 
 
@@ -711,6 +726,12 @@ def load_live_team_state():
         print(f"[cbb_ev] Failed to load live team state: {e}", flush=True)
 
 
+def _ensure_live_state():
+    """Lazy-load team state on first use instead of at startup."""
+    if not _live_state_loaded:
+        load_live_team_state()
+
+
 def extract_live_features(current_spread, opening_spread, over_under,
                           home_team, away_team, game_date_str):
     """
@@ -719,6 +740,7 @@ def extract_live_features(current_spread, opening_spread, over_under,
     Returns:
         features_dict or None
     """
+    _ensure_live_state()
     if not _live_state_loaded:
         return None
 

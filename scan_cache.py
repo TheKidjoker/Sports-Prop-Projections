@@ -27,7 +27,7 @@ _wake = threading.Event()
 _started = False
 
 BG_INTERVAL = 3600     # 1 hour between periodic full refreshes
-ALL_SPORTS = ("nba", "nhl", "cbb", "cfb", "nfl")
+ALL_SPORTS = ("nba", "nhl", "cbb", "cfb", "nfl", "mlb")
 
 DAILY_REFRESH_HOUR = 6  # 6 AM EST
 EST = timezone(timedelta(hours=-5))
@@ -138,6 +138,7 @@ def request_refresh(*sports):
 
 def _scan(sport):
     """Run scan_all_games, cache results, sync to pick curation, fetch closing lines."""
+    import gc
     from game_scanner import scan_all_games
     import pick_curation
     try:
@@ -163,7 +164,7 @@ def _scan(sport):
         except Exception:
             pass
         # Pre-warm props cache for props-eligible sports
-        if sport in ("nba", "nhl", "cbb"):
+        if sport in ("nba", "nhl", "cbb", "mlb"):
             try:
                 from game_scanner import get_top_props
                 props = get_top_props(sport)
@@ -181,9 +182,11 @@ def _scan(sport):
             except Exception:
                 logger.warning("[scan_cache] EV props pre-warm failed for %s", sport)
         logger.info("[scan_cache] Refreshed %s: %d games", sport, len(results))
+        gc.collect()
         return results
     except Exception as e:
         logger.warning("[scan_cache] %s scan failed: %s", sport, e)
+        gc.collect()
         return None
 
 

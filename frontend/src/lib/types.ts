@@ -151,6 +151,8 @@ export interface PropSignal {
 export interface PropsResponse {
   success: boolean;
   props: PropSignal[];
+  cached?: boolean;
+  refreshing?: boolean;
 }
 
 // Dashboard — matches actual Flask /api/dashboard response

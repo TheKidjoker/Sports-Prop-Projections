@@ -5,13 +5,17 @@ Replaces the heuristic additive scoring system (49% OOS) with a calibrated
 probability model that feeds an EV-based betting framework:
     Edge = Model_Probability - Implied_Market_Probability
 
-Features (12):
-    spread_abs, clv, rest_diff, days_rest_dog, days_rest_fav,
+Features (11):
+    spread_abs, clv, rest_diff,
     dog_off_regressed, fav_off_regressed, net_rating_diff,
-    dog_win_pct_10, fav_win_pct_10, home_away, spread_squared
+    dog_win_pct_10, fav_win_pct_10, home_away, elo_diff, pace_diff
+
+Removed (collinear): days_rest_dog, days_rest_fav (with rest_diff),
+    spread_squared (with spread_abs)
+Added: elo_diff (Elo power rating difference), pace_diff (over/under delta)
 
 Training: strict chronological 70/30 split, no shuffling, StandardScaler
-fitted on train only.  AUC gate: reject if AUC < 0.58.
+fitted on train only.  AUC gate: reject if AUC < 0.60.
 Walk-forward: 500-train/100-test/step-100 with Brier score per fold.
 """
 
@@ -120,44 +124,57 @@ def _extract_features(game, team_state, feature_names):
     fav_rest = _days_since_last(fav_st, game_date_str)
     rest_diff = dog_rest - fav_rest
 
-    # Features 4-5: individual rest days (capped at 7)
-    days_rest_dog = dog_rest
-    days_rest_fav = fav_rest
-
-    # Features 6-7: regressed offensive efficiency
+    # Features 4-5: regressed offensive efficiency
     dog_off_regressed = _regressed_avg(dog_st["scores"])
     fav_off_regressed = _regressed_avg(fav_st["scores"])
 
-    # Feature 8: net_rating_diff
+    # Feature 6: net_rating_diff
     dog_def = _regressed_avg(dog_st.get("opp_scores", []))
     fav_def = _regressed_avg(fav_st.get("opp_scores", []))
     dog_net = dog_off_regressed - dog_def
     fav_net = fav_off_regressed - fav_def
     net_rating_diff = dog_net - fav_net
 
-    # Features 9-10: win pct last 10
+    # Features 7-8: win pct last 10
     dog_win_pct_10 = _win_pct_last_n(dog_st, 10)
     fav_win_pct_10 = _win_pct_last_n(fav_st, 10)
 
-    # Feature 11: home_away (1 if underdog is home team, 0 if away)
+    # Feature 9: home_away (1 if underdog is home team, 0 if away)
     home_away = 1.0 if closing > 0 else 0.0
 
-    # Feature 12: spread_squared (captures non-linear spread effects)
-    spread_squared = spread_abs ** 2
+    # Feature 10: elo_diff (Elo rating difference, dog - fav perspective)
+    from constants import USE_ELO_FEATURES
+    if USE_ELO_FEATURES:
+        try:
+            from power_ratings import get_elo
+            dog_elo = get_elo(dog_team, "nba")
+            fav_elo = get_elo(fav_team, "nba")
+            elo_diff = (dog_elo - fav_elo) / 100.0  # Scale to ~[-5, 5]
+        except Exception:
+            elo_diff = 0.0
+    else:
+        elo_diff = 0.0
+
+    # Feature 11: pace_diff (over/under deviation from league avg)
+    over_under = game.get("over_under")
+    league_avg_total = EV_CONFIG["league_avg_score"] * 2  # ~210
+    if over_under is not None:
+        pace_diff = (over_under - league_avg_total) / 10.0  # Scale to ~[-2, 2]
+    else:
+        pace_diff = 0.0
 
     features = {
         "spread_abs": spread_abs,
         "clv": clv,
         "rest_diff": rest_diff,
-        "days_rest_dog": days_rest_dog,
-        "days_rest_fav": days_rest_fav,
         "dog_off_regressed": dog_off_regressed,
         "fav_off_regressed": fav_off_regressed,
         "net_rating_diff": net_rating_diff,
         "dog_win_pct_10": dog_win_pct_10,
         "fav_win_pct_10": fav_win_pct_10,
         "home_away": home_away,
-        "spread_squared": spread_squared,
+        "elo_diff": elo_diff,
+        "pace_diff": pace_diff,
     }
     return features
 
@@ -778,6 +795,12 @@ def load_live_team_state():
         print(f"[nba_ev] Failed to load live team state: {e}", flush=True)
 
 
+def _ensure_live_state():
+    """Lazy-load team state on first use instead of at startup."""
+    if not _live_state_loaded:
+        load_live_team_state()
+
+
 def extract_live_features(current_spread, opening_spread, over_under,
                           home_team, away_team, game_date_str):
     """
@@ -786,6 +809,7 @@ def extract_live_features(current_spread, opening_spread, over_under,
     Returns:
         features_dict or None
     """
+    _ensure_live_state()
     if not _live_state_loaded:
         return None
 

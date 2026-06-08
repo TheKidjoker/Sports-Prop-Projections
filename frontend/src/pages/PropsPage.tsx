@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTopProps } from "@/hooks/use-props";
 import { PropRow } from "@/components/picks/PropRow";
 import { LogoLoader } from "@/components/ui/LogoLoader";
@@ -13,12 +13,23 @@ interface PropsPageProps {
 }
 
 export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
-  const [loadAll, setLoadAll] = useState(false);
   const [page, setPage] = useState(0);
   const activeSport = sport ? toLowerSport(sport) : "nba";
-  const { data, isLoading, error, refetch } = useTopProps(activeSport, loadAll);
-
   const propsAvailable = activeSport === "nba" || activeSport === "nhl" || activeSport === "cbb" || activeSport === "mlb";
+
+  // Auto-load props (cache-only on backend, so this is fast)
+  const { data, isLoading, error, refetch } = useTopProps(activeSport, propsAvailable);
+  const isRefreshing = data?.refreshing === true && (!data?.props || data.props.length === 0);
+
+  // Reset page when sport changes
+  useEffect(() => { setPage(0); }, [activeSport]);
+
+  // Auto-retry when backend is computing props in background
+  useEffect(() => {
+    if (!isRefreshing) return;
+    const timer = setTimeout(() => refetch(), 8000);
+    return () => clearTimeout(timer);
+  }, [isRefreshing, refetch]);
 
   const sortedProps = useMemo(
     () => data?.props ? [...data.props].sort((a, b) => b.confidence - a.confidence) : [],
@@ -66,11 +77,11 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         </div>
         {propsAvailable && (
           <button
-            onClick={() => { setLoadAll(true); setPage(0); }}
+            onClick={() => { setPage(0); refetch(); }}
             disabled={isLoading}
             className="px-4 py-2 text-xs font-heading tracking-wider bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors disabled:opacity-50"
           >
-            {isLoading ? "LOADING..." : "LOAD TOP PROPS"}
+            {isLoading ? "LOADING..." : "REFRESH"}
           </button>
         )}
       </div>
@@ -97,8 +108,17 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         </div>
       )}
 
-      {isLoading && loadAll && (
+      {isLoading && (
         <LogoLoader text="LOADING PROPS..." />
+      )}
+
+      {isRefreshing && !isLoading && (
+        <div className="text-center py-6">
+          <LogoLoader text="COMPUTING PROPS..." />
+          <p className="text-muted-foreground text-xs font-heading tracking-wider mt-2">
+            Props are being computed server-side. Auto-refreshing...
+          </p>
+        </div>
       )}
 
       {/* Desktop table view */}
@@ -209,18 +229,10 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         </div>
       )}
 
-      {loadAll && !isLoading && sortedProps.length === 0 && (
+      {!isLoading && !isRefreshing && sortedProps.length === 0 && propsAvailable && (
         <div className="text-center py-10">
           <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            No props available
-          </p>
-        </div>
-      )}
-
-      {!loadAll && propsAvailable && (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            Click "LOAD TOP PROPS" to fetch player projections
+            No props available right now
           </p>
         </div>
       )}

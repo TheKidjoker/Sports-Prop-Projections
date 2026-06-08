@@ -750,6 +750,12 @@ def load_live_team_state():
         print(f"[mlb_ev] Failed to load live team state: {e}", flush=True)
 
 
+def _ensure_live_state():
+    """Lazy-load team state on first use instead of at startup."""
+    if not _live_state_loaded:
+        load_live_team_state()
+
+
 def extract_live_features(current_spread, opening_spread, over_under,
                           home_team, away_team, game_date_str):
     """
@@ -758,6 +764,7 @@ def extract_live_features(current_spread, opening_spread, over_under,
     Returns:
         features_dict or None
     """
+    _ensure_live_state()
     if not _live_state_loaded:
         return None
 

@@ -200,6 +200,7 @@ def _analyze_nfl_weather(game, event_id):
 _feedback_cache = {}
 _feedback_lock = threading.Lock()
 _FEEDBACK_TTL = 300  # 5 minutes
+_FEEDBACK_MAX_SIZE = 50  # Bound cache size to prevent unbounded growth
 
 
 def _get_feedback_adjustment(slot_type, sport):
@@ -247,6 +248,11 @@ def _get_feedback_adjustment(slot_type, sport):
 
     with _feedback_lock:
         _feedback_cache[cache_key] = {"adj": adj, "ts": now}
+        # Evict oldest entries if cache too large
+        if len(_feedback_cache) > _FEEDBACK_MAX_SIZE:
+            oldest = sorted(_feedback_cache, key=lambda k: _feedback_cache[k]["ts"])
+            for old_key in oldest[:len(_feedback_cache) - _FEEDBACK_MAX_SIZE]:
+                del _feedback_cache[old_key]
     return adj
 
 

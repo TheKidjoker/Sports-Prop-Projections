@@ -6,8 +6,8 @@ import threading
 import requests
 
 # ─── TTL Response Cache ─────────────────────────────────────────────────────
-CACHE_TTL = 900  # 15 minutes — ESPN data barely changes; reduces re-fetches during scans
-CACHE_MAX_SIZE = 500  # 5 sports × 100+ endpoints; prevents thrashing during hourly cycles
+CACHE_TTL = 600  # 10 minutes — ESPN data barely changes; reduces re-fetches during scans
+CACHE_MAX_SIZE = 200  # Reduced from 500 to limit memory on constrained servers
 _cache = {}
 _cache_lock = threading.Lock()
 

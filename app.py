@@ -60,55 +60,48 @@ if HAS_TEST_MODEL:
         except Exception:
             pass
 
-    # Load NBA EV model if available and validated
+    # Load EV model coefficients from DB (lightweight — team state is lazy-loaded on first use)
     try:
-        from nba_ev_model import load_nba_ev_model, load_live_team_state as nba_load_state
+        from nba_ev_model import load_nba_ev_model
         from constants import EV_CONFIG
         _ev_run = tm_db.get_latest_model_run("nba", "ev_logistic")
         if _ev_run and _ev_run.get("model_params"):
             _ev_params = _ev_run["model_params"]
             if _ev_params.get("auc", 0) >= EV_CONFIG["auc_gate"]:
                 load_nba_ev_model(_ev_params)
-                nba_load_state()
     except Exception as _ev_err:
         print(f"[nba_ev] Startup load skipped: {_ev_err}", flush=True)
 
-    # Load NHL EV model if available and validated
     try:
-        from nhl_ev_model import load_nhl_ev_model, load_live_team_state as nhl_load_state, NHL_EV_CONFIG
+        from nhl_ev_model import load_nhl_ev_model, NHL_EV_CONFIG
         _nhl_ev_run = tm_db.get_latest_model_run("nhl", "ev_logistic")
         if _nhl_ev_run and _nhl_ev_run.get("model_params"):
             _nhl_ev_params = _nhl_ev_run["model_params"]
             _nhl_auc = _nhl_ev_params.get("mean_auc") or _nhl_ev_params.get("auc", 0)
             if _nhl_auc >= NHL_EV_CONFIG["auc_gate"]:
                 load_nhl_ev_model(_nhl_ev_params)
-                nhl_load_state()
     except Exception as _nhl_ev_err:
         print(f"[nhl_ev] Startup load skipped: {_nhl_ev_err}", flush=True)
 
-    # Load CBB EV model if available and validated
     try:
-        from cbb_ev_model import load_cbb_ev_model, load_live_team_state as cbb_load_state, CBB_EV_CONFIG
+        from cbb_ev_model import load_cbb_ev_model, CBB_EV_CONFIG
         _cbb_ev_run = tm_db.get_latest_model_run("cbb", "ev_logistic")
         if _cbb_ev_run and _cbb_ev_run.get("model_params"):
             _cbb_ev_params = _cbb_ev_run["model_params"]
             _cbb_auc = _cbb_ev_params.get("mean_auc") or _cbb_ev_params.get("auc", 0)
             if _cbb_auc >= CBB_EV_CONFIG["auc_gate"]:
                 load_cbb_ev_model(_cbb_ev_params)
-                cbb_load_state()
     except Exception as _cbb_ev_err:
         print(f"[cbb_ev] Startup load skipped: {_cbb_ev_err}", flush=True)
 
-    # Load MLB EV model if available and validated
     try:
-        from mlb_ev_model import load_mlb_ev_model, load_live_team_state as mlb_load_state, MLB_EV_CONFIG
+        from mlb_ev_model import load_mlb_ev_model, MLB_EV_CONFIG
         _mlb_ev_run = tm_db.get_latest_model_run("mlb", "ev_logistic")
         if _mlb_ev_run and _mlb_ev_run.get("model_params"):
             _mlb_ev_params = _mlb_ev_run["model_params"]
             _mlb_auc = _mlb_ev_params.get("mean_auc") or _mlb_ev_params.get("auc", 0)
             if _mlb_auc >= MLB_EV_CONFIG["auc_gate"]:
                 load_mlb_ev_model(_mlb_ev_params)
-                mlb_load_state()
     except Exception as _mlb_ev_err:
         print(f"[mlb_ev] Startup load skipped: {_mlb_ev_err}", flush=True)
 
@@ -122,10 +115,13 @@ if HAS_TEST_MODEL:
 scan_cache.init()
 
 # ─── Auto-run Test Model on Startup ─────────────────────────────────────
-if HAS_TEST_MODEL:
+# Skipped by default on Render to avoid OOM. Set SKIP_AUTO_TRAIN=0 to enable.
+_skip_auto_train = os.environ.get("SKIP_AUTO_TRAIN", "1") == "1"
+if HAS_TEST_MODEL and not _skip_auto_train:
     def _auto_run_test_model():
         """Background thread: run backtests + EV training + walkforward on startup."""
         import time
+        import gc
         time.sleep(5)  # Let app finish startup
 
         sports = ["nba", "nhl", "cbb", "mlb"]
@@ -200,6 +196,7 @@ if HAS_TEST_MODEL:
                 print(f"[auto-tm] {sport}: walkforward done", flush=True)
 
                 print(f"[auto-tm] {sport} complete", flush=True)
+                gc.collect()
             except Exception as e:
                 print(f"[auto-tm] {sport} failed: {e}", flush=True)
 
@@ -207,6 +204,8 @@ if HAS_TEST_MODEL:
 
     import threading as _auto_tm_threading
     _auto_tm_threading.Thread(target=_auto_run_test_model, daemon=True).start()
+elif _skip_auto_train:
+    print("[auto-tm] Skipped (SKIP_AUTO_TRAIN=1). Models loaded from DB only.", flush=True)
 
 # ─── Supabase Auth ──────────────────────────────────────────────────────
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
@@ -702,51 +701,58 @@ def api_lines():
 @app.route("/api/top-props", methods=["GET"])
 @require_auth
 def api_top_props():
-    """Generate PRISM player props for ALL today's games at once."""
+    """Serve PRISM player props from cache. Triggers background refresh on miss."""
+    import time
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "cbb", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
-        # Check persistent cache first
+        # Check persistent cache first (Supabase)
         import cache_manager
-        cached_props = cache_manager.get_cached_props(sport, cache_minutes=10)
+        cached_props = cache_manager.get_cached_props(sport, cache_minutes=15)
         if cached_props is not None:
             return jsonify({"success": True, "props": cached_props, "cached": True})
 
-        # Cache miss - compute fresh
-        props = get_top_props(sport)
+        # Check in-memory props cache (game_scanner)
+        from game_scanner import _props_cache, _props_cache_lock
+        with _props_cache_lock:
+            mem_props = []
+            for key, entry in _props_cache.items():
+                if key.startswith(f"{sport}:") and (time.time() - entry["ts"]) < 900:
+                    mem_props.extend(entry["data"])
+            if mem_props:
+                mem_props.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+                return jsonify({"success": True, "props": mem_props, "cached": True})
 
-        # Even if no props found, cache empty result to avoid hammering APIs
-        cache_manager.cache_props(sport, props)
-
-        return jsonify({"success": True, "props": props, "cached": False})
+        # Cache miss — queue background refresh, return empty with refreshing flag
+        scan_cache.request_refresh(sport)
+        print(f"[api_top_props] Cache miss for {sport}, queued background refresh", flush=True)
+        return jsonify({"success": True, "props": [], "cached": False, "refreshing": True})
     except Exception as e:
-        # Log detailed error for debugging
         import traceback
         print(f"[api_top_props] Error: {traceback.format_exc()}", flush=True)
-        # Return empty props instead of 500 error (graceful degradation)
         return jsonify({"success": True, "props": [], "error": str(e)})
 
 
 @app.route("/api/ev/player-props", methods=["GET"])
 @require_auth
 def api_ev_player_props():
-    """Get player props with EV calculations for EV Engine."""
+    """Serve player props with EV from cache. Triggers background refresh on miss."""
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "cbb", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         import cache_manager
-        cached = cache_manager.get_cached_props(f"{sport}_ev", cache_minutes=10)
+        cached = cache_manager.get_cached_props(f"{sport}_ev", cache_minutes=15)
         if cached is not None:
             return jsonify({"success": True, "props": cached, "cached": True})
 
-        props = get_top_props_with_ev(sport)
-        cache_manager.cache_props(f"{sport}_ev", props)
-
-        return jsonify({"success": True, "props": props, "cached": False})
+        # Cache miss — queue background refresh instead of computing inline
+        scan_cache.request_refresh(sport)
+        print(f"[api_ev_player_props] Cache miss for {sport}_ev, queued background refresh", flush=True)
+        return jsonify({"success": True, "props": [], "cached": False, "refreshing": True})
     except Exception as e:
         import traceback
         print(f"[api_ev_player_props] Error: {traceback.format_exc()}", flush=True)
@@ -756,26 +762,21 @@ def api_ev_player_props():
 @app.route("/api/prop-ev", methods=["GET"])
 @require_auth
 def api_prop_ev():
-    """Prop EV Engine — variance-based probability + actual market odds → true EV."""
+    """Prop EV Engine — serve from cache. Triggers background refresh on miss."""
     try:
         sport = request.args.get("sport", "nba").lower()
         if sport not in ("nba", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         import cache_manager
-        cached = cache_manager.get_cached_props(f"{sport}_prop_ev", cache_minutes=10)
+        cached = cache_manager.get_cached_props(f"{sport}_prop_ev", cache_minutes=15)
         if cached is not None:
             return jsonify({"success": True, "props": cached, "cached": True})
 
-        props = get_prop_ev_analysis(sport)
-
-        # Strip recent_games from response (too large for JSON)
-        for p in props:
-            p.pop("recent_games", None)
-
-        cache_manager.cache_props(f"{sport}_prop_ev", props)
-
-        return jsonify({"success": True, "props": props, "cached": False})
+        # Cache miss — queue background refresh instead of computing inline
+        scan_cache.request_refresh(sport)
+        print(f"[api_prop_ev] Cache miss for {sport}_prop_ev, queued background refresh", flush=True)
+        return jsonify({"success": True, "props": [], "cached": False, "refreshing": True})
     except Exception as e:
         import traceback
         print(f"[api_prop_ev] Error: {traceback.format_exc()}", flush=True)

@@ -3,7 +3,7 @@ services:
     name: jokers-edge
     runtime: python
     buildCommand: pip install -r requirements.txt && cd frontend && npm install && npm run build && cd ..
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 600
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120 --max-requests 500 --max-requests-jitter 50
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -18,9 +18,11 @@ services:
       - key: OPENWEATHER_API_KEY
         sync: false
       - key: SCAN_GAME_WORKERS
-        value: "4"
+        value: "2"
       - key: SCAN_API_WORKERS
-        value: "4"
+        value: "2"
+      - key: SKIP_AUTO_TRAIN
+        value: "1"
       - key: GNEWS_API_KEY
         sync: false
       - key: NEWSAPI_KEY
