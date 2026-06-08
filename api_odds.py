@@ -17,6 +17,7 @@ ODDS_API_SPORT_MAP = {
     "nfl": "americanfootball_nfl",
     "cfb": "americanfootball_ncaaf",
     "cbb": "basketball_ncaab",
+    "mlb": "baseball_mlb",
 }
 
 
@@ -94,10 +95,12 @@ def _get_odds_comparison_theodds(sport="nba"):
 
     try:
         url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
+        # MLB uses moneyline (h2h) instead of spreads
+        markets = "h2h,totals" if sport == "mlb" else "spreads,totals"
         params = {
             "apiKey": api_key,
             "regions": "us",
-            "markets": "spreads,totals",
+            "markets": markets,
             "oddsFormat": "american",
         }
         data = _cached_request(url, params=params, timeout=15)
@@ -208,6 +211,15 @@ def _get_player_props_odds_theodds(sport="nba"):
                 "player_assists": "assists",
                 "player_shots_on_goal": "shots_on_goal",
             }
+        elif sport == "mlb":
+            markets_str = "pitcher_strikeouts,batter_hits,batter_total_bases,batter_home_runs,batter_runs_batted_in"
+            market_to_stat = {
+                "pitcher_strikeouts": "strikeouts",
+                "batter_hits": "hits",
+                "batter_total_bases": "total_bases",
+                "batter_home_runs": "home_runs",
+                "batter_runs_batted_in": "rbis",
+            }
         else:
             markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"
             market_to_stat = {
@@ -274,6 +286,15 @@ def _get_player_props_odds_full_theodds(sport="nba"):
                 "player_goals": "goals",
                 "player_assists": "assists",
                 "player_shots_on_goal": "shots_on_goal",
+            }
+        elif sport == "mlb":
+            markets_str = "pitcher_strikeouts,batter_hits,batter_total_bases,batter_home_runs,batter_runs_batted_in"
+            market_to_stat = {
+                "pitcher_strikeouts": "strikeouts",
+                "batter_hits": "hits",
+                "batter_total_bases": "total_bases",
+                "batter_home_runs": "home_runs",
+                "batter_runs_batted_in": "rbis",
             }
         else:
             markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"

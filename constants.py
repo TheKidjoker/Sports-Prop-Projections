@@ -35,6 +35,11 @@ THRESHOLDS = {
         "lean": 8,
         "max_score": 35,
     },
+    "mlb": {
+        "strong": 7,
+        "lean": 4,
+        "max_score": 25,
+    },
 }
 
 # Moneyline spread thresholds — recommend ML when |spread| >= threshold
@@ -113,6 +118,7 @@ DATA_CONFIDENCE_LEVELS = {
     "nhl": {"level": "medium",   "games": 529,  "label": "Medium",   "reason": "Adequate for core factors"},
     "nfl": {"level": "low",      "games": 105,  "label": "Low",      "reason": "Insufficient for reliable weight tuning"},
     "cfb": {"level": "very_low", "games": 51,   "label": "Very Low", "reason": "All weights essentially unvalidated"},
+    "mlb": {"level": "very_low", "games": 0,    "label": "Very Low", "reason": "New sport — collecting historical data"},
 }
 
 SPORT_VALIDATION_STATUS = {
@@ -121,6 +127,7 @@ SPORT_VALIDATION_STATUS = {
     "cbb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
     "nfl": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
     "cfb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Spread Model"},
+    "mlb": {"badge": "EXPERIMENTAL", "css_class": "badge-experimental", "text": "EXPERIMENTAL \u2014 Moneyline Model"},
 }
 
 PRISM_VALIDATION_STATUS = {
@@ -299,6 +306,7 @@ SPORT_OVERRIDES = {
         "line_toward_fav":      {"value": -2, "n": 105, "p_value": 0.12, "confidence": "insufficient_data"},
     },
     "cfb": {},
+    "mlb": {},
 }
 
 
@@ -330,21 +338,28 @@ CBB_UNVALIDATED_CAPS = {
     "feedback": 0,
 }
 
-UNVALIDATED_SPORTS = {"cbb"}
+UNVALIDATED_SPORTS = {"cbb", "mlb"}
 
 
 # ─── Signal Decay Classification ──────────────────────────────────────────
 # How quickly each factor's signal degrades after the scan was produced.
 # "fast" = line already moved, "slow" = changes over hours, "none" = schedule fact.
 
+# ─── Feature Flags (Rollback Safety) ─────────────────────────────────────────
+# Each algorithm upgrade can be disabled independently.
+USE_DYNAMIC_PRISM_WEIGHTS = True
+USE_ZSCORE_MATCHUP = True
+USE_ELO_FEATURES = True
+USE_POISSON_VARIANCE = True
+
 EV_CONFIG = {
-    "auc_gate": 0.58,               # Minimum AUC-ROC to activate model (raised from 0.54)
-    "auc_gate_standalone": 0.60,    # Higher gate when EV is the ONLY model (no rules)
+    "auc_gate": 0.60,               # Minimum AUC-ROC to activate model (raised for elo_diff)
+    "auc_gate_standalone": 0.62,    # Higher gate when EV is the ONLY model (no rules)
     "implied_prob": 110 / (100 + 110),  # 0.5238 at -110 standard vig
     "edge_tiers": {
-        "strong": 0.08,             # 8%+ edge → STRONG PLAY
-        "confident": 0.05,          # 5-8% edge → CONFIDENT
-        "lean": 0.03,               # 3-5% edge → LEAN
+        "strong": 0.06,             # 6%+ edge → STRONG PLAY (was 8%)
+        "confident": 0.04,          # 4-6% edge → CONFIDENT (was 5%)
+        "lean": 0.02,               # 2-4% edge → LEAN (was 3%)
     },
     "train_split": 0.70,            # 70/30 chronological split
     "regularization_C": 0.1,        # L2 regularization strength
@@ -354,9 +369,8 @@ EV_CONFIG = {
     "league_avg_score": 105.0,      # NBA league average PPG default
     "feature_names": [
         "spread_abs", "clv", "rest_diff",
-        "days_rest_dog", "days_rest_fav",
         "dog_off_regressed", "fav_off_regressed", "net_rating_diff",
         "dog_win_pct_10", "fav_win_pct_10",
-        "home_away", "spread_squared",
+        "home_away", "elo_diff", "pace_diff",
     ],
 }

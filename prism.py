@@ -7,15 +7,39 @@ high-edge player prop signals.
 """
 
 import math
+from constants import USE_DYNAMIC_PRISM_WEIGHTS, USE_ZSCORE_MATCHUP
 
 # League average defaults (fallback if dynamic fetch fails)
-LEAGUE_AVG_TOTALS = {"nba": 224.0, "nhl": 6.0}
-LEAGUE_AVG_DEF = {"nba": 112.0, "nhl": 3.0}
+LEAGUE_AVG_TOTALS = {"nba": 224.0, "nhl": 6.0, "mlb": 8.5}
+LEAGUE_AVG_DEF = {"nba": 112.0, "nhl": 3.0, "mlb": 4.25}
 
 # League averages for stat-specific matchup multipliers (hardcoded fallbacks)
 _LEAGUE_AVG_STATS_DEFAULTS = {
     "nba": {"reb": 43.5, "steals": 7.5},
     "nhl": {"goals_allowed": 3.0, "shots_allowed": 30.0},
+}
+
+# League standard deviations for z-score matchup model (hardcoded fallbacks)
+_LEAGUE_STDEV_DEFAULTS = {
+    "nba": {"pts_allowed": 5.5, "reb": 3.2, "steals": 1.2},
+    "nhl": {"goals_allowed": 0.6, "shots_allowed": 4.0},
+    "mlb": {"runs_allowed": 1.2, "k_rate": 2.0},
+}
+
+# Z-score sensitivity per stat type (how much the matchup matters)
+_ZSCORE_SENSITIVITY = {
+    "pts": 0.04,
+    "reb": 0.03,
+    "ast": 0.025,
+    "g": 0.04,
+    "sog": 0.03,
+    "k": 0.05,
+    "h": 0.03,
+    "tb": 0.035,
+    "hr": 0.02,
+    "rbi": 0.025,
+    "er": 0.04,
+    "ha": 0.035,
 }
 
 # Dynamic league averages cache for matchup stats
@@ -87,12 +111,91 @@ def _get_dynamic_league_avgs(sport="nba"):
         return None
 
 
+def _compute_rest_factor(is_b2b, days_rest=None, sport="nba"):
+    """
+    Gradient rest factor based on days since last game.
+    0 days (B2B): 0.93 | 1 day: 0.97 | 2 days: 1.0 | 3+ days: 1.02
+    Falls back to binary B2B logic if days_rest not available.
+    MLB: always 1.0 (162-game daily schedule, no rest effect).
+    """
+    if sport == "mlb":
+        return 1.0
+    if days_rest is not None:
+        if days_rest <= 0:
+            return 0.93
+        elif days_rest == 1:
+            return 0.97
+        elif days_rest == 2:
+            return 1.0
+        else:
+            return 1.02
+    # Fallback: binary B2B
+    return 0.93 if is_b2b else 1.0
+
+
+def _compute_zscore_matchup(stat_type, sport, opponent_def_rating, league_avg_def,
+                            opp, league_stats):
+    """
+    Z-score based matchup multiplier with soft tanh cap.
+    z = (opp_value - league_avg) / league_stdev
+    mult = 1.0 + z * sensitivity
+
+    Returns:
+        (matchup_mult, matchup_available) tuple
+    """
+    sensitivity = _ZSCORE_SENSITIVITY.get(stat_type, 0.03)
+    stdev_defaults = _LEAGUE_STDEV_DEFAULTS.get(sport, {})
+
+    opp_value = None
+    league_avg = None
+    league_stdev = None
+
+    if stat_type == "pts":
+        opp_value = opponent_def_rating
+        league_avg = league_avg_def
+        league_stdev = stdev_defaults.get("pts_allowed", 5.5)
+    elif stat_type == "reb":
+        opp_value = opp.get("avgRebounds")
+        league_avg = league_stats.get("reb", 43.5)
+        league_stdev = stdev_defaults.get("reb", 3.2)
+        # Inverted: weak rebounder = positive z for player
+        if opp_value and league_avg:
+            opp_value = league_avg + (league_avg - opp_value)  # invert
+    elif stat_type == "ast":
+        opp_value = opp.get("avgSteals")
+        league_avg = league_stats.get("steals", 7.5)
+        league_stdev = stdev_defaults.get("steals", 1.2)
+        # Inverted: more steals = worse for player
+        if opp_value and league_avg:
+            opp_value = league_avg + (league_avg - opp_value)
+    elif stat_type == "g":
+        opp_value = opponent_def_rating
+        league_avg = league_avg_def
+        league_stdev = stdev_defaults.get("goals_allowed", 0.6)
+    elif stat_type == "sog":
+        opp_value = opp.get("avgShotsAllowed")
+        league_avg = league_stats.get("shots_allowed", 30.0)
+        league_stdev = stdev_defaults.get("shots_allowed", 4.0)
+
+    if opp_value is None or league_avg is None or league_stdev is None or league_stdev <= 0:
+        return 1.0, False
+
+    z = (opp_value - league_avg) / league_stdev
+
+    # Soft cap via tanh at |z| > 2.0 (diminishing returns)
+    if abs(z) > 2.0:
+        z = 2.0 * math.tanh(z / 2.0)
+
+    matchup_mult = 1.0 + z * sensitivity
+    return matchup_mult, True
+
+
 def calculate_prism_projection(season_avg, recent_games, stat_type,
                                opponent_def_rating, league_avg_def,
                                game_total, is_b2b, is_home, spread,
                                injured_teammates, posted_line, slot_type,
                                sport="nba", player_rank=0,
-                               opponent_stats=None):
+                               opponent_stats=None, days_rest=None):
     """
     Core PRISM projection for a single player + stat type.
 
@@ -130,76 +233,92 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
         if league_avg_def is None or league_avg_def <= 0:
             league_avg_def = LEAGUE_AVG_DEF.get(sport, 112.0)
 
-    # ── 1. Weighted Average ──
+    # ── 1. Weighted Average (dynamic weighting) ──
     stat_key = _stat_key(stat_type)
-    min_minutes = 10 if sport == "nhl" else 15
-    valid_recent = [g for g in (recent_games or []) if g.get("min", 0) >= min_minutes]
+    if sport == "mlb":
+        # MLB: no minutes filter — all games are valid
+        valid_recent = list(recent_games or [])
+    else:
+        min_minutes = 10 if sport == "nhl" else 15
+        valid_recent = [g for g in (recent_games or []) if g.get("min", 0) >= min_minutes]
 
     if len(valid_recent) >= 3:
-        recent_vals = [g.get(stat_key, 0) for g in valid_recent[:5]]
+        recent_vals = [g.get(stat_key, 0) for g in valid_recent[:10]]
         recent_avg = sum(recent_vals) / len(recent_vals)
-        weighted_avg = (recent_avg * 0.60) + (season_avg * 0.40)
+        n_recent = len(recent_vals)
+
+        if USE_DYNAMIC_PRISM_WEIGHTS:
+            # Dynamic: weight adapts to sample size
+            # prior_weights: nba=15, nhl=12, cbb=20
+            prior_weights = {"nba": 15, "nhl": 12, "cbb": 20, "mlb": 18}
+            prior_w = prior_weights.get(sport, 15)
+            recent_weight = min(n_recent, 10) / (min(n_recent, 10) + prior_w)
+            weighted_avg = (recent_avg * recent_weight) + (season_avg * (1.0 - recent_weight))
+        else:
+            # Legacy fixed 60/40
+            weighted_avg = (recent_avg * 0.60) + (season_avg * 0.40)
     else:
         weighted_avg = season_avg
 
-    # ── 2. Matchup Multiplier (stat-specific) ──
+    # ── 2. Matchup Multiplier (z-score based or legacy ratio) ──
     league_stats = _get_league_matchup_avgs(sport)
     opp = opponent_stats or {}
 
-    if stat_type == "pts":
-        # Points: opponent pts allowed / league avg defense
-        if opponent_def_rating and league_avg_def:
-            matchup_mult = opponent_def_rating / league_avg_def
-            matchup_mult = max(0.85, min(1.20, matchup_mult))
-            matchup_available = True
-        else:
-            matchup_mult = 1.0
-            matchup_available = False
-    elif stat_type == "reb":
-        # Rebounds: inverted opponent rebounding (weak rebounder = more boards)
-        opp_avg_reb = opp.get("avgRebounds")
-        league_avg_reb = league_stats.get("reb", 43.5)
-        if opp_avg_reb and opp_avg_reb > 0:
-            matchup_mult = league_avg_reb / opp_avg_reb
-            matchup_mult = max(0.88, min(1.15, matchup_mult))
-            matchup_available = True
-        else:
-            matchup_mult = 1.0
-            matchup_available = False
-    elif stat_type == "ast":
-        # Assists: inverted opponent steals (more steals = disruption = fewer assists)
-        opp_avg_steals = opp.get("avgSteals")
-        league_avg_steals = league_stats.get("steals", 7.5)
-        if opp_avg_steals and opp_avg_steals > 0:
-            matchup_mult = league_avg_steals / opp_avg_steals
-            matchup_mult = max(0.90, min(1.12, matchup_mult))
-            matchup_available = True
-        else:
-            matchup_mult = 1.0
-            matchup_available = False
-    elif stat_type == "g":
-        # Goals: opponent goals-allowed / league avg
-        if opponent_def_rating and league_avg_def:
-            matchup_mult = opponent_def_rating / league_avg_def
-            matchup_mult = max(0.85, min(1.20, matchup_mult))
-            matchup_available = True
-        else:
-            matchup_mult = 1.0
-            matchup_available = False
-    elif stat_type == "sog":
-        # Shots on goal: opponent shots-allowed / league avg
-        opp_shots_allowed = opp.get("avgShotsAllowed")
-        league_avg_sa = league_stats.get("shots_allowed", 30.0)
-        if opp_shots_allowed and opp_shots_allowed > 0:
-            matchup_mult = opp_shots_allowed / league_avg_sa
-            matchup_mult = max(0.88, min(1.15, matchup_mult))
-            matchup_available = True
-        else:
-            matchup_mult = 1.0
-            matchup_available = False
+    if USE_ZSCORE_MATCHUP:
+        matchup_mult, matchup_available = _compute_zscore_matchup(
+            stat_type, sport, opponent_def_rating, league_avg_def, opp, league_stats
+        )
     else:
-        matchup_mult = 1.0
-        matchup_available = False
+        # Legacy ratio-based matchup
+        if stat_type == "pts":
+            if opponent_def_rating and league_avg_def:
+                matchup_mult = opponent_def_rating / league_avg_def
+                matchup_mult = max(0.85, min(1.20, matchup_mult))
+                matchup_available = True
+            else:
+                matchup_mult = 1.0
+                matchup_available = False
+        elif stat_type == "reb":
+            opp_avg_reb = opp.get("avgRebounds")
+            league_avg_reb = league_stats.get("reb", 43.5)
+            if opp_avg_reb and opp_avg_reb > 0:
+                matchup_mult = league_avg_reb / opp_avg_reb
+                matchup_mult = max(0.88, min(1.15, matchup_mult))
+                matchup_available = True
+            else:
+                matchup_mult = 1.0
+                matchup_available = False
+        elif stat_type == "ast":
+            opp_avg_steals = opp.get("avgSteals")
+            league_avg_steals = league_stats.get("steals", 7.5)
+            if opp_avg_steals and opp_avg_steals > 0:
+                matchup_mult = league_avg_steals / opp_avg_steals
+                matchup_mult = max(0.90, min(1.12, matchup_mult))
+                matchup_available = True
+            else:
+                matchup_mult = 1.0
+                matchup_available = False
+        elif stat_type == "g":
+            if opponent_def_rating and league_avg_def:
+                matchup_mult = opponent_def_rating / league_avg_def
+                matchup_mult = max(0.85, min(1.20, matchup_mult))
+                matchup_available = True
+            else:
+                matchup_mult = 1.0
+                matchup_available = False
+        elif stat_type == "sog":
+            opp_shots_allowed = opp.get("avgShotsAllowed")
+            league_avg_sa = league_stats.get("shots_allowed", 30.0)
+            if opp_shots_allowed and opp_shots_allowed > 0:
+                matchup_mult = opp_shots_allowed / league_avg_sa
+                matchup_mult = max(0.88, min(1.15, matchup_mult))
+                matchup_available = True
+            else:
+                matchup_mult = 1.0
+                matchup_available = False
+        else:
+            matchup_mult = 1.0
+            matchup_available = False
 
     # ── 3. Pace Factor ──
     if game_total and game_total > 0:
@@ -208,14 +327,24 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     else:
         pace_factor = 1.0
 
-    # ── 4. Rest Factor ──
-    rest_factor = 0.93 if is_b2b else 1.0
+    # ── 4. Rest Factor (gradient) ──
+    rest_factor = _compute_rest_factor(is_b2b, days_rest, sport=sport)
 
-    # ── 5. Home/Away Adjustment ──
-    home_away_adj = 1.03 if is_home else 0.98
+    # ── 5. Home/Away Adjustment (sport-specific) ──
+    _home_away_map = {
+        "nba": (1.015, 0.985),
+        "nhl": (1.025, 0.975),
+        "cbb": (1.04, 0.96),
+        "mlb": (1.01, 0.99),
+    }
+    home_mult, away_mult = _home_away_map.get(sport, (1.03, 0.98))
+    home_away_adj = home_mult if is_home else away_mult
 
     # ── 6. Blowout Discount (points/goals — continuous ramp, not cliff) ──
-    if stat_type in ("pts", "g") and spread is not None:
+    # MLB pitcher props: disabled (pitcher gets pulled after fixed IP regardless of score)
+    if sport == "mlb":
+        blowout_disc = 1.0
+    elif stat_type in ("pts", "g") and spread is not None:
         if sport == "nhl" and stat_type == "g":
             # NHL spreads are tighter: 1.5 = big favorite
             blowout_disc = max(0.90, 1.0 - max(0, abs(spread) - 1.5) * 0.04)
@@ -229,9 +358,10 @@ def calculate_prism_projection(season_avg, recent_games, stat_type,
     usage_boost = 0.0
     if stat_type == "pts" and injured_teammates:
         total_lost_ppg = sum(t.get("ppg", 0) for t in injured_teammates)
-        redistributed = total_lost_ppg * 0.60
-        # Top scorer gets 50%, second gets 30%, third gets 20%
-        rank_weights = [0.50, 0.30, 0.20]
+        # 40% redistribution (bench absorbs the rest) — was 60%
+        redistributed = total_lost_ppg * 0.40
+        # Rank weights: 45/30/25 (slightly less top-heavy)
+        rank_weights = [0.45, 0.30, 0.25]
         rank_idx = min(player_rank, len(rank_weights) - 1)
         usage_boost = redistributed * rank_weights[rank_idx]
 
@@ -367,7 +497,10 @@ def estimate_line_from_average(season_avg, stat_type="pts"):
     """
     if season_avg is None or season_avg <= 0:
         return None
-    discount = {"pts": 0.97, "reb": 0.94, "ast": 0.93, "g": 0.95, "sog": 0.97}.get(stat_type, 0.97)
+    discount = {
+        "pts": 0.97, "reb": 0.94, "ast": 0.93, "g": 0.95, "sog": 0.97,
+        "k": 0.95, "h": 0.94, "tb": 0.95, "hr": 0.90, "rbi": 0.93, "er": 1.05, "ha": 1.05,
+    }.get(stat_type, 0.97)
     return round(season_avg * discount, 1)
 
 
@@ -413,7 +546,10 @@ def _calculate_confidence(edge, num_recent_games, matchup_available,
 
 def _stat_key(stat_type):
     """Map stat_type to game log dict key."""
-    return {"pts": "pts", "reb": "reb", "ast": "ast", "g": "g", "sog": "sog"}.get(stat_type, stat_type)
+    return {
+        "pts": "pts", "reb": "reb", "ast": "ast", "g": "g", "sog": "sog",
+        "k": "k", "h": "h", "tb": "tb", "hr": "hr", "rbi": "rbi", "er": "er", "ha": "ha",
+    }.get(stat_type, stat_type)
 
 
 def get_league_defensive_average(sport="nba"):

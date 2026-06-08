@@ -719,6 +719,15 @@ def get_player_game_log_espn(player_name, athlete_id, team_id, sport, count=7):
             if sport == "nhl":
                 entry["g"] = found.get("g", 0)
                 entry["sog"] = found.get("sog", 0)
+            elif sport == "mlb":
+                entry["k"] = found.get("k", 0) or found.get("strikeouts", 0)
+                entry["h"] = found.get("h", 0) or found.get("hits", 0)
+                entry["tb"] = found.get("tb", 0) or found.get("totalBases", 0)
+                entry["hr"] = found.get("hr", 0) or found.get("homeRuns", 0)
+                entry["rbi"] = found.get("rbi", 0) or found.get("RBIs", 0)
+                entry["er"] = found.get("er", 0) or found.get("earnedRuns", 0)
+                entry["ha"] = found.get("ha", 0) or found.get("hitsAllowed", 0)
+                entry["ip"] = found.get("ip", 0) or found.get("inningsPitched", 0)
             game_log.append(entry)
 
         return game_log if game_log else None

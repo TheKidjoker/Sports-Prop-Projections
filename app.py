@@ -48,7 +48,7 @@ pick_curation.init_pick_approvals_db()
 if HAS_TEST_MODEL:
     tm_db.init_tm_db()
     # Load calibration models from latest backtest runs
-    for _cal_sport in ("nba", "nhl", "nfl", "cfb", "cbb"):
+    for _cal_sport in ("nba", "nhl", "nfl", "cfb", "cbb", "mlb"):
         try:
             _cal_run = tm_db.get_latest_model_run(_cal_sport, "rules_backtest")
             if _cal_run and _cal_run.get("model_params"):
@@ -98,6 +98,27 @@ if HAS_TEST_MODEL:
                 cbb_load_state()
     except Exception as _cbb_ev_err:
         print(f"[cbb_ev] Startup load skipped: {_cbb_ev_err}", flush=True)
+
+    # Load MLB EV model if available and validated
+    try:
+        from mlb_ev_model import load_mlb_ev_model, load_live_team_state as mlb_load_state, MLB_EV_CONFIG
+        _mlb_ev_run = tm_db.get_latest_model_run("mlb", "ev_logistic")
+        if _mlb_ev_run and _mlb_ev_run.get("model_params"):
+            _mlb_ev_params = _mlb_ev_run["model_params"]
+            _mlb_auc = _mlb_ev_params.get("mean_auc") or _mlb_ev_params.get("auc", 0)
+            if _mlb_auc >= MLB_EV_CONFIG["auc_gate"]:
+                load_mlb_ev_model(_mlb_ev_params)
+                mlb_load_state()
+    except Exception as _mlb_ev_err:
+        print(f"[mlb_ev] Startup load skipped: {_mlb_ev_err}", flush=True)
+
+    # Build Elo power ratings from historical game data
+    try:
+        from power_ratings import load_elo_ratings
+        load_elo_ratings()
+    except Exception as _elo_err:
+        print(f"[power_ratings] Startup load skipped: {_elo_err}", flush=True)
+
 scan_cache.init()
 
 # ─── Auto-run Test Model on Startup ─────────────────────────────────────
@@ -107,7 +128,7 @@ if HAS_TEST_MODEL:
         import time
         time.sleep(5)  # Let app finish startup
 
-        sports = ["nba", "nhl", "cbb"]
+        sports = ["nba", "nhl", "cbb", "mlb"]
 
         for sport in sports:
             try:
@@ -153,6 +174,14 @@ if HAS_TEST_MODEL:
                         cbb_ev_start()
                         while True:
                             st = cbb_ev_status()
+                            if st.get("status") in ("complete", "error"):
+                                break
+                            time.sleep(3)
+                    elif sport == "mlb":
+                        from mlb_ev_model import start_ev_training_thread as mlb_ev_start, get_ev_training_status as mlb_ev_status
+                        mlb_ev_start()
+                        while True:
+                            st = mlb_ev_status()
                             if st.get("status") in ("complete", "error"):
                                 break
                             time.sleep(3)
@@ -381,7 +410,7 @@ def api_games():
     """Returns today's games list for autocomplete."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
 
         # Signal visitor arrival — wake background cache refresh
@@ -411,7 +440,7 @@ def api_games():
                 "date_label": game.get("date_label", ""),
             }
 
-            if sport in ("nhl", "cfb", "cbb", "nfl"):
+            if sport in ("nhl", "cfb", "cbb", "nfl", "mlb"):
                 entry["venue_name"] = game.get("venue_name", "")
                 entry["venue_city"] = game.get("venue_city", "")
                 entry["venue_state"] = game.get("venue_state", "")
@@ -442,7 +471,7 @@ def api_scan():
         is_admin = _is_admin()
 
         if sport == "all":
-            sports = ("nba", "nhl", "cfb", "nfl", "cbb")
+            sports = ("nba", "nhl", "cfb", "nfl", "cbb", "mlb")
             all_results = {}
             missing = []
             for s in sports:
@@ -475,7 +504,7 @@ def api_scan():
             return jsonify({"success": True, "all_sports": filtered_results,
                             "cached": not missing})
 
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
 
         # Check cache first
@@ -495,7 +524,7 @@ def api_scan():
                 "scan_age_minutes": cache_age_min,
                 "featured_mode": featured_only,
             }
-            if sport in ("nba", "nhl", "cbb"):
+            if sport in ("nba", "nhl", "cbb", "mlb"):
                 response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
             return jsonify(response)
 
@@ -515,7 +544,7 @@ def api_scan():
                     "cached": True, "cache_age": round(age),
                     "featured_mode": featured_only,
                 }
-                if sport in ("nba", "nhl", "cbb"):
+                if sport in ("nba", "nhl", "cbb", "mlb"):
                     response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
                 return jsonify(response)
 
@@ -531,7 +560,7 @@ def api_scan():
             return jsonify({"success": True, "games": [],
                             "picks_pending_review": True})
         response = {"success": True, "games": games, "featured_mode": featured_only}
-        if sport in ("nba", "nhl", "cbb"):
+        if sport in ("nba", "nhl", "cbb", "mlb"):
             response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
         return jsonify(response)
     except Exception as e:
@@ -635,7 +664,7 @@ def api_props():
         sport = request.args.get("sport", "nba").lower()
         if not event_id:
             return jsonify({"success": False, "error": "event_id required"}), 400
-        if sport not in ("nba", "cbb", "nhl"):
+        if sport not in ("nba", "cbb", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         # Run with timeout to prevent indefinite hangs
@@ -661,7 +690,7 @@ def api_lines():
     """Fetch per-book spreads and totals for Line Shop."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         from api_odds import get_multibook_lines
         lines = get_multibook_lines(sport)
@@ -676,7 +705,7 @@ def api_top_props():
     """Generate PRISM player props for ALL today's games at once."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "cbb", "nhl"):
+        if sport not in ("nba", "cbb", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         # Check persistent cache first
@@ -706,7 +735,7 @@ def api_ev_player_props():
     """Get player props with EV calculations for EV Engine."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "cbb", "nhl"):
+        if sport not in ("nba", "cbb", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         import cache_manager
@@ -730,7 +759,7 @@ def api_prop_ev():
     """Prop EV Engine — variance-based probability + actual market odds → true EV."""
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl"):
+        if sport not in ("nba", "nhl", "mlb"):
             return jsonify({"success": True, "props": []})
 
         import cache_manager
@@ -839,7 +868,7 @@ def predict():
     try:
         data = request.get_json()
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
 
         # Validate required fields
@@ -1003,7 +1032,7 @@ def predict():
         prediction_data = None
         cover_rates_data = None
 
-        if player_name and sport not in ("nhl", "cfb", "cbb", "nfl"):
+        if player_name and sport not in ("nhl", "cfb", "cbb", "nfl", "mlb"):
             recent_games = get_player_recent_points(player_name, games)
 
             if not recent_games or len(recent_games) == 0:
@@ -1040,7 +1069,7 @@ def predict():
         }
 
         # Include venue for NHL, CFB, CBB, and NFL
-        if sport in ("nhl", "cfb", "cbb", "nfl") and matched_game:
+        if sport in ("nhl", "cfb", "cbb", "nfl", "mlb") and matched_game:
             response_data["venue_name"] = matched_game.get("venue_name", "")
             response_data["venue_city"] = matched_game.get("venue_city", "")
             response_data["venue_state"] = matched_game.get("venue_state", "")
@@ -1057,7 +1086,7 @@ def api_dashboard():
     """Returns aggregated prediction tracking stats."""
     try:
         sport = request.args.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         stats = tracker.get_dashboard_stats(sport)
         return jsonify({"success": True, **stats})
@@ -1072,7 +1101,7 @@ def api_grade():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         result = tracker.grade_predictions(sport)
         return jsonify({"success": True, **result})
@@ -1086,7 +1115,7 @@ def api_clv_trend():
     """CLV time-series trend data with rolling averages and health indicators."""
     try:
         sport = request.args.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         trend = tracker.get_clv_trend(sport)
         return jsonify({"success": True, "trend": trend})
@@ -1101,7 +1130,7 @@ def api_close_lines():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         result = tracker.fetch_closing_lines(sport)
         return jsonify({"success": True, **result})
@@ -1117,7 +1146,7 @@ def api_model_health():
         return jsonify({"success": True, "sports": {}, "message": "Test model module not available"})
     try:
         sports_data = {}
-        for sport in ("nba", "nhl", "nfl", "cfb", "cbb"):
+        for sport in ("nba", "nhl", "nfl", "cfb", "cbb", "mlb"):
             rules_run = tm_db.get_latest_model_run(sport, "rules_backtest")
             wf_run = tm_db.get_latest_model_run(sport, "walkforward")
             conf = DATA_CONFIDENCE_LEVELS.get(sport, {})
@@ -1218,7 +1247,7 @@ def api_model_comparison():
             return jsonify({"success": True, "comparisons": {sport: comp}})
         # All sports
         comparisons = {}
-        for s in ("nba", "nhl", "nfl", "cfb", "cbb"):
+        for s in ("nba", "nhl", "nfl", "cfb", "cbb", "mlb"):
             comparisons[s] = get_model_comparison(s)
         return jsonify({"success": True, "comparisons": comparisons})
     except Exception as e:
@@ -1252,7 +1281,7 @@ def api_tm_collect():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         started = start_collection_thread(sport)
         return jsonify({"success": True, "started": started})
@@ -1269,7 +1298,7 @@ def api_tm_collect_status():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         progress = get_collection_status(sport)
         db_progress = tm_db.get_collection_progress(sport)
@@ -1296,7 +1325,7 @@ def api_tm_features():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         count = compute_all_features(sport)
         return jsonify({"success": True, "features_computed": count})
@@ -1313,7 +1342,7 @@ def api_tm_metrics():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         metrics = tm_db.get_backtest_metrics(sport)
         total_games = tm_db.count_historical_games(sport)
@@ -1338,7 +1367,7 @@ def api_tm_rules_backtest():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         started = start_rules_backtest_thread(sport)
         return jsonify({"success": True, "started": started})
@@ -1355,7 +1384,7 @@ def api_tm_rules_backtest_status():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         progress = get_rules_backtest_status(sport)
         # Hot-reload calibration when backtest completes
@@ -1378,7 +1407,7 @@ def api_tm_rules_backtest_metrics():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         rules_metrics = tm_db.get_latest_model_run(sport, "rules_backtest")
         ml_metrics = tm_db.get_latest_model_run(sport, "backtest")
@@ -1402,7 +1431,7 @@ def api_tm_slot_validation():
         from test_model.slot_validation import start_slot_validation_thread
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         started = start_slot_validation_thread(sport)
         return jsonify({"success": True, "started": started})
@@ -1420,7 +1449,7 @@ def api_tm_slot_validation_status():
     try:
         from test_model.slot_validation import get_slot_validation_status
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         progress = get_slot_validation_status(sport)
         return jsonify({"success": True, "progress": progress})
@@ -1437,7 +1466,7 @@ def api_tm_slot_validation_metrics():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         run = tm_db.get_latest_model_run(sport, "slot_validation")
         return jsonify({"success": True, "metrics": run})
@@ -1454,7 +1483,7 @@ def api_tm_calibration():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         run = tm_db.get_latest_model_run(sport, "rules_backtest")
         if not run or not run.get("model_params"):
@@ -1475,7 +1504,7 @@ def api_tm_walkforward():
     try:
         data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         mode = data.get("mode", "split").lower()
         if mode not in ("split", "rolling"):
@@ -1495,7 +1524,7 @@ def api_tm_walkforward_status():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         progress = get_walkforward_status(sport)
         return jsonify({"success": True, "progress": progress})
@@ -1512,7 +1541,7 @@ def api_tm_walkforward_metrics():
         return err
     try:
         sport = request.args.get("sport", "nba").lower()
-        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
         wf_metrics = tm_db.get_latest_model_run(sport, "walkforward")
         rules_metrics = tm_db.get_latest_model_run(sport, "rules_backtest")
@@ -1679,6 +1708,58 @@ def api_tm_cbb_ev_metrics():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ─── MLB EV Model Endpoints ───────────────────────────────────────────────
+
+
+@app.route("/api/tm/mlb-ev/train", methods=["POST"])
+@require_auth
+def api_tm_mlb_ev_train():
+    """Start background MLB EV model training."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from mlb_ev_model import start_ev_training_thread
+        started = start_ev_training_thread()
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/mlb-ev/status", methods=["GET"])
+@require_auth
+def api_tm_mlb_ev_status():
+    """Poll MLB EV training progress."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from mlb_ev_model import get_ev_training_status
+        progress = get_ev_training_status()
+        return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/mlb-ev/metrics", methods=["GET"])
+@require_auth
+def api_tm_mlb_ev_metrics():
+    """Get latest MLB EV model metrics."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        ev_run = tm_db.get_latest_model_run("mlb", "ev_logistic")
+        from mlb_ev_model import is_ev_model_active
+        return jsonify({
+            "success": True,
+            "ev_metrics": ev_run,
+            "model_active": is_ev_model_active(),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ─── Pick Curation (Admin) ────────────────────────────────────────────────────
 
 
@@ -1799,7 +1880,7 @@ def api_bets_list():
     try:
         sport = request.args.get("sport", "").lower() or None
         status = request.args.get("status", "").upper() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         if status and status not in ("PENDING", "WIN", "LOSS", "PUSH"):
             status = None
@@ -1830,7 +1911,7 @@ def api_bets_dashboard():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
         sport = request.args.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         stats = bet_tracker.get_tracked_dashboard(request.user_email, sport=sport)
         return jsonify({"success": True, **stats})
@@ -1846,7 +1927,7 @@ def api_bets_combined():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
         sport = request.args.get("sport", "").lower() or None
-        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb"):
+        if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         status = request.args.get("status", "").upper() or None
         result = bet_tracker.get_bets_with_dashboard(request.user_email, sport=sport, status=status)
@@ -2127,8 +2208,8 @@ def api_tm_injury_backfill():
         return err
     try:
         sport = request.json.get("sport", "nba") if request.json else "nba"
-        if sport not in ("nba", "nhl", "cbb"):
-            return jsonify({"success": False, "error": "Injury backfill only supports nba, nhl, cbb"}), 400
+        if sport not in ("nba", "nhl", "cbb", "mlb"):
+            return jsonify({"success": False, "error": "Injury backfill only supports nba, nhl, cbb, mlb"}), 400
         from test_model.injury_backfill import start_backfill_thread
         started = start_backfill_thread(sport)
         return jsonify({"success": True, "started": started})

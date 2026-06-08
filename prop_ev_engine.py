@@ -4,17 +4,34 @@
 # actual market odds for implied probability, and computes true EV.
 
 import math
-from scipy.stats import norm
+from scipy.stats import norm, poisson
+from constants import USE_POISSON_VARIANCE
+
+# ─── Bayesian Variance Priors (league-wide standard deviations) ──────────────
+# Used as prior when sample is small (Bayesian floor replaces hardcoded max())
+_LEAGUE_VARIANCE_PRIORS = {
+    "nba": {"pts": 5.5, "reb": 2.2, "ast": 1.8},
+    "nhl": {"g": 0.5, "goals": 0.5, "sog": 1.5, "shots_on_goal": 1.5},
+    "mlb": {"k": 2.0, "h": 0.8, "tb": 1.2, "hr": 0.5, "rbi": 0.9, "er": 1.5, "ha": 1.8},
+}
+_VARIANCE_PRIOR_STRENGTH = 5  # Equivalent to 5 games of prior data
+
+# Stats that use Poisson modeling when mean is low (canonical field names only —
+# aliases like "goals"→"g" are resolved by key_map before this set is checked)
+_POISSON_STATS = {"g", "sog", "hr", "rbi", "er"}
 
 
-def compute_player_variance(recent_games, stat_key, max_games=15):
+def compute_player_variance(recent_games, stat_key, max_games=15, sport="nba"):
     """
-    Compute rolling standard deviation from a player's recent game logs.
+    Compute exponentially weighted standard deviation from a player's recent game logs.
+    Uses half-life of 7 games: weight_i = 0.5^(i/7).
+    Applies Bayesian variance floor using league priors.
 
     Args:
         recent_games: list of game log dicts (from balldontlie/ESPN)
         stat_key: stat to measure ("pts", "reb", "ast", or combo like "pts+reb+ast")
         max_games: max games to use (default 15)
+        sport: sport key for Bayesian priors
 
     Returns:
         dict {std_dev, mean, n_games} or None if <5 games
@@ -24,7 +41,7 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
 
     # Combo stats: dispatch to combo variance
     if "+" in stat_key:
-        return compute_combo_variance(recent_games, stat_key.split("+"), max_games)
+        return compute_combo_variance(recent_games, stat_key.split("+"), max_games, sport)
 
     # Map stat_key to game log field names (balldontlie format + NHL)
     key_map = {
@@ -38,6 +55,20 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
         "goals": "g",
         "sog": "sog",
         "shots_on_goal": "sog",
+        "k": "k",
+        "strikeouts": "k",
+        "h": "h",
+        "hits": "h",
+        "tb": "tb",
+        "total_bases": "tb",
+        "hr": "hr",
+        "home_runs": "hr",
+        "rbi": "rbi",
+        "rbis": "rbi",
+        "er": "er",
+        "earned_runs": "er",
+        "ha": "ha",
+        "hits_allowed": "ha",
     }
     field = key_map.get(stat_key, stat_key)
 
@@ -50,28 +81,49 @@ def compute_player_variance(recent_games, stat_key, max_games=15):
     if len(values) < 5:
         return None
 
-    mean = sum(values) / len(values)
-    variance = sum((v - mean) ** 2 for v in values) / len(values)
-    std_dev = math.sqrt(variance)
+    # Exponentially weighted variance (half-life = 7 games)
+    half_life = 7.0
+    weights = [0.5 ** (i / half_life) for i in range(len(values))]
+    total_w = sum(weights)
 
-    # Floor std_dev at 1.0 to avoid division by near-zero
-    std_dev = max(std_dev, 1.0)
+    weighted_mean = sum(w * v for w, v in zip(weights, values)) / total_w
+
+    # Bessel's correction for weighted samples
+    sum_w_sq = sum(w * w for w in weights)
+    bessel_denom = total_w - (sum_w_sq / total_w)
+    if bessel_denom <= 0:
+        bessel_denom = total_w  # fallback to population variance
+
+    weighted_var = sum(w * (v - weighted_mean) ** 2 for w, v in zip(weights, values)) / bessel_denom
+    sample_std = math.sqrt(max(weighted_var, 0))
+
+    # Bayesian variance floor: posterior_var = (n * sample_var + prior_n * league_var) / (n + prior_n)
+    n = len(values)
+    sport_priors = _LEAGUE_VARIANCE_PRIORS.get(sport, _LEAGUE_VARIANCE_PRIORS.get("nba", {}))
+    league_std = sport_priors.get(field, sport_priors.get(stat_key, 1.0))
+    league_var = league_std ** 2
+    prior_n = _VARIANCE_PRIOR_STRENGTH
+
+    posterior_var = (n * weighted_var + prior_n * league_var) / (n + prior_n)
+    std_dev = math.sqrt(posterior_var)
 
     return {
         "std_dev": round(std_dev, 2),
-        "mean": round(mean, 2),
-        "n_games": len(values),
+        "mean": round(weighted_mean, 2),
+        "n_games": n,
     }
 
 
-def compute_combo_variance(recent_games, stat_keys, max_games=15):
+def compute_combo_variance(recent_games, stat_keys, max_games=15, sport="nba"):
     """
-    Compute variance of summed stats per game (e.g. pts+reb+ast).
+    Compute exponentially weighted variance of summed stats per game (e.g. pts+reb+ast).
+    Same half-life=7 weighting + Bayesian floor as individual stats.
 
     Args:
         recent_games: list of game log dicts
         stat_keys: list of stat keys to sum (e.g. ["pts", "reb", "ast"])
         max_games: max games to use
+        sport: sport key for priors
 
     Returns:
         dict {std_dev, mean, n_games} or None if <5 games with all stats
@@ -84,6 +136,8 @@ def compute_combo_variance(recent_games, stat_keys, max_games=15):
         "points": "pts", "rebounds": "reb", "assists": "ast",
         "g": "g", "goals": "g", "goa": "g",
         "sog": "sog", "shots_on_goal": "sog",
+        "k": "k", "h": "h", "tb": "tb", "hr": "hr", "rbi": "rbi",
+        "er": "er", "ha": "ha",
     }
     fields = [key_map.get(k, k) for k in stat_keys]
 
@@ -102,17 +156,33 @@ def compute_combo_variance(recent_games, stat_keys, max_games=15):
     if len(sums) < 5:
         return None
 
-    mean = sum(sums) / len(sums)
-    variance = sum((v - mean) ** 2 for v in sums) / len(sums)
-    std_dev = math.sqrt(variance)
+    # Exponentially weighted variance (half-life = 7 games)
+    half_life = 7.0
+    weights = [0.5 ** (i / half_life) for i in range(len(sums))]
+    total_w = sum(weights)
 
-    # Floor std_dev at 2.0 for combos (higher baseline than individual stats)
-    std_dev = max(std_dev, 2.0)
+    weighted_mean = sum(w * v for w, v in zip(weights, sums)) / total_w
+
+    sum_w_sq = sum(w * w for w in weights)
+    bessel_denom = total_w - (sum_w_sq / total_w)
+    if bessel_denom <= 0:
+        bessel_denom = total_w
+
+    weighted_var = sum(w * (v - weighted_mean) ** 2 for w, v in zip(weights, sums)) / bessel_denom
+
+    # Bayesian floor for combos: sum of individual priors
+    sport_priors = _LEAGUE_VARIANCE_PRIORS.get(sport, _LEAGUE_VARIANCE_PRIORS.get("nba", {}))
+    combo_league_var = sum(sport_priors.get(f, 2.0) ** 2 for f in fields)
+    n = len(sums)
+    prior_n = _VARIANCE_PRIOR_STRENGTH
+
+    posterior_var = (n * weighted_var + prior_n * combo_league_var) / (n + prior_n)
+    std_dev = math.sqrt(posterior_var)
 
     return {
         "std_dev": round(std_dev, 2),
-        "mean": round(mean, 2),
-        "n_games": len(sums),
+        "mean": round(weighted_mean, 2),
+        "n_games": n,
     }
 
 
@@ -144,18 +214,23 @@ def adjust_variance(base_std, is_b2b=False, minutes_unstable=False,
     return round(adj, 2)
 
 
-def compute_model_probability(projection, line, adjusted_std):
+def compute_model_probability(projection, line, adjusted_std, stat_key=None):
     """
-    Compute model probability using z-score and normal CDF.
+    Compute model probability using z-score/normal CDF or Poisson for low-count stats.
 
-    z = (line - projection) / adjusted_std
-    P(over) = 1 - CDF(z)  — probability the actual exceeds the line
-    P(under) = CDF(z)     — probability the actual falls below the line
+    For normal model:
+        z = (line - projection) / adjusted_std
+        P(over) = 1 - CDF(z)
+        P(under) = CDF(z)
+
+    For Poisson model (goals, SOG when projection < 5):
+        P(over k) = 1 - PoissonCDF(floor(line), lambda=projection)
 
     Args:
         projection: PRISM projected value
         line: sportsbook line
         adjusted_std: adjusted standard deviation
+        stat_key: optional stat identifier for Poisson detection
 
     Returns:
         dict {z_score, prob_over, prob_under, direction, model_probability}
@@ -166,9 +241,25 @@ def compute_model_probability(projection, line, adjusted_std):
     if adjusted_std <= 0:
         return None
 
-    z = (line - projection) / adjusted_std
-    prob_over = 1.0 - norm.cdf(z)
-    prob_under = norm.cdf(z)
+    # Poisson modeling for low-count integer stats (goals, SOG < 5)
+    use_poisson = (
+        USE_POISSON_VARIANCE
+        and stat_key is not None
+        and stat_key in _POISSON_STATS
+        and projection < 5.0
+    )
+
+    if use_poisson:
+        # P(over k) = 1 - P(X <= floor(line))
+        k = int(math.floor(line))
+        lam = max(projection, 0.1)
+        prob_under = poisson.cdf(k, lam)
+        prob_over = 1.0 - prob_under
+        z = (line - projection) / adjusted_std  # still compute for display
+    else:
+        z = (line - projection) / adjusted_std
+        prob_over = 1.0 - norm.cdf(z)
+        prob_under = norm.cdf(z)
 
     # Direction: whichever side has higher probability
     if prob_over >= prob_under:
@@ -324,8 +415,8 @@ def analyze_prop(projection, line, recent_games, stat_key,
     # Step 2: Adjust variance for situation
     adj_std = adjust_variance(base_std, is_b2b, minutes_unstable, has_injury_boost)
 
-    # Step 3: Compute model probability
-    prob_result = compute_model_probability(projection, line, adj_std)
+    # Step 3: Compute model probability (pass stat_key for Poisson detection)
+    prob_result = compute_model_probability(projection, line, adj_std, stat_key=stat_key)
     if prob_result is None:
         return None
 
@@ -410,10 +501,10 @@ def classify_tier(edge_pct, ev_pct, n_games, line_source="estimated"):
         if max_tier == "STRONG":
             max_tier = "CONFIDENT"
 
-    # Classify by edge
-    if edge_pct >= 8.0 and ev_pct >= 5.0:
+    # Classify by edge (lowered thresholds — by 8% the line has moved)
+    if edge_pct >= 6.0 and ev_pct >= 3.0:
         tier = "STRONG"
-    elif edge_pct >= 5.0 and ev_pct >= 2.0:
+    elif edge_pct >= 4.0 and ev_pct >= 1.5:
         tier = "CONFIDENT"
     elif edge_pct >= 2.0 and ev_pct > 0:
         tier = "LEAN"

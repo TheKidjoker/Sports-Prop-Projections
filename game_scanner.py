@@ -62,10 +62,13 @@ def compute_kelly_sizing(cover_pct, recommendation, sport="nba", ev_model=None):
     if full_kelly <= 0:
         return None
     half_kelly = full_kelly / 2.0
-    # Map to units: 1.5% bankroll = 1 unit, round to 0.5u, cap 0.5-3u
+    # Map to units: 1.5% bankroll = 1 unit, round to 0.5u
     raw = half_kelly * 100 / 1.5
     units = round(raw * 2) / 2
-    units = max(0.5, min(3.0, units))
+    # High-AUC models (>0.62) can go up to 3.5 units, otherwise cap at 3.0
+    ev_auc = ev_model.get("auc", 0) if ev_model else 0
+    max_units = 3.5 if ev_auc > 0.62 else 3.0
+    units = max(0.5, min(max_units, units))
     # Cap by recommendation tier
     if recommendation == "LEAN":
         units = min(units, 1.0)
@@ -97,7 +100,7 @@ def classify_game_slot(game_date_str, day_of_week, sport, is_first_game=False,
             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
 
             # Classification timezone
-            if sport in ("cfb", "cbb"):
+            if sport in ("cfb", "cbb", "mlb"):
                 classify_dt = game_dt - timedelta(hours=5)  # EST (same as display)
             elif sport == "nhl":
                 classify_dt = game_dt - timedelta(hours=6)  # CST
@@ -364,8 +367,8 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
         "opening_spread": opening_spread,
     }
 
-    # Venue for NHL, CFB, CBB, and NFL
-    if sport in ("nhl", "cfb", "cbb", "nfl"):
+    # Venue for NHL, CFB, CBB, NFL, and MLB
+    if sport in ("nhl", "cfb", "cbb", "nfl", "mlb"):
         result["venue_name"] = game.get("venue_name", "")
         result["venue_city"] = game.get("venue_city", "")
         result["venue_state"] = game.get("venue_state", "")
@@ -760,7 +763,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     # ── EV Model Integration (ensemble for NBA/CBB, pure override for NHL)
     ev_model_data = None
-    if sport in ("nba", "nhl", "cbb") and not lightweight:
+    if sport in ("nba", "nhl", "cbb", "mlb") and not lightweight:
         ev_result = _try_ev_prediction(
             sport, current, opening, game.get("game_date", ""),
             home_team, away_team,
@@ -785,7 +788,7 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                     "ev_pct": ev_pct,
                 }
             else:
-                # NHL: pure EV override (validated at 67% OOS)
+                # NHL/MLB: pure EV override
                 # Rescale display: raw sigmoid clusters 52-70% due to strong
                 # regularization. Stretch edge proportionally so the display
                 # range differentiates games (52 → 52, 55 → 60, 60 → 72, 65 → 80).
@@ -889,6 +892,8 @@ def _try_ev_prediction(sport, current_spread, opening_spread, game_date_str,
             from nhl_ev_model import is_ev_model_active, extract_live_features, predict_single
         elif sport == "cbb":
             from cbb_ev_model import is_ev_model_active, extract_live_features, predict_single
+        elif sport == "mlb":
+            from mlb_ev_model import is_ev_model_active, extract_live_features, predict_single
         else:
             return None
 
@@ -907,6 +912,42 @@ def _try_ev_prediction(sport, current_spread, opening_spread, game_date_str,
         return None
 
 
+def _get_correlation_warning(stat_names, signal, sport="nba"):
+    """
+    Generate correlation warning for combo/parlay props.
+    Warns when correlated stats are combined in same-game parlays.
+
+    Returns:
+        str warning message or None
+    """
+    stat_set = set(s.upper() for s in stat_names)
+
+    # PTS+AST are positively correlated (playmakers score and assist)
+    if "PTS" in stat_set and "AST" in stat_set:
+        if "OVER" in signal:
+            return "PTS and AST are positively correlated — combined over is riskier than individual legs suggest"
+        elif "UNDER" in signal:
+            return "PTS and AST are positively correlated — combined under benefits from correlation"
+
+    # PTS+REB mild correlation in some roles (bigs)
+    if "PTS" in stat_set and "REB" in stat_set and "AST" not in stat_set:
+        return "PTS and REB have mild positive correlation for frontcourt players"
+
+    # SOG+Goals strongly correlated (can't score without shooting)
+    if sport == "nhl" and "SOG" in stat_set and "G" in stat_set:
+        return "SOG and Goals are strongly correlated — parlay legs are not independent"
+
+    # MLB: HITS and TB are strongly correlated (hits are a subset of total bases)
+    if sport == "mlb" and "HITS" in stat_set and "TB" in stat_set:
+        return "Hits and Total Bases are strongly correlated — parlay legs are not independent"
+
+    # MLB: HITS and RBI mildly correlated (contact hitters drive in runs)
+    if sport == "mlb" and "HITS" in stat_set and "RBI" in stat_set:
+        return "Hits and RBI have mild positive correlation for lineup-protected hitters"
+
+    return None
+
+
 def _detect_combo_streak(recent_games, combo_line, stat_keys):
     """
     Streak detection for combo stats — 4+/5 games over or under the combo line.
@@ -922,7 +963,11 @@ def _detect_combo_streak(recent_games, combo_line, stat_keys):
     if not recent_games or len(recent_games) < 5:
         return None
 
-    key_map = {"pts": "pts", "reb": "reb", "ast": "ast", "goa": "g", "sog": "sog"}
+    key_map = {
+        "pts": "pts", "reb": "reb", "ast": "ast", "goa": "g", "sog": "sog",
+        "hit": "h", "h": "h", "tb": "tb", "hr": "hr", "rbi": "rbi",
+        "k": "k", "er": "er", "ha": "ha",
+    }
     fields = [key_map.get(k, k) for k in stat_keys]
 
     over_count = 0
@@ -1045,6 +1090,14 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
             ("ast", "apg", "AST", "assists", 0.3),       # Assists per game, min 0.3
             ("sog", "sogpg", "SOG", "shots_on_goal", 1.5),  # Shots on goal, min 1.5
         ]
+    elif sport == "mlb":
+        stat_configs = [
+            ("k", "k_per_game", "K", "strikeouts", 3.0),
+            ("h", "hits_per_game", "HITS", "hits", 0.5),
+            ("tb", "tb_per_game", "TB", "total_bases", 0.8),
+            ("hr", "hr_per_game", "HR", "home_runs", 0.1),
+            ("rbi", "rbi_per_game", "RBI", "rbis", 0.3),
+        ]
     else:
         stat_configs = [
             ("pts", "ppg", "PTS", "points", 8.0),
@@ -1150,6 +1203,11 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
             ("GOALS+AST", ["GOALS", "AST"], "goals_assists"),
             ("PTS+SOG",   ["PTS", "SOG"],   "points_shots"),
         ]
+    elif sport == "mlb":
+        combo_configs = [
+            ("H+TB",  ["HITS", "TB"],  "hits_total_bases"),
+            ("H+RBI", ["HITS", "RBI"], "hits_rbis"),
+        ]
     else:
         combo_configs = [
             ("PTS+REB+AST", ["PTS", "REB", "AST"], "points_rebounds_assists"),
@@ -1217,6 +1275,11 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                 # stat_key uses "+" separator for EV engine dispatch
                 combo_stat_key = "+".join(s.lower()[:3] for s in required_stats)
 
+                # Correlation warning for parlays
+                correlation_warning = _get_correlation_warning(
+                    required_stats, combo_signal, sport
+                )
+
                 results.append({
                     "player_name": player_name,
                     "team": first_result["team"],
@@ -1234,6 +1297,7 @@ def _run_prism_analysis(home_team_id, away_team_id, home_team, away_team,
                     "is_b2b": first_result.get("is_b2b", False),
                     "has_injury_boost": any(r.get("has_injury_boost", False) for r in indiv_results),
                     "stat_key": combo_stat_key,
+                    "correlation_warning": correlation_warning,
                 })
 
     # Sort by abs(edge) descending
@@ -1253,7 +1317,7 @@ def get_top_props(sport="nba"):
     Fetch today's games and run PRISM analysis for ALL games in parallel.
     Returns a flat list of prop dicts sorted by confidence, each tagged with matchup info.
     """
-    if sport not in ("nba", "cbb", "nhl"):
+    if sport not in ("nba", "cbb", "nhl", "mlb"):
         return []
 
     games = get_todays_games(sport)
@@ -1441,7 +1505,7 @@ def get_prop_ev_analysis(sport="nba"):
     """
     from prop_ev_engine import analyze_prop
 
-    if sport not in ("nba", "cbb", "nhl"):
+    if sport not in ("nba", "cbb", "nhl", "mlb"):
         return []
 
     # Try cached base props first, fetch odds in parallel
@@ -1488,6 +1552,9 @@ def get_prop_ev_analysis(sport="nba"):
         "REB+AST": "rebounds_assists",
         "GOALS": "goals", "SOG": "shots_on_goal",
         "GOALS+AST": "goals_assists", "PTS+SOG": "points_shots",
+        "K": "strikeouts", "HITS": "hits", "TB": "total_bases",
+        "HR": "home_runs", "RBI": "rbis",
+        "H+TB": "hits_total_bases", "H+RBI": "hits_rbis",
     }
 
     results = []
@@ -1583,7 +1650,7 @@ def get_game_props(event_id, sport="nba", player_props_lines=None):
         List of prop signal dicts, or empty list on failure.
     """
     start = time.time()
-    if sport not in ("nba", "cbb", "nhl"):
+    if sport not in ("nba", "cbb", "nhl", "mlb"):
         return []
 
     # Check cache first
@@ -1630,8 +1697,8 @@ def get_game_props(event_id, sport="nba", player_props_lines=None):
     if game_date_str:
         try:
             game_dt = datetime.fromisoformat(game_date_str.replace("Z", "+00:00"))
-            if sport == "cbb":
-                classify_dt = game_dt - timedelta(hours=5)  # EST for CBB
+            if sport in ("cbb", "mlb"):
+                classify_dt = game_dt - timedelta(hours=5)  # EST for CBB/MLB
             elif sport == "nhl":
                 classify_dt = game_dt - timedelta(hours=6)  # CST for NHL
             else:
