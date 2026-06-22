@@ -244,7 +244,8 @@ def _get_jwks_client():
                 f"{SUPABASE_URL}/auth/v1/jwks",
                 cache_keys=True,
                 max_cached_keys=16,
-                cache_jwk_set_for_minutes=60
+                cache_jwk_set=True,
+                lifespan=3600,
             )
             _jwks_failed = False
             print(f"[AUTH] JWKS client initialized successfully", flush=True)
