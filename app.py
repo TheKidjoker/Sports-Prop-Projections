@@ -232,23 +232,31 @@ def _get_jwks_client():
     global _jwks_client, _jwks_failed, _jwks_last_attempt
     import time
 
-    # If JWKS previously failed, only retry every 5 minutes
-    if _jwks_failed and (time.time() - _jwks_last_attempt) < 300:
+    # If JWKS previously failed, retry every 30 seconds
+    if _jwks_failed and (time.time() - _jwks_last_attempt) < 30:
         return None
 
     if _jwks_client is None and SUPABASE_URL:
         try:
             _jwks_last_attempt = time.time()
-            # Add cache_keys=True to reduce unnecessary fetches
-            _jwks_client = jwt.PyJWKClient(
-                f"{SUPABASE_URL}/auth/v1/jwks",
-                cache_keys=True,
-                max_cached_keys=16,
-                cache_jwk_set=True,
-                lifespan=3600,
-            )
+            jwks_uri = f"{SUPABASE_URL}/auth/v1/jwks"
+            # PyJWT >=2.9 uses cache_jwk_set+lifespan; older uses cache_jwk_set_for_minutes
+            try:
+                _jwks_client = jwt.PyJWKClient(
+                    jwks_uri, cache_keys=True, max_cached_keys=16,
+                    cache_jwk_set=True, lifespan=3600,
+                )
+            except TypeError:
+                # Fallback for older PyJWT
+                try:
+                    _jwks_client = jwt.PyJWKClient(
+                        jwks_uri, cache_keys=True, max_cached_keys=16,
+                        cache_jwk_set_for_minutes=60,
+                    )
+                except TypeError:
+                    _jwks_client = jwt.PyJWKClient(jwks_uri, cache_keys=True)
             _jwks_failed = False
-            print(f"[AUTH] JWKS client initialized successfully", flush=True)
+            print(f"[AUTH] JWKS client initialized (PyJWT {jwt.__version__})", flush=True)
         except Exception as e:
             _jwks_failed = True
             print(f"[AUTH] JWKS initialization failed: {e}", flush=True)
@@ -1281,14 +1289,18 @@ def api_soccer_leagues():
 @require_auth
 def api_soccer_scan():
     """Scan soccer matches for a league."""
-    data = request.get_json() or {}
-    league = data.get("league", "epl")
-    date_str = data.get("date")
+    try:
+        data = request.get_json() or {}
+        league = data.get("league", "epl")
+        date_str = data.get("date")
 
-    from soccer_scanner import get_scanner
-    scanner = get_scanner()
-    matches = scanner.scan_matches(league, date_str)
-    return jsonify({"matches": matches, "league": league, "count": len(matches)})
+        from soccer_scanner import get_scanner
+        scanner = get_scanner()
+        matches = scanner.scan_matches(league, date_str)
+        return jsonify({"matches": matches, "league": league, "count": len(matches)})
+    except Exception as e:
+        print(f"[soccer_scan] Error: {e}", flush=True)
+        return jsonify({"matches": [], "league": league if 'league' in dir() else "epl", "count": 0, "error": str(e)})
 
 
 @app.route("/api/soccer/props", methods=["GET"])

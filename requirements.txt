@@ -6,6 +6,6 @@ scikit-learn
 scipy
 vaderSentiment
 numpy
-PyJWT[crypto]
+PyJWT[crypto]>=2.9.0
 python-dotenv
 APScheduler>=3.10.0
