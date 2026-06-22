@@ -57,7 +57,7 @@ function LoginForm() {
   const bootMessages = ["", "AUTHENTICATING...", "VERIFYING CLEARANCE...", "ACCESS GRANTED"];
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center hex-grid-bg">
+    <div className="min-h-screen bg-background flex items-center justify-center hex-grid-bg relative z-20">
       <div className="hud-panel p-8 max-w-sm w-full mx-4">
         <div className="text-center mb-6">
           <img
@@ -90,7 +90,6 @@ function LoginForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full px-3 py-2 bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
-            style={{ clipPath: "polygon(0 4px, 4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)" }}
           />
           <input
             type="password"
@@ -98,7 +97,6 @@ function LoginForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-3 py-2 bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
-            style={{ clipPath: "polygon(0 4px, 4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)" }}
           />
           {error && (
             <p className="text-xs text-primary font-mono">{error}</p>
@@ -107,7 +105,6 @@ function LoginForm() {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 bg-primary text-primary-foreground font-heading tracking-[0.15em] text-sm transition-all duration-200 hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
-            style={{ clipPath: "polygon(0 4px, 4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px))" }}
           >
             {loading
               ? isSignUp ? "CREATING ACCOUNT..." : "DEPLOYING..."
