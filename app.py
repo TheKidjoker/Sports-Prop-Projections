@@ -523,7 +523,8 @@ def api_scan():
                 response["props"] = cache_manager.get_cached_props(sport, cache_minutes=30)
             return jsonify(response)
 
-        # No cache — wait briefly for background warm-up before blocking
+        # No cache — trigger background scan and wait briefly
+        scan_cache.request_refresh(sport)
         import time as _time
         for _ in range(6):  # 6 x 0.5s = 3s max
             _time.sleep(0.5)
