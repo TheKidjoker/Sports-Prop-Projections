@@ -3,6 +3,9 @@ Automated Scheduler — runs scans, grading, and closing line fetches on a sched
 
 Uses APScheduler BackgroundScheduler to run jobs inside the Flask app process.
 Enabled via ENABLE_SCHEDULER=true environment variable.
+
+Budget-aware: checks daily API budget before making Odds API calls.
+Closing lines reduced to 1x/day to conserve API budget.
 """
 
 import os
@@ -17,9 +20,9 @@ _scheduler = None
 def init_scheduler():
     """
     Create and start a BackgroundScheduler with 3 jobs:
-    1. Morning scan (11:00 AM ET / 16:00 UTC)
-    2. Closing lines (multiple windows: noon, 1pm, 6pm ET)
-    3. Night grading (1:00 AM ET / 06:00 UTC)
+    1. Morning scan (11:00 AM ET / 16:00 UTC) — budget-checked
+    2. Closing lines (6:00 PM ET / 23:00 UTC) — 1x/day to conserve budget
+    3. Night grading (1:00 AM ET / 06:00 UTC) — free (ESPN only)
     """
     global _scheduler
     try:
@@ -30,7 +33,7 @@ def init_scheduler():
 
     _scheduler = BackgroundScheduler(timezone="UTC")
 
-    # Morning scan: 11:00 AM ET = 16:00 UTC (15:00 UTC during DST)
+    # Morning scan: 11:00 AM ET = 16:00 UTC
     _scheduler.add_job(
         _morning_scan,
         "cron",
@@ -40,18 +43,17 @@ def init_scheduler():
         misfire_grace_time=3600,
     )
 
-    # Closing lines: noon ET (17:00 UTC), 1pm ET (18:00 UTC), 6pm ET (23:00 UTC)
-    for hour_utc, label in [(17, "Noon ET"), (18, "1 PM ET"), (23, "6 PM ET")]:
-        _scheduler.add_job(
-            _fetch_closing_lines,
-            "cron",
-            hour=hour_utc, minute=0,
-            id=f"close_lines_{hour_utc}",
-            name=f"Closing Lines ({label})",
-            misfire_grace_time=3600,
-        )
+    # Closing lines: once/day at 6 PM ET = 23:00 UTC (conserves API budget)
+    _scheduler.add_job(
+        _fetch_closing_lines,
+        "cron",
+        hour=23, minute=0,
+        id="close_lines_23",
+        name="Closing Lines (6 PM ET)",
+        misfire_grace_time=3600,
+    )
 
-    # Night grading: 1:00 AM ET = 06:00 UTC
+    # Night grading: 1:00 AM ET = 06:00 UTC (uses ESPN, no Odds API calls)
     _scheduler.add_job(
         _night_grade,
         "cron",
@@ -66,7 +68,13 @@ def init_scheduler():
 
 
 def _morning_scan():
-    """Scan all sports, save predictions, send Discord summary."""
+    """Scan active sports only, respecting API budget."""
+    import api_budget
+
+    if not api_budget.check_budget():
+        logger.warning("[scan] Daily API budget exhausted — skipping morning scan")
+        return
+
     from game_scanner import scan_all_games
     import tracker
 
@@ -75,6 +83,9 @@ def _morning_scan():
 
     scan_results = {}
     for sport in SPORTS:
+        if not api_budget.check_budget():
+            logger.warning("[scan] Budget exhausted mid-scan — stopping at %s", sport)
+            break
         try:
             results = scan_all_games(sport)
             tracker.save_predictions(results, sport)
@@ -94,13 +105,22 @@ def _morning_scan():
 
 
 def _fetch_closing_lines():
-    """Fetch closing lines for all sports."""
+    """Fetch closing lines for active sports, budget-checked."""
+    import api_budget
+
+    if not api_budget.check_budget():
+        logger.warning("[close] Daily API budget exhausted — skipping closing lines")
+        return
+
     import tracker
 
     SPORTS = ["nba", "nhl", "nfl", "cfb", "cbb", "mlb"]
     tracker.init_db()
 
     for sport in SPORTS:
+        if not api_budget.check_budget():
+            logger.warning("[close] Budget exhausted mid-fetch — stopping at %s", sport)
+            break
         try:
             result = tracker.fetch_closing_lines(sport)
             logger.info("[close] %s: %d updated", sport.upper(), result.get("updated", 0))
@@ -109,7 +129,7 @@ def _fetch_closing_lines():
 
 
 def _night_grade():
-    """Grade predictions, send Discord results."""
+    """Grade predictions, send Discord results. Uses ESPN (free), not Odds API."""
     import tracker
 
     tracker.init_db()
@@ -124,7 +144,6 @@ def _night_grade():
             result.get("summary", {}).get("push", 0),
         )
 
-        # Send Discord results
         try:
             from notifications import DiscordWebhook
             webhook = DiscordWebhook()
@@ -138,12 +157,7 @@ def _night_grade():
 
 
 def get_scheduler_status():
-    """
-    Return scheduler status and upcoming job schedule.
-
-    Returns:
-        Dict with enabled flag and list of jobs with next run times.
-    """
+    """Return scheduler status and upcoming job schedule."""
     if _scheduler is None:
         return {"enabled": False, "jobs": []}
 

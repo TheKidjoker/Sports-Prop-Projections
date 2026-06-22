@@ -3,6 +3,7 @@ import os
 import requests
 from datetime import datetime, timezone
 from constants import wilson_interval, metric_with_ci, MIN_SAMPLES
+from api_cache import _cached_request
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
@@ -746,24 +747,22 @@ def _normalize_team_name(name):
 
 
 def _fetch_odds_api_lines(sport):
-    """Fetch current spreads from The Odds API for a sport. Returns dict keyed by normalized matchup."""
+    """Fetch current spreads from The Odds API for a sport. Returns dict keyed by normalized matchup.
+    Uses _cached_request for 4-hour cache + daily budget tracking."""
     if not ODDS_API_KEY:
         return {}
     sport_key = ODDS_API_SPORT_KEYS.get(sport)
     if not sport_key:
         return {}
 
-    try:
-        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
-        resp = requests.get(url, params={
-            "apiKey": ODDS_API_KEY,
-            "regions": "us",
-            "markets": "spreads",
-            "bookmakers": "fanduel,draftkings",
-        }, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
+    data = _cached_request(url, params={
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "spreads",
+        "bookmakers": "fanduel,draftkings",
+    }, timeout=15)
+    if not data:
         return {}
 
     lines = {}

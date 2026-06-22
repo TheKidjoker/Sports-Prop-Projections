@@ -1,12 +1,12 @@
 """
 Background scan cache — keeps game analysis pre-computed for instant page loads.
 
-- On demand: scans a sport when first requested by a visitor
-- Every hour: refreshes all cached sports
-- Daily at 6 AM EST: pre-scans all sports so data is ready for the day
-- On visitor arrival (/api/games): triggers immediate refresh for that sport
-- /api/scan returns cached results instantly, queues background refresh
-- Two-tier cache: in-memory for speed + Supabase for persistence across deploys
+API Budget Mode (500 calls/month free tier):
+- Scans are ON-DEMAND only — triggered when a user requests a sport
+- No automatic hourly refresh of all sports
+- Daily 6 AM EST: refreshes only actively-used sports
+- Persistent Supabase cache: 8-hour TTL (vs old 60-min)
+- All Odds API calls go through api_cache with 4-hour TTL + daily budget
 """
 
 import os
@@ -26,15 +26,19 @@ _queue_lock = threading.Lock()
 _wake = threading.Event()
 _started = False
 
-BG_INTERVAL = 3600     # 1 hour between periodic full refreshes
 ALL_SPORTS = ("nba", "nhl", "cbb", "cfb", "nfl", "mlb")
 
 DAILY_REFRESH_HOUR = 6  # 6 AM EST
 EST = timezone(timedelta(hours=-5))
 
+STAGGER_DELAY = 15   # seconds between sport scan pairs
+SCAN_PARALLEL = 2
 
-STAGGER_DELAY = 15   # seconds between sport scan pairs to avoid rate limit bursts
-SCAN_PARALLEL = 2    # scan this many sports concurrently
+# Persistent cache TTL — how long Supabase-cached results are considered valid
+PERSISTENT_CACHE_MINUTES = 480  # 8 hours
+
+# Minimum age (seconds) before a sport is eligible for background re-scan
+STALE_THRESHOLD = 14400  # 4 hours — matches Odds API cache TTL
 
 # File lock to prevent duplicate scan threads across gunicorn workers
 _LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".scan_cache_lock")
@@ -43,6 +47,7 @@ _LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".scan_cac
 def init():
     """Start background refresh daemon. Safe to call multiple times.
     Uses a file lock so only one gunicorn worker runs the scan thread.
+    No startup warm-up — scans happen on-demand when users visit.
     """
     global _started
     if _started:
@@ -56,18 +61,14 @@ def init():
         finally:
             os.close(fd)
     except FileExistsError:
-        # Another worker already owns the scan thread — check if still alive
         try:
             with open(_LOCK_FILE, "r") as f:
                 pid = int(f.read().strip())
-            # On Unix, os.kill(pid, 0) checks if process exists
-            # On Windows, this will raise an error if the process doesn't exist
             os.kill(pid, 0)
             logger.info("[scan_cache] Scan thread owned by worker pid=%d, skipping", pid)
-            _started = True  # Don't retry
+            _started = True
             return
         except (OSError, ValueError):
-            # Stale lock file — reclaim it
             try:
                 os.unlink(_LOCK_FILE)
                 fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -84,43 +85,34 @@ def init():
 
     _started = True
     threading.Thread(target=_loop, daemon=True, name="scan-cache").start()
-    # Queue all sports for immediate warm-up on startup
-    request_refresh(*ALL_SPORTS)
-    logger.info("[scan_cache] Background thread started (pid=%d), queued startup warm-up", os.getpid())
+    logger.info("[scan_cache] Background thread started (pid=%d) — on-demand mode, no startup warm-up", os.getpid())
 
 
 def get(sport):
     """
     Return (results, age_seconds) or (None, None).
-    Checks in-memory cache first, then Supabase persistent cache.
+    Checks in-memory cache first, then Supabase persistent cache (8-hour TTL).
     """
-    # Check in-memory first (fastest)
     with _cache_lock:
         e = _cache.get(sport)
         if e is not None:
             return e["results"], time.time() - e["ts"]
 
-    # Check persistent Supabase cache
-    db_results = cache_manager.get_cached_scan(sport, cache_minutes=60)
+    db_results = cache_manager.get_cached_scan(sport, cache_minutes=PERSISTENT_CACHE_MINUTES)
     if db_results:
-        # Warm in-memory cache with DB data
         with _cache_lock:
             _cache[sport] = {"results": db_results, "ts": time.time()}
         logger.info("[scan_cache] Warmed memory from DB: %s", sport)
-        return db_results, 0  # Treat as fresh since we just loaded it
+        return db_results, 0
 
     return None, None
 
 
 def put(sport, results):
-    """
-    Store results in cache (both memory and persistent DB).
-    """
-    # Write to in-memory cache
+    """Store results in cache (both memory and persistent DB)."""
     with _cache_lock:
         _cache[sport] = {"results": results, "ts": time.time()}
 
-    # Write to persistent Supabase cache (async, don't block on errors)
     try:
         cache_manager.cache_scan(sport, results)
     except Exception as e:
@@ -136,11 +128,37 @@ def request_refresh(*sports):
     _wake.set()
 
 
+def request_refresh_if_stale(*sports):
+    """Queue sports for refresh only if their cache is older than STALE_THRESHOLD.
+    Prevents burning API calls when data is still fresh."""
+    import api_budget
+    if not api_budget.check_budget():
+        logger.info("[scan_cache] Budget exhausted — skipping refresh request")
+        return
+
+    to_refresh = []
+    for sport in sports:
+        with _cache_lock:
+            e = _cache.get(sport)
+        if e is None or (time.time() - e["ts"]) > STALE_THRESHOLD:
+            to_refresh.append(sport)
+
+    if to_refresh:
+        request_refresh(*to_refresh)
+
+
 def _scan(sport):
-    """Run scan_all_games, cache results, sync to pick curation, fetch closing lines."""
+    """Run scan_all_games and cache results. Lightweight — no props or closing lines."""
     import gc
     from game_scanner import scan_all_games
     import pick_curation
+
+    # Check budget before scanning (scans make Odds API calls internally)
+    import api_budget
+    if not api_budget.check_budget():
+        logger.warning("[scan_cache] Budget exhausted — skipping %s scan", sport)
+        return None
+
     try:
         results = scan_all_games(sport)
         put(sport, results)
@@ -148,39 +166,6 @@ def _scan(sport):
             pick_curation.sync_picks_from_scan(results, sport)
         except Exception:
             pass
-        # Progressively capture closing lines as games approach
-        try:
-            import tracker
-            cl_result = tracker.fetch_closing_lines(sport)
-            cl_updated = cl_result.get("updated", 0) if cl_result else 0
-            if cl_updated > 0:
-                logger.info("[scan_cache] Close lines for %s: %d updated", sport, cl_updated)
-        except Exception:
-            pass
-        # Fetch closing lines for tracked bets (bet_tracker)
-        try:
-            import bet_tracker
-            bet_tracker.fetch_closing_lines_for_bets(sport)
-        except Exception:
-            pass
-        # Pre-warm props cache for props-eligible sports
-        if sport in ("nba", "nhl", "cbb", "mlb"):
-            try:
-                from game_scanner import get_top_props
-                props = get_top_props(sport)
-                cache_manager.cache_props(sport, props)
-                logger.info("[scan_cache] Pre-warmed props for %s: %d props", sport, len(props))
-            except Exception:
-                logger.warning("[scan_cache] Props pre-warm failed for %s", sport)
-
-            # Pre-warm EV props (reuses base props from cache — just adds math)
-            try:
-                from game_scanner import get_top_props_with_ev
-                ev_props = get_top_props_with_ev(sport)
-                cache_manager.cache_props(f"{sport}_ev", ev_props)
-                logger.info("[scan_cache] Pre-warmed EV props for %s: %d props", sport, len(ev_props))
-            except Exception:
-                logger.warning("[scan_cache] EV props pre-warm failed for %s", sport)
         logger.info("[scan_cache] Refreshed %s: %d games", sport, len(results))
         gc.collect()
         return results
@@ -188,21 +173,6 @@ def _scan(sport):
         logger.warning("[scan_cache] %s scan failed: %s", sport, e)
         gc.collect()
         return None
-
-
-def _scan_sports_parallel(sports):
-    """Scan multiple sports in parallel batches of SCAN_PARALLEL with stagger between batches."""
-    from concurrent.futures import ThreadPoolExecutor
-    for i in range(0, len(sports), SCAN_PARALLEL):
-        batch = sports[i:i + SCAN_PARALLEL]
-        if len(batch) == 1:
-            _scan(batch[0])
-        else:
-            with ThreadPoolExecutor(max_workers=SCAN_PARALLEL) as pool:
-                list(pool.map(_scan, batch))
-        # Stagger between batches (not after the last one)
-        if i + SCAN_PARALLEL < len(sports):
-            time.sleep(STAGGER_DELAY)
 
 
 def _seconds_until_next_daily():
@@ -215,15 +185,15 @@ def _seconds_until_next_daily():
 
 
 def _loop():
-    """Background: refresh on demand, periodically, and daily at 6 AM EST."""
+    """Background: process on-demand queue + daily 6 AM refresh of active sports."""
     next_daily = time.monotonic() + _seconds_until_next_daily()
 
     while True:
-        wait_time = min(BG_INTERVAL, max(0, next_daily - time.monotonic()))
+        wait_time = max(0, next_daily - time.monotonic())
         _wake.wait(timeout=wait_time)
         _wake.clear()
 
-        # Drain priority queue first
+        # Drain priority queue
         while True:
             with _queue_lock:
                 if not _queue:
@@ -231,29 +201,23 @@ def _loop():
                 sport = _queue.pop(0)
             _scan(sport)
 
-        # Daily 6 AM EST: pre-scan all sports for the day
+        # Daily 6 AM EST: refresh only actively-cached sports (not all 6)
         if time.monotonic() >= next_daily:
-            logger.info("[scan_cache] Daily 6 AM EST refresh — scanning all sports")
-            _scan_sports_parallel(list(ALL_SPORTS))
-            # Auto-grade all tracked bets after daily scan
+            with _cache_lock:
+                active_sports = list(_cache.keys())
+            if active_sports:
+                logger.info("[scan_cache] Daily 6 AM refresh for active sports: %s", active_sports)
+                for sport in active_sports:
+                    _scan(sport)
+            # Auto-grade tracked bets
             try:
                 import bet_tracker
                 bet_tracker.grade_all_tracked_bets()
             except Exception:
                 pass
+            # Cleanup old DB cache entries
+            try:
+                cache_manager.clear_old_cache_entries(hours=24)
+            except Exception:
+                pass
             next_daily = time.monotonic() + _seconds_until_next_daily()
-            continue  # skip hourly refresh since we just did everything
-
-        # Periodic: refresh all sports every hour (2 at a time)
-        _scan_sports_parallel(list(ALL_SPORTS))
-        # Auto-grade after hourly refresh to catch late-finishing games
-        try:
-            import bet_tracker
-            bet_tracker.grade_all_tracked_bets()
-        except Exception:
-            pass
-        # Cleanup old DB cache entries (keep last 24 hours)
-        try:
-            cache_manager.clear_old_cache_entries(hours=24)
-        except Exception:
-            pass

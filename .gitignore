@@ -11,3 +11,4 @@ nul
 .scan_cache_lock
 .soccer_api_budget.json
 .soccer_api_cache.json
+.odds_api_budget.json

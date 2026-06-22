@@ -3,11 +3,15 @@
 
 import time
 import threading
+import logging
 import requests
 
+logger = logging.getLogger(__name__)
+
 # ─── TTL Response Cache ─────────────────────────────────────────────────────
-CACHE_TTL = 600  # 10 minutes — ESPN data barely changes; reduces re-fetches during scans
-CACHE_MAX_SIZE = 200  # Reduced from 500 to limit memory on constrained servers
+CACHE_TTL = 600        # 10 minutes for free APIs (ESPN, etc.)
+ODDS_API_TTL = 14400   # 4 hours for The Odds API (500 calls/month budget)
+CACHE_MAX_SIZE = 200
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -15,15 +19,27 @@ _cache_lock = threading.Lock()
 def _cached_request(url, params=None, timeout=10, headers=None):
     """
     Thread-safe cached HTTP GET. Returns parsed JSON or None.
-    Cache key = URL + sorted query params. TTL = CACHE_TTL seconds.
+    Cache key = URL + sorted query params.
+    Uses 4-hour TTL for Odds API, 10-minute TTL for free APIs.
+    Checks daily budget before making paid API calls.
     """
     key = url + "|" + str(sorted((params or {}).items()))
     now = time.time()
 
+    is_paid = "the-odds-api.com" in url
+    ttl = ODDS_API_TTL if is_paid else CACHE_TTL
+
     with _cache_lock:
         entry = _cache.get(key)
-        if entry and (now - entry["ts"]) < CACHE_TTL:
+        if entry and (now - entry["ts"]) < ttl:
             return entry["data"]
+
+    # Check budget before making paid API calls
+    if is_paid:
+        import api_budget
+        if not api_budget.check_budget():
+            logger.warning("[cache] Odds API daily budget exhausted — returning None")
+            return None
 
     try:
         response = requests.get(url, params=params, timeout=timeout, headers=headers)
@@ -32,6 +48,11 @@ def _cached_request(url, params=None, timeout=10, headers=None):
         data = response.json()
     except (requests.RequestException, ValueError):
         return None
+
+    # Record the call for budget tracking
+    if is_paid:
+        import api_budget
+        api_budget.record_call()
 
     with _cache_lock:
         _cache[key] = {"data": data, "ts": time.time()}

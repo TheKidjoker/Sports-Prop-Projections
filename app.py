@@ -408,8 +408,8 @@ def api_games():
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
 
-        # Signal visitor arrival — wake background cache refresh
-        scan_cache.request_refresh(sport)
+        # Signal visitor arrival — only refresh if cache is stale (>4h)
+        scan_cache.request_refresh_if_stale(sport)
 
         games, slate = _get_games_with_transition(sport)
         result = []
@@ -477,7 +477,7 @@ def api_scan():
                     missing.append(s)
 
             if not missing:
-                scan_cache.request_refresh(*sports)
+                scan_cache.request_refresh_if_stale(*sports)
             else:
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     futures = {pool.submit(scan_all_games, s): s for s in missing}
@@ -505,9 +505,9 @@ def api_scan():
         # Check cache first
         cached, age = scan_cache.get(sport)
         if cached is not None:
-            scan_cache.request_refresh(sport)
+            scan_cache.request_refresh_if_stale(sport)
             cache_age_min = round(age / 60) if age else 0
-            freshness = "fresh" if cache_age_min < 30 else ("aging" if cache_age_min < 120 else "stale")
+            freshness = "fresh" if cache_age_min < 60 else ("aging" if cache_age_min < 240 else "stale")
             games = _apply_approval_filter(cached, sport, is_admin, featured_only)
             if games is None:
                 return jsonify({"success": True, "games": [],
@@ -529,7 +529,6 @@ def api_scan():
             _time.sleep(0.5)
             cached, age = scan_cache.get(sport)
             if cached is not None:
-                scan_cache.request_refresh(sport)
                 games = _apply_approval_filter(cached, sport, is_admin, featured_only)
                 if games is None:
                     return jsonify({"success": True, "games": [],
@@ -2379,6 +2378,18 @@ def api_scheduler_status():
         return jsonify({"success": True, **status})
     except ImportError:
         return jsonify({"success": True, "enabled": False, "jobs": [], "message": "Scheduler not available"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/budget", methods=["GET"])
+@require_auth
+def api_budget_status():
+    """Return Odds API usage budget status."""
+    try:
+        import api_budget
+        usage = api_budget.get_usage()
+        return jsonify({"success": True, **usage})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
