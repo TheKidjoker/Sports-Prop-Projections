@@ -105,6 +105,28 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.4" },
         },
+        "jarvis-scan": {
+          "0%": { transform: "translateY(-100%)", opacity: "0" },
+          "10%": { opacity: "0.6" },
+          "90%": { opacity: "0.6" },
+          "100%": { transform: "translateY(100vh)", opacity: "0" },
+        },
+        "glow-pulse": {
+          "0%, 100%": { boxShadow: "0 0 4px hsla(0, 72%, 51%, 0.2)" },
+          "50%": { boxShadow: "0 0 16px hsla(0, 72%, 51%, 0.4)" },
+        },
+        "tracer-line": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "boot-text": {
+          "0%, 100%": { opacity: "0.4" },
+          "50%": { opacity: "1" },
+        },
+        "hex-pulse": {
+          "0%, 100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.05)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -113,6 +135,11 @@ export default {
         "fade-up": "fade-up 0.4s ease-out forwards",
         "ticker-scroll": "ticker-scroll 50s linear infinite",
         "pulse-dot": "pulse-dot 2s ease-in-out infinite",
+        "jarvis-scan": "jarvis-scan 4s ease-in-out infinite",
+        "glow-pulse": "glow-pulse 3s ease-in-out infinite",
+        "tracer-line": "tracer-line 3s linear infinite",
+        "boot-text": "boot-text 1.5s ease-in-out infinite",
+        "hex-pulse": "hex-pulse 2s ease-in-out infinite",
       },
     },
   },

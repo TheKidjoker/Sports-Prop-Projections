@@ -20,15 +20,9 @@ from test_model import db as tm_db
 
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 
-# The Odds API sport keys
-ODDS_API_SPORT_KEYS = {
-    "nba": "basketball_nba",
-    "nhl": "icehockey_nhl",
-    "nfl": "americanfootball_nfl",
-    "cfb": "americanfootball_ncaaf",
-    "cbb": "basketball_ncaab",
-    "soccer": "soccer_epl",
-}
+# The Odds API sport keys — sourced from sport_registry
+from sport_registry import get_odds_api_sport_map
+ODDS_API_SPORT_KEYS = get_odds_api_sport_map()
 
 # Season date ranges by sport (approximate)
 SEASON_RANGES = {

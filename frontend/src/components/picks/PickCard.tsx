@@ -4,36 +4,25 @@ import { motion } from "framer-motion";
 import {
   Zap, RefreshCw, BarChart3, Target, AlertTriangle, Cloud, Users, Clock, Plus,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { approvePick, rejectPick } from "@/lib/api";
+import { GaugeRing } from "@/components/jarvis/GaugeRing";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { CHART_COLORS } from "@/lib/chart-theme";
 import type { PickData, Tier, SportLower } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
 
 export type { PickData, Tier };
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  rest: RefreshCw,
-  chart: BarChart3,
-  target: Target,
-  alert: AlertTriangle,
-  cloud: Cloud,
-  users: Users,
-  clock: Clock,
-  zap: Zap,
+  rest: RefreshCw, chart: BarChart3, target: Target, alert: AlertTriangle,
+  cloud: Cloud, users: Users, clock: Clock, zap: Zap,
 };
 
-const tierBadgeVariant: Record<Tier, "strong" | "confident" | "lean" | "monitor"> = {
-  "STRONG PLAY": "strong",
-  CONFIDENT: "confident",
-  LEAN: "lean",
-  MONITOR: "monitor",
-};
-
-const tierBorderClass: Record<Tier, string> = {
-  "STRONG PLAY": "border-l-tier-strong",
-  CONFIDENT: "border-l-tier-confident",
-  LEAN: "border-l-tier-lean",
-  MONITOR: "border-l-tier-monitor",
+const tierColors: Record<Tier, string> = {
+  "STRONG PLAY": CHART_COLORS.crimson,
+  CONFIDENT: CHART_COLORS.gold,
+  LEAN: CHART_COLORS.foreground,
+  MONITOR: CHART_COLORS.muted,
 };
 
 interface PickCardProps {
@@ -44,8 +33,7 @@ interface PickCardProps {
 }
 
 export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardProps) {
-  const badgeVariant = tierBadgeVariant[pick.tier] ?? "monitor";
-  const borderClass = tierBorderClass[pick.tier] ?? "border-l-tier-monitor";
+  const color = tierColors[pick.tier] ?? CHART_COLORS.muted;
   const queryClient = useQueryClient();
   const [approveState, setApproveState] = useState<"idle" | "loading" | "done">("idle");
   const [rejectState, setRejectState] = useState<"idle" | "loading" | "done">("idle");
@@ -58,10 +46,7 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       setApproveState("done");
       queryClient.invalidateQueries({ queryKey: ["pending-picks"] });
       queryClient.invalidateQueries({ queryKey: ["scan", pick.sport] });
-    } catch (e) {
-      console.error("Approve failed:", e);
-      setApproveState("idle");
-    }
+    } catch { setApproveState("idle"); }
   };
 
   const handleReject = async () => {
@@ -72,30 +57,20 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       setRejectState("done");
       queryClient.invalidateQueries({ queryKey: ["pending-picks"] });
       queryClient.invalidateQueries({ queryKey: ["scan", pick.sport] });
-    } catch (e) {
-      console.error("Reject failed:", e);
-      setRejectState("idle");
-    }
+    } catch { setRejectState("idle"); }
   };
 
   const handleTrack = () => {
     if (!onTrackBet || !pick.eventId || !pick.sport) return;
-    // Parse spread number from spreadLine (e.g. "Lakers +6.5" → 6.5)
     const spreadMatch = pick.spreadLine.match(/([+-]?\d+\.?\d*)/);
     const line = spreadMatch ? parseFloat(spreadMatch[1]) : 0;
     onTrackBet({
-      event_id: pick.eventId,
-      sport: pick.sport,
-      type: "spread",
-      team: pick.spreadLine.split(/\s[+-]/)[0] || pick.awayTeam,
-      line,
+      event_id: pick.eventId, sport: pick.sport, type: "spread",
+      team: pick.spreadLine.split(/\s[+-]/)[0] || pick.awayTeam, line,
       label: `${pick.awayTeam} @ ${pick.homeTeam} — ${pick.spreadLine}`,
-      home_team: pick.homeTeam,
-      away_team: pick.awayTeam,
-      recommendation: pick.tier,
-      cover_pct: pick.coverPct,
-      slot_type: pick.slotType,
-      action: pick.actionString,
+      home_team: pick.homeTeam, away_team: pick.awayTeam,
+      recommendation: pick.tier, cover_pct: pick.coverPct,
+      slot_type: pick.slotType, action: pick.actionString,
     });
   };
 
@@ -103,21 +78,16 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.06, duration: 0.35 }}
-      className={`card-surface rounded-sm ${borderClass} transition-all duration-200 group hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_hsla(0,72%,51%,0.15)]`}
+      transition={{ delay: index * 0.05, duration: 0.3 }}
+      className="hud-panel group transition-all duration-200 hover:translate-y-[-2px]"
+      style={{ borderLeftWidth: 3, borderLeftColor: color, borderLeftStyle: "solid" }}
     >
-      {/* Header row */}
+      {/* Header: Tier badge + Confidence gauge */}
       <div className="flex items-center justify-between px-3 sm:px-4 pt-3 pb-2">
-        <Badge variant={badgeVariant}>
-          {pick.tier}
-        </Badge>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-sm text-foreground">
-            {pick.coverPct.toFixed(1)}%
-          </span>
-          <span className="text-[10px] text-muted-foreground font-mono">
-            score:{pick.compositeScore}
-          </span>
+        <HexBadge label={pick.tier} color={color} size="md" active />
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[10px] text-muted-foreground">score:{pick.compositeScore}</span>
+          <GaugeRing value={pick.coverPct} max={100} label="" unit="%" size={48} color={color} />
         </div>
       </div>
 
@@ -125,22 +95,18 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       <div className="px-3 sm:px-4 pb-2">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5">
           <span className="font-heading text-base sm:text-lg tracking-wider text-foreground">
-            {pick.awayTeam}{" "}
-            <span className="text-muted-foreground text-sm">@</span>{" "}
-            {pick.homeTeam}
+            {pick.awayTeam} <span className="text-muted-foreground text-sm">@</span> {pick.homeTeam}
           </span>
-          <div className="flex items-center gap-2 text-right">
-            <span className="text-xs text-muted-foreground">{pick.gameTime}</span>
-            {pick.slotType && (
-              <span className="text-[10px] text-muted-foreground">{pick.slotType}</span>
-            )}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">{pick.gameTime}</span>
+            {pick.slotType && <span className="text-[10px] text-muted-foreground">{pick.slotType}</span>}
           </div>
         </div>
         {pick.spreadLine && (
-          <p className="text-xs text-muted-foreground">
+          <p className="font-mono-nums text-sm text-foreground mt-0.5">
             {pick.spreadLine}
             {pick.bestLine && pick.bestLine.spread !== undefined && (
-              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-success/10 text-success border border-success/20">
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono" style={{ background: `${CHART_COLORS.green}15`, color: CHART_COLORS.green, border: `1px solid ${CHART_COLORS.green}30` }}>
                 Best: {pick.bestLine.book} {pick.bestLine.spread > 0 ? "+" : ""}{pick.bestLine.spread}
                 {pick.bestLine.spread_odds ? ` ${pick.bestLine.spread_odds}` : ""}
               </span>
@@ -150,7 +116,7 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
       </div>
 
       {/* Action string */}
-      <div className="px-3 sm:px-4 py-2 border-t border-b border-border/50 bg-muted/20">
+      <div className="mx-3 sm:mx-4 py-2 mb-2" style={{ borderLeft: `2px solid ${color}`, paddingLeft: 12, background: "hsla(240,15%,7%,0.5)" }}>
         {pick.actionString ? (
           <p className="text-xs sm:text-sm text-foreground font-medium leading-snug">&ldquo;{pick.actionString}&rdquo;</p>
         ) : pick.spreadLine ? (
@@ -158,63 +124,51 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
             {pick.tier !== "MONITOR" ? `${pick.tier}: ` : ""}Lean {pick.spreadLine} — {pick.coverPct.toFixed(1)}% confidence
           </p>
         ) : (
-          <p className="text-xs text-muted-foreground italic">
-            Spread not yet available — {pick.coverPct.toFixed(1)}% model confidence
-          </p>
+          <p className="text-xs text-muted-foreground italic">Spread not yet available — {pick.coverPct.toFixed(1)}% model confidence</p>
         )}
       </div>
 
       {/* Factor pills */}
-      <div className="px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap gap-1.5 sm:gap-2">
+      <div className="px-3 sm:px-4 py-2 flex flex-wrap gap-1.5">
         {pick.factors.map((factor, i) => {
           const IconComponent = iconMap[factor.icon];
+          const isPositive = factor.points > 0;
+          const isNegative = factor.points < 0;
           return (
             <span
               key={i}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-sm text-[10px] font-mono border ${
-                factor.points > 0
-                  ? "bg-success/10 text-success border-success/20"
-                  : factor.points < 0
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : "bg-muted text-muted-foreground border-border"
-              }`}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono border transition-all"
+              style={{
+                background: isPositive ? `${CHART_COLORS.green}15` : isNegative ? `${CHART_COLORS.crimson}15` : "hsla(240,10%,12%,1)",
+                color: isPositive ? CHART_COLORS.green : isNegative ? CHART_COLORS.crimson : CHART_COLORS.muted,
+                borderColor: isPositive ? `${CHART_COLORS.green}30` : isNegative ? `${CHART_COLORS.crimson}30` : "hsla(0,30%,12%,0.6)",
+                boxShadow: isPositive ? `0 0 6px ${CHART_COLORS.green}20` : "none",
+                clipPath: "polygon(4px 0, calc(100% - 4px) 0, 100% 50%, calc(100% - 4px) 100%, 4px 100%, 0 50%)",
+              }}
             >
-              {IconComponent ? (
-                <IconComponent className="w-2.5 h-2.5" />
-              ) : (
-                factor.icon
-              )}{" "}
-              {factor.label}
+              {IconComponent ? <IconComponent className="w-2.5 h-2.5" /> : factor.icon}
+              {" "}{factor.label}
               {factor.unvalidated && <Zap className="w-2.5 h-2.5 text-warning" />}
-              <span className="font-semibold">
-                {factor.points > 0 ? "+" : ""}
-                {factor.points}
-              </span>
+              <span className="font-semibold">{factor.points > 0 ? "+" : ""}{factor.points}</span>
             </span>
           );
         })}
       </div>
 
       {/* Footer */}
-      <div className="px-3 sm:px-4 pb-3 flex items-center justify-between">
+      <div className="px-3 sm:px-4 pb-3 pt-1 flex items-center justify-between border-t border-border/30">
         <div className="flex items-center gap-3">
-          {pick.moneyline && (
-            <span className="text-[10px] font-mono text-muted-foreground">
-              ML: {pick.moneyline}
-            </span>
-          )}
+          {pick.moneyline && <span className="text-[10px] font-mono text-muted-foreground">ML: {pick.moneyline}</span>}
           {pick.hasUnvalidated && (
-            <span className="text-[10px] text-warning flex items-center gap-1">
-              <Zap className="w-3 h-3" /> Includes unvalidated
-            </span>
+            <span className="text-[10px] text-warning flex items-center gap-1"><Zap className="w-3 h-3" /> Unvalidated</span>
           )}
         </div>
-
         <div className="flex items-center gap-1">
           {onTrackBet && pick.eventId && (
             <button
               onClick={handleTrack}
-              className="px-2 py-1 text-[10px] font-heading bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors flex items-center gap-1"
+              className="px-3 py-1 text-[10px] font-heading tracking-wider text-secondary border border-secondary/30 hover:bg-secondary/15 transition-colors flex items-center gap-1"
+              style={{ clipPath: "polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px)" }}
             >
               <Plus className="w-2.5 h-2.5" /> TRACK
             </button>
@@ -225,18 +179,10 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
             <span className="text-[10px] font-heading text-success tracking-wider">APPROVED</span>
           ) : isAdmin ? (
             <>
-              <button
-                onClick={handleApprove}
-                disabled={approveState === "loading" || rejectState === "loading"}
-                className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 rounded-sm hover:bg-success/25 transition-colors disabled:opacity-50"
-              >
+              <button onClick={handleApprove} disabled={approveState === "loading" || rejectState === "loading"} className="px-2 py-1 text-[10px] font-heading bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-colors disabled:opacity-50">
                 {approveState === "loading" ? "..." : "APPROVE"}
               </button>
-              <button
-                onClick={handleReject}
-                disabled={approveState === "loading" || rejectState === "loading"}
-                className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors disabled:opacity-50"
-              >
+              <button onClick={handleReject} disabled={approveState === "loading" || rejectState === "loading"} className="px-2 py-1 text-[10px] font-heading bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors disabled:opacity-50">
                 {rejectState === "loading" ? "..." : "REJECT"}
               </button>
             </>

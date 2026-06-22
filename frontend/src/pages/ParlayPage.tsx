@@ -7,6 +7,10 @@ import {
 } from "@/components/picks/ParlayBuilder";
 import { LogoLoader } from "@/components/ui/LogoLoader";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { StatusIndicator } from "@/components/jarvis/StatusIndicator";
+import { CHART_COLORS } from "@/lib/chart-theme";
 
 interface ParlayPageProps {
   onTrackBet?: (bet: BetSlipItem) => void;
@@ -45,63 +49,76 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
 
   // Loading state: scan still running
   if (scanLoading) {
-    return <LogoLoader text="SCANNING ALL SPORTS..." />;
+    return <LogoLoader text="SCANNING ALL THEATRES..." />;
   }
 
   // Error state
   if (scanError) {
     return (
-      <div className="py-6 px-6 max-w-5xl mx-auto">
-        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm">
-          <span className="text-xs text-primary font-mono">
-            Error: {scanError instanceof Error ? scanError.message : "Unknown error"}
+      <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto">
+        <HudPanel title="STRIKE OPS ERROR" status="error">
+          <span className="text-xs font-mono" style={{ color: CHART_COLORS.crimson }}>
+            {scanError instanceof Error ? scanError.message : "Unknown error"}
           </span>
-        </div>
+        </HudPanel>
       </div>
     );
   }
 
   return (
-    <div className="py-6 px-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="font-heading text-xl tracking-wider text-foreground">
-            CROSS-SPORT <span className="text-secondary">PARLAYS</span>
+          <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
+            Strike Operations{" "}
+            <span style={{ color: CHART_COLORS.crimson }}>/ Cross-Sport Parlays</span>
           </h2>
-          <span className="text-[9px] font-heading px-1.5 py-0.5 border rounded-sm bg-success/15 text-success border-success/30">
-            PROPS VALIDATED
-          </span>
+        </div>
+
+        <button
+          onClick={() => triggerScan()}
+          disabled={scanLoading}
+          className="hud-btn px-3 py-1.5 text-[10px] font-heading tracking-widest uppercase flex items-center gap-1.5"
+          style={{
+            borderColor: `${CHART_COLORS.crimson}50`,
+            color: CHART_COLORS.crimson,
+            background: `${CHART_COLORS.crimson}10`,
+          }}
+        >
+          <RefreshCw className="w-3 h-3" />
+          RESCAN
+        </button>
+      </div>
+
+      {/* ── Props loading status ── */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <HexBadge
+            label={`${allPicks.length} PICKS`}
+            color={CHART_COLORS.gold}
+            size="md"
+            active={allPicks.length > 0}
+          />
+          <HexBadge
+            label={`${parlays.length} PARLAYS`}
+            color={CHART_COLORS.green}
+            size="md"
+            active={parlays.length > 0}
+          />
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => triggerScan()}
-            disabled={scanLoading}
-            className="px-3 py-1.5 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <RefreshCw className="w-3 h-3" />
-            RESCAN
-          </button>
+          {propsLoading && (
+            <StatusIndicator status="warning" label={`LOADING PROPS ${propsComplete}/${propsTotal}`} />
+          )}
+          {!propsLoading && propsComplete > 0 && (
+            <StatusIndicator status="online" label="ALL PROPS LOADED" />
+          )}
         </div>
       </div>
 
-      <div className="flex items-center justify-end mb-4">
-        {/* Props loading indicator */}
-        {propsLoading && (
-          <span className="text-[10px] font-heading tracking-wider text-muted-foreground animate-pulse">
-            LOADING PLAYER PROPS... {propsComplete}/{propsTotal} SPORTS
-          </span>
-        )}
-
-        {!propsLoading && propsComplete > 0 && (
-          <span className="text-[10px] font-heading tracking-wider text-success">
-            ALL PROPS LOADED
-          </span>
-        )}
-      </div>
-
-      {/* Parlays grid */}
+      {/* ── Parlays Grid ── */}
       {parlays.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {parlays.map((parlay) => (
@@ -113,13 +130,13 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
           ))}
         </div>
       ) : (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider">
+        <HudPanel title="NO STRIKE PACKAGES" status="offline">
+          <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-8">
             {allPicks.length === 0
-              ? "No games found across any sport"
-              : "No parlays meet confidence thresholds"}
+              ? "No actionable games across any theatre of operations"
+              : "No parlay combinations meet confidence thresholds"}
           </p>
-        </div>
+        </HudPanel>
       )}
     </div>
   );

@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { HexBadge } from "@/components/jarvis/HexBadge";
 import type { Sport } from "@/lib/types";
 
 export type { Sport };
 
-interface SportConfig {
+export interface SportConfig {
   id: Sport;
   label: string;
   subtitle: string;
@@ -23,10 +22,14 @@ export const SPORTS: SportConfig[] = [
   { id: "SOCCER", label: "SOCCER", subtitle: "Gotham Pitch", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
 ];
 
-const confidenceDotColor = {
-  validated: "bg-success",
-  experimental: "bg-warning",
-  limited: "bg-primary",
+const sportColors: Record<string, string> = {
+  NHL: "hsl(200, 70%, 50%)",
+  NBA: "hsl(43, 76%, 38%)",
+  MLB: "hsl(0, 72%, 51%)",
+  NFL: "hsl(142, 71%, 45%)",
+  CFB: "hsl(280, 60%, 55%)",
+  CBB: "hsl(30, 80%, 50%)",
+  SOCCER: "hsl(120, 50%, 40%)",
 };
 
 interface SportPillsProps {
@@ -36,63 +39,31 @@ interface SportPillsProps {
 }
 
 export function SportPills({ selected, onSelect, gameCounts }: SportPillsProps) {
-  const [hoveredSport, setHoveredSport] = useState<Sport | null>(null);
-
   return (
-    <div className="flex items-center gap-1">
-      <button
+    <div className="flex items-center gap-1 flex-wrap">
+      <HexBadge
+        label="ALL"
+        size="md"
+        active={selected === null}
+        color="hsl(0, 72%, 51%)"
         onClick={() => onSelect(null)}
-        className={`px-3 py-1.5 text-xs font-heading tracking-wider transition-all duration-200 rounded-sm ${
-          selected === null
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:text-foreground hover:bg-accent"
-        }`}
-      >
-        ALL
-      </button>
+      />
       {SPORTS.map((sport) => {
         const count = gameCounts?.[sport.id] ?? sport.gamesCount;
         return (
-          <div
-            key={sport.id}
-            className="relative"
-            onMouseEnter={() => setHoveredSport(sport.id)}
-            onMouseLeave={() => setHoveredSport(null)}
-          >
-            <button
+          <div key={sport.id} className="relative">
+            <HexBadge
+              label={sport.label}
+              size="md"
+              active={selected === sport.id}
+              color={sportColors[sport.id] ?? "hsl(0, 72%, 51%)"}
               onClick={() => onSelect(sport.id === selected ? null : sport.id)}
-              className={`px-3 py-1.5 text-xs font-heading tracking-wider transition-all duration-200 rounded-sm flex items-center gap-1.5 ${
-                selected === sport.id
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${confidenceDotColor[sport.confidence]} ${
-                  sport.confidence === "limited" ? "" : "animate-pulse-dot"
-                }`}
-              />
-              {sport.label}
-              {count > 0 && (
-                <span className="text-[9px] text-muted-foreground font-mono">
-                  {count}
-                </span>
-              )}
-            </button>
-
-            <AnimatePresence>
-              {hoveredSport === sport.id && (
-                <motion.div
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-2 glass rounded-sm text-xs whitespace-nowrap z-50"
-                >
-                  <p className="text-foreground font-medium">{sport.subtitle}</p>
-                  <p className="text-muted-foreground">{sport.confidenceLabel}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            />
+            {count > 0 && (
+              <span className="absolute -top-1 -right-1 text-[7px] font-mono text-foreground bg-muted border border-border rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                {count}
+              </span>
+            )}
           </div>
         );
       })}

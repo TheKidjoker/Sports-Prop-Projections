@@ -8,8 +8,31 @@ import { ScanPanel } from "@/components/test-model/ScanPanel";
 import { RulesPanel } from "@/components/test-model/RulesPanel";
 import { TmLegend } from "@/components/test-model/TmLegend";
 import type { Sport, SportLower } from "@/lib/types";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { CHART_COLORS } from "@/lib/chart-theme";
 
 const SPORTS: Sport[] = ["NBA", "NHL", "MLB", "NFL", "CFB", "CBB"];
+
+/* ── per-sport hex badge colors ── */
+const sportHexColor: Record<string, string> = {
+  NBA: CHART_COLORS.crimson,
+  NHL: "#60a5fa",
+  MLB: CHART_COLORS.green,
+  NFL: CHART_COLORS.gold,
+  CFB: "#f97316",
+  CBB: "#c084fc",
+};
+
+/* ── Tab definitions ── */
+const TABS = [
+  { value: "scan",        label: "TODAY'S MODEL" },
+  { value: "backtest",    label: "BACKTEST" },
+  { value: "rules",       label: "RULES REPLAY" },
+  { value: "calibration", label: "CALIBRATION" },
+  { value: "collection",  label: "DATA" },
+  { value: "metrics",     label: "METRICS" },
+] as const;
 
 interface TestModelPageProps {
   sport: Sport | null;
@@ -20,49 +43,47 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
   const lowerSport = tmSport.toLowerCase() as SportLower;
 
   return (
-    <div className="py-4 sm:py-6 px-3 sm:px-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4 sm:mb-6">
-        <h2 className="font-heading text-lg sm:text-xl tracking-wider text-foreground">
-          TEST <span className="text-primary">MODEL</span>
+    <div className="py-4 sm:py-6 px-3 sm:px-6 max-w-6xl mx-auto space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
+          Diagnostics{" "}
+          <span style={{ color: CHART_COLORS.crimson }}>/ Model Laboratory</span>
         </h2>
       </div>
 
-      {/* Sport switcher pills */}
-      <div className="flex items-center gap-1 sm:gap-1.5 mb-4 sm:mb-6 overflow-x-auto">
+      {/* ── Sport Switcher (HexBadge row) ── */}
+      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1">
         {SPORTS.map((s) => (
-          <button
+          <HexBadge
             key={s}
+            label={s}
+            color={sportHexColor[s] ?? CHART_COLORS.muted}
+            size="md"
+            active={tmSport === s}
             onClick={() => setTmSport(s)}
-            className={`px-3 py-1.5 text-xs font-heading tracking-wider rounded-sm transition-colors ${
-              tmSport === s
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
-            }`}
-          >
-            {s}
-          </button>
+          />
         ))}
       </div>
 
+      {/* ── Command Tabs ── */}
       <Tabs defaultValue="scan" className="space-y-4">
-        <TabsList className="bg-muted/50 border border-border rounded-sm h-auto flex-wrap gap-0.5 p-1">
-          {([
-            ["scan", "TODAY'S MODEL"],
-            ["backtest", "BACKTEST"],
-            ["rules", "RULES REPLAY"],
-            ["calibration", "CALIBRATION"],
-            ["collection", "DATA"],
-            ["metrics", "METRICS"],
-          ] as const).map(([val, label]) => (
-            <TabsTrigger
-              key={val}
-              value={val}
-              className="text-[10px] sm:text-xs font-heading tracking-wider data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-sm px-2 sm:px-3 py-1 sm:py-1.5"
-            >
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <HudPanel>
+          <TabsList className="bg-transparent border-0 h-auto flex-wrap gap-1 p-0">
+            {TABS.map(({ value, label }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="text-[9px] sm:text-[10px] font-heading tracking-widest uppercase px-3 sm:px-4 py-1.5 border transition-all rounded-none
+                  data-[state=inactive]:border-white/[0.06] data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground
+                  data-[state=active]:border-[hsla(0,72%,51%,0.5)] data-[state=active]:bg-[hsla(0,72%,51%,0.1)] data-[state=active]:text-[hsl(0,72%,51%)]"
+                style={{ clipPath: "polygon(6% 0%, 94% 0%, 100% 50%, 94% 100%, 6% 100%, 0% 50%)" }}
+              >
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </HudPanel>
 
         <TabsContent value="scan">
           <ScanPanel key={lowerSport} sport={lowerSport} />
@@ -89,9 +110,11 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
         </TabsContent>
       </Tabs>
 
-      {/* Legend at bottom */}
-      <div className="mt-8">
-        <TmLegend />
+      {/* ── Legend ── */}
+      <div className="mt-6">
+        <HudPanel title="SYSTEM LEGEND" status="online">
+          <TmLegend />
+        </HudPanel>
       </div>
     </div>
   );

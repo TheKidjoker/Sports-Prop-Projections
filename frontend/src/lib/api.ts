@@ -96,6 +96,15 @@ async function del<T>(url: string): Promise<T> {
   return res.json();
 }
 
+function buildQueryString(params: Record<string, string | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) qs.set(key, value);
+  }
+  const str = qs.toString();
+  return str ? `?${str}` : "";
+}
+
 // ─── Auth ──────────────────────────────────────────────
 export function fetchAuthConfig() {
   return get<AuthConfig>("/api/auth/config");
@@ -130,12 +139,7 @@ export function fetchTopProps(sport: SportLower) {
 
 // ─── Dashboard ─────────────────────────────────────────
 export function fetchDashboard(sport?: SportLower, startDate?: string, endDate?: string) {
-  const params = new URLSearchParams();
-  if (sport) params.set("sport", sport);
-  if (startDate) params.set("start_date", startDate);
-  if (endDate) params.set("end_date", endDate);
-  const qs = params.toString();
-  return get<DashboardResponse>(`/api/dashboard${qs ? `?${qs}` : ""}`);
+  return get<DashboardResponse>(`/api/dashboard${buildQueryString({ sport, start_date: startDate, end_date: endDate })}`);
 }
 
 export function gradePredictions(sport?: SportLower) {
@@ -154,11 +158,7 @@ export function saveBets(bets: unknown[]) {
 }
 
 export function fetchBets(sport?: SportLower, status?: string) {
-  const params = new URLSearchParams();
-  if (sport) params.set("sport", sport);
-  if (status) params.set("status", status);
-  const qs = params.toString();
-  return get<{ success: boolean; bets: TrackedBet[] }>(`/api/bets${qs ? `?${qs}` : ""}`);
+  return get<{ success: boolean; bets: TrackedBet[] }>(`/api/bets${buildQueryString({ sport, status })}`);
 }
 
 export function gradeBets() {
@@ -166,12 +166,7 @@ export function gradeBets() {
 }
 
 export function fetchBetsDashboard(sport?: SportLower, startDate?: string, endDate?: string) {
-  const params = new URLSearchParams();
-  if (sport) params.set("sport", sport);
-  if (startDate) params.set("start_date", startDate);
-  if (endDate) params.set("end_date", endDate);
-  const qs = params.toString();
-  return get<BetDashboardResponse>(`/api/bets/dashboard${qs ? `?${qs}` : ""}`);
+  return get<BetDashboardResponse>(`/api/bets/dashboard${buildQueryString({ sport, start_date: startDate, end_date: endDate })}`);
 }
 
 export function deleteBet(betId: number) {
@@ -179,13 +174,7 @@ export function deleteBet(betId: number) {
 }
 
 export function fetchBetsCombined(sport?: SportLower, status?: string, startDate?: string, endDate?: string) {
-  const params = new URLSearchParams();
-  if (sport) params.set("sport", sport);
-  if (status) params.set("status", status);
-  if (startDate) params.set("start_date", startDate);
-  if (endDate) params.set("end_date", endDate);
-  const qs = params.toString();
-  return get<{ success: boolean; bets: TrackedBet[]; dashboard: Omit<BetDashboardResponse, "success"> }>(`/api/bets/combined${qs ? `?${qs}` : ""}`);
+  return get<{ success: boolean; bets: TrackedBet[]; dashboard: Omit<BetDashboardResponse, "success"> }>(`/api/bets/combined${buildQueryString({ sport, status, start_date: startDate, end_date: endDate })}`);
 }
 
 // ─── Pick Curation ─────────────────────────────────────

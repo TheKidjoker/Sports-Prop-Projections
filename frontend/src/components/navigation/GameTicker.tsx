@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useGames } from "@/hooks/use-games";
+import { HexBadge } from "@/components/jarvis/HexBadge";
 import type { GameListEntry, SportLower } from "@/lib/types";
 
 interface TickerGame {
@@ -8,26 +9,34 @@ interface TickerGame {
   home: string;
   time: string;
   dateLabel: string;
+  sport: string;
+  isLive?: boolean;
 }
 
-function mapToTicker(games: GameListEntry[]): TickerGame[] {
+const TICKER_SPORTS: SportLower[] = ["nhl", "nba", "mlb", "nfl", "cbb", "cfb"];
+
+function mapToTicker(games: GameListEntry[], sport: string): TickerGame[] {
   return games.map((g) => ({
     id: g.event_id,
     away: g.away_team,
     home: g.home_team,
     time: g.game_time_est,
     dateLabel: g.date_label || "",
+    sport: sport.toUpperCase(),
   }));
 }
 
 function GameItem({ game }: { game: TickerGame }) {
   return (
-    <span className="inline-flex items-center gap-2 px-5 whitespace-nowrap">
-      <span className="font-mono text-xs text-foreground">
-        {game.away} <span className="text-muted-foreground">@</span> {game.home}
+    <span className="inline-flex items-center gap-2 px-4 whitespace-nowrap">
+      <HexBadge label={game.sport.slice(0, 3)} size="sm" active />
+      <span className="font-mono-nums text-[11px] text-foreground">
+        {game.away}
+        <span className="text-muted-foreground mx-1">@</span>
+        {game.home}
       </span>
-      <span className="text-[10px] text-muted-foreground font-mono">
-        {game.dateLabel ? `${game.dateLabel} — ` : ""}{game.time} EST
+      <span className="text-[9px] text-muted-foreground font-mono">
+        {game.dateLabel ? `${game.dateLabel} ` : ""}{game.time}
       </span>
     </span>
   );
@@ -36,39 +45,35 @@ function GameItem({ game }: { game: TickerGame }) {
 export function GameTicker() {
   const [paused, setPaused] = useState(false);
 
-  // Fetch games for active sports
-  const nhl = useGames("nhl" as SportLower);
-  const nba = useGames("nba" as SportLower);
-  const cbb = useGames("cbb" as SportLower);
+  const queries = TICKER_SPORTS.map((sport) => ({
+    sport,
+    ...useGames(sport),
+  }));
 
-  const allGames: TickerGame[] = [
-    ...mapToTicker(nhl.data?.games ?? []),
-    ...mapToTicker(nba.data?.games ?? []),
-    ...mapToTicker(cbb.data?.games ?? []),
-  ];
+  const allGames: TickerGame[] = queries.flatMap(
+    (q) => mapToTicker(q.data?.games ?? [], q.sport)
+  );
+
+  const isLoading = queries.some((q) => q.isLoading);
 
   if (allGames.length === 0) {
     return (
-      <div className="h-8 border-b border-border bg-muted/30 overflow-hidden relative">
+      <div className="h-8 border-b border-border bg-muted/20 overflow-hidden relative hex-grid-bg">
         <div className="flex items-center h-full px-4">
           <span className="text-[10px] text-muted-foreground font-mono">
-            {nhl.isLoading || nba.isLoading || cbb.isLoading
-              ? "Loading games..."
-              : "No games scheduled"}
+            {isLoading ? "LOADING OPERATIONS..." : "NO ACTIVE OPERATIONS"}
           </span>
         </div>
       </div>
     );
   }
 
-  // Duplicate for seamless loop
   const doubled = [...allGames, ...allGames];
-  // Dynamic duration: ~8s per game, minimum 80s
   const duration = Math.max(80, allGames.length * 8);
 
   return (
     <div
-      className="h-8 border-b border-border bg-muted/30 overflow-hidden relative"
+      className="h-8 border-b border-border bg-muted/20 overflow-hidden relative hex-grid-bg"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >

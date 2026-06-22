@@ -9,13 +9,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_K
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions.db")
 
-ODDS_API_SPORT_KEYS = {
-    "nba": "basketball_nba",
-    "nhl": "icehockey_nhl",
-    "nfl": "americanfootball_nfl",
-    "cfb": "americanfootball_ncaaf",
-    "cbb": "basketball_ncaab",
-}
+from sport_registry import get_odds_api_sport_map
+ODDS_API_SPORT_KEYS = get_odds_api_sport_map()
 
 # ─── Supabase singleton ──────────────────────────────────────────────────────
 _supabase_client = None

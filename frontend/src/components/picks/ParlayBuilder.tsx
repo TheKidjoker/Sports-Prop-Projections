@@ -2,6 +2,10 @@ import { useState, useEffect } from "react";
 import type { PickData, PropSignal, SportLower, ParlayAnalysis } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
 import { analyzeParlayCorrelation } from "@/lib/api";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { GaugeRing } from "@/components/jarvis/GaugeRing";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { CHART_COLORS } from "@/lib/chart-theme";
 
 // ─── Types ────────────────────────────────────────────
 
@@ -10,7 +14,6 @@ export interface ParlayLeg {
   coverPct: number;
   sport: SportLower;
   type: "spread" | "prop";
-  // Spread metadata
   eventId?: string;
   team?: string;
   line?: number;
@@ -19,7 +22,6 @@ export interface ParlayLeg {
   recommendation?: string;
   action?: string;
   slotType?: string;
-  // Prop metadata
   playerName?: string;
   statType?: string;
   propLine?: number;
@@ -39,13 +41,13 @@ export interface ParlayTier {
 // ─── Sport badge colors ───────────────────────────────
 
 const SPORT_COLORS: Record<string, string> = {
-  nba: "bg-warning/20 text-warning border-warning/30",
-  nhl: "bg-secondary/20 text-secondary border-secondary/30",
-  mlb: "bg-primary/20 text-primary border-primary/30",
-  cbb: "bg-accent-foreground/20 text-accent-foreground border-accent-foreground/30",
-  nfl: "bg-success/20 text-success border-success/30",
-  cfb: "bg-primary/20 text-primary border-primary/30",
-  soccer: "bg-success/20 text-success border-success/30",
+  nba: "hsl(43, 76%, 38%)",
+  nhl: "hsl(200, 70%, 50%)",
+  mlb: "hsl(0, 72%, 51%)",
+  cbb: "hsl(30, 80%, 50%)",
+  nfl: "hsl(142, 71%, 45%)",
+  cfb: "hsl(280, 60%, 55%)",
+  soccer: "hsl(120, 50%, 40%)",
 };
 
 // ─── Build parlays from cross-sport data ──────────────
@@ -89,7 +91,6 @@ function makePropLeg(prop: PropSignal & { _sport: SportLower }): ParlayLeg {
   };
 }
 
-/** Diversify legs across sports: max N per sport */
 function diversify(legs: ParlayLeg[], maxPerSport: number): ParlayLeg[] {
   const counts: Record<string, number> = {};
   return legs.filter((leg) => {
@@ -98,7 +99,6 @@ function diversify(legs: ParlayLeg[], maxPerSport: number): ParlayLeg[] {
   });
 }
 
-/** Count distinct sports in a set of legs */
 function distinctSports(legs: ParlayLeg[]): number {
   return new Set(legs.map((l) => l.sport)).size;
 }
@@ -107,78 +107,37 @@ export function buildCrossSportParlays(
   picks: PickData[],
   props: (PropSignal & { _sport: SportLower })[]
 ): ParlayTier[] {
-  // Build all candidate legs
-  const spreadLegs = picks
-    .filter((p) => p.tier !== "MONITOR")
-    .map(makeLeg);
-
-  const propLegs = props
-    .filter((p) => p.signal === "STRONG" || p.signal === "LEAN")
-    .map(makePropLeg);
-
-  const allLegs = [...spreadLegs, ...propLegs].sort(
-    (a, b) => b.coverPct - a.coverPct
-  );
+  const spreadLegs = picks.filter((p) => p.tier !== "MONITOR").map(makeLeg);
+  const propLegs = props.filter((p) => p.signal === "STRONG" || p.signal === "LEAN").map(makePropLeg);
+  const allLegs = [...spreadLegs, ...propLegs].sort((a, b) => b.coverPct - a.coverPct);
 
   const parlays: ParlayTier[] = [];
 
-  // Two-Face's Safe Bet: top 2 legs >= 65%
   const safeLegs = allLegs.filter((l) => l.coverPct >= 65).slice(0, 2);
   if (safeLegs.length === 2) {
-    parlays.push({
-      name: "Two-Face's Safe Bet",
-      subtitle: "2-leg parlay, highest confidence",
-      legs: safeLegs,
-      className: "border-success/30",
-    });
+    parlays.push({ name: "Two-Face's Safe Bet", subtitle: "2-leg parlay, highest confidence", legs: safeLegs, className: "border-success/30" });
   }
 
-  // Gotham Gambit: 4-6 legs >= 60%, max 2 per sport
-  const gambitPool = diversify(
-    allLegs.filter((l) => l.coverPct >= 60),
-    2
-  ).slice(0, 6);
+  const gambitPool = diversify(allLegs.filter((l) => l.coverPct >= 60), 2).slice(0, 6);
   if (gambitPool.length >= 4) {
-    parlays.push({
-      name: "Gotham Gambit",
-      subtitle: `${gambitPool.length}-leg parlay`,
-      legs: gambitPool,
-      className: "border-secondary/30",
-    });
+    parlays.push({ name: "Gotham Gambit", subtitle: `${gambitPool.length}-leg parlay`, legs: gambitPool, className: "border-secondary/30" });
   }
 
-  // Gotham Breakout: up to 10 legs >= 55%, max 3 per sport
-  const breakoutPool = diversify(
-    allLegs.filter((l) => l.coverPct >= 55),
-    3
-  ).slice(0, 10);
+  const breakoutPool = diversify(allLegs.filter((l) => l.coverPct >= 55), 3).slice(0, 10);
   if (breakoutPool.length >= 3) {
-    parlays.push({
-      name: "Gotham Breakout",
-      subtitle: `${breakoutPool.length}-leg longshot`,
-      legs: breakoutPool,
-      className: "border-primary/30",
-    });
+    parlays.push({ name: "Gotham Breakout", subtitle: `${breakoutPool.length}-leg longshot`, legs: breakoutPool, className: "border-primary/30" });
   }
 
-  // Best of Day: top 3 legs from >= 2 different sports
-  const bestLegs = allLegs.slice(0, 6); // take top 6, filter to 3 with diversity
+  const bestLegs = allLegs.slice(0, 6);
   const bestDiverse: ParlayLeg[] = [];
   const bestCounts: Record<string, number> = {};
   for (const leg of bestLegs) {
     if (bestDiverse.length >= 3) break;
     bestCounts[leg.sport] = (bestCounts[leg.sport] || 0) + 1;
-    if (bestCounts[leg.sport] <= 2) {
-      bestDiverse.push(leg);
-    }
+    if (bestCounts[leg.sport] <= 2) bestDiverse.push(leg);
   }
   if (bestDiverse.length >= 3 && distinctSports(bestDiverse) >= 2) {
-    parlays.push({
-      name: "Best of Day",
-      subtitle: "Top picks across sports",
-      legs: bestDiverse,
-      className: "border-accent/30",
-    });
+    parlays.push({ name: "Best of Day", subtitle: "Top picks across sports", legs: bestDiverse, className: "border-accent/30" });
   }
 
   return parlays;
@@ -190,36 +149,19 @@ export function parlayLegsToSlipItems(legs: ParlayLeg[]): BetSlipItem[] {
   return legs.map((leg) => {
     if (leg.type === "prop") {
       return {
-        event_id: leg.eventId ?? "",
-        sport: leg.sport,
-        type: "prop",
-        team: leg.team ?? "",
-        stat: leg.statType,
-        line: leg.propLine ?? 0,
-        label: leg.label,
-        home_team: leg.homeTeam,
-        away_team: leg.awayTeam,
-        player_name: leg.playerName,
-        direction: leg.direction,
-        projection: leg.projection,
-        edge: leg.edge,
-        confidence: leg.coverPct,
-        signal: leg.signal,
+        event_id: leg.eventId ?? "", sport: leg.sport, type: "prop",
+        team: leg.team ?? "", stat: leg.statType, line: leg.propLine ?? 0,
+        label: leg.label, home_team: leg.homeTeam, away_team: leg.awayTeam,
+        player_name: leg.playerName, direction: leg.direction,
+        projection: leg.projection, edge: leg.edge, confidence: leg.coverPct, signal: leg.signal,
       };
     }
     return {
-      event_id: leg.eventId ?? "",
-      sport: leg.sport,
-      type: "spread",
-      team: leg.team ?? "",
-      line: leg.line ?? 0,
-      label: leg.label,
-      home_team: leg.homeTeam,
-      away_team: leg.awayTeam,
-      recommendation: leg.recommendation,
-      cover_pct: leg.coverPct,
-      slot_type: leg.slotType,
-      action: leg.action,
+      event_id: leg.eventId ?? "", sport: leg.sport, type: "spread",
+      team: leg.team ?? "", line: leg.line ?? 0, label: leg.label,
+      home_team: leg.homeTeam, away_team: leg.awayTeam,
+      recommendation: leg.recommendation, cover_pct: leg.coverPct,
+      slot_type: leg.slotType, action: leg.action,
     };
   });
 }
@@ -232,11 +174,7 @@ interface ParlayCardProps {
 }
 
 export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
-  const combinedProb = parlay.legs.reduce(
-    (acc, leg) => acc * (leg.coverPct / 100),
-    1
-  );
-
+  const combinedProb = parlay.legs.reduce((acc, leg) => acc * (leg.coverPct / 100), 1);
   const [analysis, setAnalysis] = useState<ParlayAnalysis | null>(null);
 
   useEffect(() => {
@@ -246,104 +184,78 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
       coverPct: leg.coverPct,
     }));
     analyzeParlayCorrelation(legsPayload)
-      .then((res) => {
-        if (res.success) setAnalysis(res.analysis);
-      })
-      .catch(() => {}); // Graceful degradation
-  }, [parlay.legs.length]);
+      .then((res) => { if (res.success) setAnalysis(res.analysis); })
+      .catch(() => {});
+  }, [parlay.legs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasCorrelation = analysis && analysis.correlation_penalty_pct > 5;
   const adjustedProb = analysis?.adjusted_joint_prob;
 
   return (
-    <div
-      className={`card-surface rounded-sm border-l-2 ${parlay.className}`}
+    <HudPanel
+      title={parlay.name}
+      status={hasCorrelation ? "warning" : "online"}
+      headerRight={
+        hasCorrelation ? (
+          <HexBadge label="CORRELATED" color={CHART_COLORS.gold} size="sm" active />
+        ) : undefined
+      }
+      className={`border-l-2 ${parlay.className}`}
     >
-      {/* Header */}
-      <div className="px-4 pt-3 pb-2">
-        <div className="flex items-center gap-2">
-          <h4 className="font-heading text-sm tracking-wider text-foreground">
-            {parlay.name}
-          </h4>
-          {hasCorrelation && (
-            <span className="px-1.5 py-0.5 text-[8px] font-heading tracking-wider rounded bg-warning/15 text-warning border border-warning/30">
-              CORRELATED
-            </span>
-          )}
-        </div>
-        <p className="text-[10px] text-muted-foreground">{parlay.subtitle}</p>
-      </div>
+      <p className="text-[10px] text-muted-foreground mb-3">{parlay.subtitle}</p>
 
       {/* Legs */}
-      <div className="px-4 pb-2">
+      <div className="space-y-0">
         {parlay.legs.map((leg, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-2 py-1.5 border-b border-border/20 last:border-0"
-          >
-            {/* Sport badge */}
-            <span
-              className={`px-1.5 py-0.5 text-[8px] font-heading tracking-wider rounded border ${SPORT_COLORS[leg.sport] ?? "bg-muted text-muted-foreground border-border"}`}
-            >
-              {leg.sport.toUpperCase()}
-            </span>
-
-            {/* Type badge */}
-            <span className={`text-[8px] font-heading tracking-wider w-8 text-center ${
-              leg.type === "prop"
-                ? "px-1 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30"
-                : "text-muted-foreground"
-            }`}>
-              {leg.type === "spread" ? "SPR" : (leg.statType ?? "PROP")}
-            </span>
-
-            {/* Label */}
-            <span className="font-mono text-[10px] text-foreground truncate flex-1">
-              {leg.label}
-            </span>
-
-            {/* Confidence */}
-            <span className="font-mono text-[10px] text-success whitespace-nowrap">
-              {leg.coverPct.toFixed(1)}%
-            </span>
+          <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/20 last:border-0">
+            <HexBadge label={leg.sport.toUpperCase().slice(0, 3)} size="sm" active color={SPORT_COLORS[leg.sport]} />
+            {leg.type === "prop" && (
+              <span className="text-[8px] font-heading tracking-wider px-1 py-0.5 bg-secondary/15 text-secondary border border-secondary/30">
+                {leg.statType ?? "PROP"}
+              </span>
+            )}
+            <span className="font-mono text-[10px] text-foreground truncate flex-1">{leg.label}</span>
+            <span className="font-mono text-[10px] text-success whitespace-nowrap">{leg.coverPct.toFixed(1)}%</span>
           </div>
         ))}
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-border/30 flex flex-col gap-1">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-heading tracking-wider text-muted-foreground">
-              COMBINED:{" "}
-              <span className="text-foreground">
-                {(combinedProb * 100).toFixed(1)}%
-              </span>
-            </span>
-            {adjustedProb != null && adjustedProb !== combinedProb && (
-              <span className="text-[10px] font-heading tracking-wider text-warning">
-                ADJ: {(adjustedProb * 100).toFixed(1)}%
-              </span>
-            )}
-          </div>
-
-          {onTrackAll && (
-            <button
-              onClick={() => onTrackAll(parlayLegsToSlipItems(parlay.legs))}
-              className="px-3 py-1 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors"
-            >
-              TRACK ALL LEGS
-            </button>
+      <div className="pt-3 mt-3 border-t border-border/30 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <GaugeRing
+            value={combinedProb * 100}
+            max={100}
+            label="COMBINED"
+            unit="%"
+            size={48}
+            color={combinedProb > 0.15 ? CHART_COLORS.green : CHART_COLORS.crimson}
+          />
+          {adjustedProb != null && adjustedProb !== combinedProb && (
+            <div className="text-center">
+              <span className="font-mono text-xs text-warning">{(adjustedProb * 100).toFixed(1)}%</span>
+              <p className="text-[8px] font-heading tracking-wider text-muted-foreground">ADJUSTED</p>
+            </div>
           )}
         </div>
 
-        {hasCorrelation && analysis.correlated_pairs.length > 0 && (
-          <div className="text-[9px] text-warning font-mono">
-            Correlated: {analysis.correlated_pairs.map((p) => `${p.stat_a}+${p.stat_b} (${(p.correlation * 100).toFixed(0)}%)`).join(", ")}
-            {" "} — penalty {analysis.correlation_penalty_pct.toFixed(1)}%
-          </div>
+        {onTrackAll && (
+          <button
+            onClick={() => onTrackAll(parlayLegsToSlipItems(parlay.legs))}
+            className="px-4 py-1.5 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
+            style={{ clipPath: "polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px)" }}
+          >
+            DEPLOY
+          </button>
         )}
       </div>
-    </div>
+
+      {hasCorrelation && analysis.correlated_pairs.length > 0 && (
+        <div className="mt-2 text-[9px] text-warning font-mono">
+          Correlated: {analysis.correlated_pairs.map((p) => `${p.stat_a}+${p.stat_b} (${(p.correlation * 100).toFixed(0)}%)`).join(", ")}
+          {" "} — penalty {analysis.correlation_penalty_pct.toFixed(1)}%
+        </div>
+      )}
+    </HudPanel>
   );
 }

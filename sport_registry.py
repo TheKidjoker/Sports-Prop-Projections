@@ -231,3 +231,81 @@ def get_sport_display_name(sport_key):
     """Get human-readable sport name."""
     sport = SPORT_REGISTRY.get(sport_key)
     return sport["name"] if sport else sport_key.upper()
+
+
+# ─── Derived Mapping Helpers ──────────────────────────────────────────────────
+# These replace duplicate dicts that were scattered across api_odds.py,
+# api_odds_io.py, tracker.py, test_model/collector.py, and api_cache.py.
+
+def get_odds_api_sport_map():
+    """
+    Returns {sport_key: odds_api_key} for all sports.
+    Includes soccer league variants for The Odds API.
+    """
+    base = {k: v["odds_api_key"] for k, v in SPORT_REGISTRY.items() if v.get("odds_api_key")}
+    # Add soccer league variants (The Odds API uses these keys directly)
+    base.update({
+        "soccer_epl": "soccer_epl",
+        "soccer_spain_la_liga": "soccer_spain_la_liga",
+        "soccer_germany_bundesliga": "soccer_germany_bundesliga",
+        "soccer_italy_serie_a": "soccer_italy_serie_a",
+        "soccer_france_ligue_one": "soccer_france_ligue_one",
+        "soccer_usa_mls": "soccer_usa_mls",
+        "soccer_uefa_champs_league": "soccer_uefa_champs_league",
+        "soccer_netherlands_eredivisie": "soccer_netherlands_eredivisie",
+        "soccer_portugal_primeira_liga": "soccer_portugal_primeira_liga",
+        "soccer_turkey_super_league": "soccer_turkey_super_league",
+        "soccer_england_league1": "soccer_england_league1",
+        "soccer_mexico_ligamx": "soccer_mexico_ligamx",
+        "soccer_australia_aleague": "soccer_australia_aleague",
+        "soccer_japan_j_league": "soccer_japan_j_league",
+        "soccer_korea_kleague1": "soccer_korea_kleague1",
+        "soccer_saudi_pro_league": "soccer_saudi_professional_league",
+    })
+    return base
+
+
+def get_odds_io_sport_map():
+    """
+    Returns {sport_key: {"sport": ..., "league": ...}} for odds-api.io.
+    """
+    result = {}
+    for k, v in SPORT_REGISTRY.items():
+        io_key = v.get("odds_io_key")
+        if io_key:
+            parts = io_key.rsplit("-", 1)
+            # Handle multi-word sport names like "ice-hockey" and "american-football"
+            if k == "nhl":
+                result[k] = {"sport": "ice-hockey", "league": "nhl"}
+            elif k in ("nfl", "cfb"):
+                league = "nfl" if k == "nfl" else "ncaaf"
+                result[k] = {"sport": "american-football", "league": league}
+            elif k == "cbb":
+                result[k] = {"sport": "basketball", "league": "ncaab"}
+            else:
+                result[k] = {"sport": parts[0], "league": parts[1] if len(parts) > 1 else k}
+    # Soccer league variants for odds-api.io
+    result.update({
+        "soccer_epl": {"sport": "soccer", "league": "england-premier-league"},
+        "soccer_spain_la_liga": {"sport": "soccer", "league": "spain-la-liga"},
+        "soccer_germany_bundesliga": {"sport": "soccer", "league": "germany-bundesliga"},
+        "soccer_italy_serie_a": {"sport": "soccer", "league": "italy-serie-a"},
+        "soccer_france_ligue_one": {"sport": "soccer", "league": "france-ligue-1"},
+        "soccer_usa_mls": {"sport": "soccer", "league": "usa-mls"},
+        "soccer_uefa_champs_league": {"sport": "soccer", "league": "uefa-champions-league"},
+    })
+    return result
+
+
+def get_espn_sport_map():
+    """
+    Returns {sport_key: {"category": espn_sport, "league": espn_league}}.
+    """
+    result = {}
+    for k, v in SPORT_REGISTRY.items():
+        if v.get("espn_sport") and v.get("espn_league"):
+            result[k] = {"category": v["espn_sport"], "league": v["espn_league"]}
+    # Soccer uses eng.1 for ESPN
+    if "soccer" not in result:
+        result["soccer"] = {"category": "soccer", "league": "eng.1"}
+    return result

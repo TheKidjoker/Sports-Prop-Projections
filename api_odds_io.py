@@ -12,20 +12,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Sport / League Mapping ──────────────────────────────────────────────────
 # odds-api.io uses sport slug + league slug (discovered via /sports + /leagues)
-ODDS_IO_SPORT_MAP = {
-    "nba": {"sport": "basketball", "league": "nba"},
-    "nhl": {"sport": "ice-hockey", "league": "nhl"},
-    "nfl": {"sport": "american-football", "league": "nfl"},
-    "cfb": {"sport": "american-football", "league": "ncaaf"},
-    "cbb": {"sport": "basketball", "league": "ncaab"},
-    "soccer_epl": {"sport": "soccer", "league": "england-premier-league"},
-    "soccer_spain_la_liga": {"sport": "soccer", "league": "spain-la-liga"},
-    "soccer_germany_bundesliga": {"sport": "soccer", "league": "germany-bundesliga"},
-    "soccer_italy_serie_a": {"sport": "soccer", "league": "italy-serie-a"},
-    "soccer_france_ligue_one": {"sport": "soccer", "league": "france-ligue-1"},
-    "soccer_usa_mls": {"sport": "soccer", "league": "usa-mls"},
-    "soccer_uefa_champs_league": {"sport": "soccer", "league": "uefa-champions-league"},
-}
+from sport_registry import get_odds_io_sport_map
+ODDS_IO_SPORT_MAP = get_odds_io_sport_map()
 
 BASE_URL = "https://api.odds-api.io/v3"
 

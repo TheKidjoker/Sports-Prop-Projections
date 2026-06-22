@@ -148,6 +148,91 @@
   }
 }
 
+/* ─── JARVIS HUD System ─────────────────────────────────────── */
+
+@keyframes jarvis-scan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.6; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 4px hsla(0, 72%, 51%, 0.2), inset 0 0 4px hsla(0, 72%, 51%, 0.05); }
+  50% { box-shadow: 0 0 16px hsla(0, 72%, 51%, 0.4), inset 0 0 8px hsla(0, 72%, 51%, 0.1); }
+}
+
+@keyframes data-stream {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 100%; }
+}
+
+@keyframes hud-border-trace {
+  0% { --trace-angle: 0deg; }
+  100% { --trace-angle: 360deg; }
+}
+
+@keyframes tracer-line {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes boot-text {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes hex-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@property --trace-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.hud-panel {
+  background: hsla(240, 15%, 7%, 0.9);
+  border: 1px solid hsla(0, 30%, 12%, 0.6);
+  clip-path: polygon(
+    0 8px, 8px 0, calc(100% - 8px) 0, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px)
+  );
+  position: relative;
+}
+
+.hud-panel-active {
+  animation: glow-pulse 3s ease-in-out infinite;
+  border-color: hsla(0, 72%, 51%, 0.4);
+}
+
+.hud-panel-header {
+  font-family: 'Oswald', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 8px 16px;
+  border-bottom: 1px solid hsla(0, 30%, 12%, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-panel-header::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: hsl(0, 72%, 51%);
+  flex-shrink: 0;
+}
+
+.hex-grid-bg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
 /* Red pulse skeleton animation */
 @keyframes red-pulse {
   0%, 100% {

@@ -4,70 +4,86 @@ import { useGradeBets, useDeleteBet, useBetsCombined } from "@/hooks/use-bets";
 import { toLowerSport, type Sport, type SportLower, type TrackedBet } from "@/lib/types";
 import { LogoLoader } from "@/components/ui/LogoLoader";
 import { toast } from "sonner";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { GaugeRing } from "@/components/jarvis/GaugeRing";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { GaugeSkeleton } from "@/components/jarvis/GaugeSkeleton";
+import { CHART_COLORS } from "@/lib/chart-theme";
 
 interface MyBetsPageProps {
   sport: Sport | null;
 }
 
-import { Badge } from "@/components/ui/badge";
-
-const resultBadgeVariant = (result: string): "win" | "loss" | "push" | "pending" => {
-  switch (result) {
-    case "WIN": return "win";
-    case "LOSS": return "loss";
-    case "PUSH": return "push";
-    default: return "pending";
-  }
+/* ── result color map ── */
+const resultStyle: Record<string, { color: string; bg: string }> = {
+  WIN:     { color: CHART_COLORS.green,   bg: `${CHART_COLORS.green}15` },
+  LOSS:    { color: CHART_COLORS.crimson,  bg: `${CHART_COLORS.crimson}15` },
+  PUSH:    { color: CHART_COLORS.gold,     bg: `${CHART_COLORS.gold}15` },
+  PENDING: { color: CHART_COLORS.muted,    bg: `${CHART_COLORS.muted}15` },
 };
 
-const recBadgeVariant = (rec: string | null | undefined): "strong" | "confident" | "lean" | null => {
-  if (!rec) return null;
-  if (rec === "STRONG PLAY") return "strong";
-  if (rec === "CONFIDENT") return "confident";
-  return "lean";
+/* ── sport hex badge color ── */
+const sportHexColor: Record<string, string> = {
+  nba: CHART_COLORS.crimson,
+  nhl: "#60a5fa",
+  mlb: CHART_COLORS.green,
+  nfl: CHART_COLORS.gold,
+  cbb: "#c084fc",
+  cfb: "#f97316",
 };
 
-function BetLine({ bet }: { bet: TrackedBet }) {
+/* ── Bet Line Component ── */
+function BetLine({ bet, onDelete }: { bet: TrackedBet; onDelete: (id: number) => void }) {
   const isSpread = bet.bet_type === "spread";
   const isProp = bet.bet_type === "prop";
+  const rs = resultStyle[bet.result] ?? resultStyle.PENDING;
 
   return (
-    <div className="flex items-start sm:items-center justify-between px-4 py-3 border-b border-border/30 hover:bg-muted/20 gap-2">
+    <div className="flex items-start sm:items-center justify-between px-3 py-2.5 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors gap-2">
       <div className="flex-1 min-w-0">
-        {/* Row 1: Sport badge + matchup */}
+        {/* Row 1: sport hex + matchup */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-heading text-muted-foreground uppercase shrink-0">
-            {bet.sport}
-          </span>
+          <HexBadge
+            label={bet.sport.toUpperCase()}
+            color={sportHexColor[bet.sport] ?? CHART_COLORS.muted}
+            size="sm"
+            active
+          />
           <span className="font-mono text-xs text-foreground truncate">
             {bet.away_team} @ {bet.home_team}
           </span>
-          {bet.recommendation && recBadgeVariant(bet.recommendation) && (
-            <Badge variant={recBadgeVariant(bet.recommendation)!} size="sm" className="shrink-0">
+          {bet.recommendation && (
+            <span className="text-[8px] font-heading tracking-widest uppercase px-1.5 py-0.5 border rounded-sm"
+              style={{
+                borderColor: `${CHART_COLORS.gold}40`,
+                color: CHART_COLORS.gold,
+                background: `${CHART_COLORS.gold}10`,
+              }}
+            >
               {bet.recommendation}
-            </Badge>
+            </span>
           )}
         </div>
 
-        {/* Row 2: Pick details */}
+        {/* Row 2: pick details */}
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           {isSpread && bet.lean_team && (
-            <span className="font-mono text-xs text-secondary">
+            <span className="font-mono text-xs" style={{ color: CHART_COLORS.gold }}>
               {bet.lean_team} {bet.spread_at_pick != null ? (bet.spread_at_pick > 0 ? `+${bet.spread_at_pick}` : bet.spread_at_pick) : ""}
             </span>
           )}
           {isProp && bet.player_name && (
-            <span className="font-mono text-xs text-secondary">
+            <span className="font-mono text-xs" style={{ color: CHART_COLORS.gold }}>
               {bet.player_name} {bet.stat_type} {bet.prop_direction === "OVER" ? "o" : "u"}{bet.prop_line}
             </span>
           )}
           {isProp && bet.projection != null && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground font-mono">
               proj:{bet.projection.toFixed(1)}
             </span>
           )}
           {bet.cover_pct != null && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground font-mono">
               {bet.cover_pct.toFixed(1)}%
             </span>
           )}
@@ -78,7 +94,7 @@ function BetLine({ bet }: { bet: TrackedBet }) {
           )}
         </div>
 
-        {/* Row 3: Date + score */}
+        {/* Row 3: date + score + clv */}
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[10px] text-muted-foreground font-mono">
             {new Date(bet.created_at).toLocaleDateString()}
@@ -89,7 +105,7 @@ function BetLine({ bet }: { bet: TrackedBet }) {
             </span>
           )}
           {bet.clv != null && (
-            <span className={`text-[10px] font-mono ${bet.clv > 0 ? "text-success" : "text-primary"}`}>
+            <span className="text-[10px] font-mono" style={{ color: bet.clv > 0 ? CHART_COLORS.green : CHART_COLORS.crimson }}>
               CLV:{bet.clv > 0 ? "+" : ""}{bet.clv.toFixed(1)}
             </span>
           )}
@@ -97,12 +113,12 @@ function BetLine({ bet }: { bet: TrackedBet }) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        <Badge variant={resultBadgeVariant(bet.result)}>
-          {bet.result}
-        </Badge>
+        {/* Result hex badge */}
+        <HexBadge label={bet.result} color={rs.color} size="sm" active />
+
         {bet.result === "PENDING" && (
           <button
-            onClick={() => deleteBet.mutate(bet.id)}
+            onClick={() => onDelete(bet.id)}
             className="p-1 text-muted-foreground hover:text-primary transition-colors"
           >
             <Trash2 className="w-3 h-3" />
@@ -113,6 +129,7 @@ function BetLine({ bet }: { bet: TrackedBet }) {
   );
 }
 
+/* ── Sport filter options ── */
 const SPORT_FILTERS: { label: string; value: SportLower | undefined }[] = [
   { label: "ALL", value: undefined },
   { label: "NBA", value: "nba" },
@@ -154,16 +171,18 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
         },
       });
     }
-  }, [bets]);
+  }, [bets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const statuses = ["ALL", "PENDING", "WIN", "LOSS", "PUSH"];
   const overall = dashboard?.overall;
 
   return (
-    <div className="py-6 px-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="font-heading text-xl tracking-wider text-foreground">
-          MY <span className="text-secondary">BETS</span>
+    <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
+          Field Log{" "}
+          <span style={{ color: CHART_COLORS.crimson }}>/ Tracked Operations</span>
         </h2>
         <button
           onClick={() =>
@@ -178,123 +197,151 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
             })
           }
           disabled={gradeBets.isPending}
-          className="px-4 py-2 text-xs font-heading tracking-wider bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors disabled:opacity-50"
+          className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+          style={{
+            borderColor: `${CHART_COLORS.crimson}50`,
+            color: CHART_COLORS.crimson,
+            background: `${CHART_COLORS.crimson}10`,
+          }}
         >
           {gradeBets.isPending ? "GRADING..." : "GRADE ALL"}
         </button>
       </div>
 
-      {/* Dashboard stats */}
-      {overall && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-          <div className="card-surface rounded-sm p-4">
-            <p className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1">RECORD</p>
-            <p className="font-mono text-xl text-foreground">
-              {overall.wins}-{overall.losses}-{overall.pushes}
-            </p>
+      {/* ── Gauge Row ── */}
+      {overall ? (
+        <HudPanel title="FIELD METRICS" status="online">
+          <div className="flex items-center justify-around flex-wrap gap-4 py-2">
+            <GaugeRing
+              value={overall.win_rate}
+              max={100}
+              label={`RECORD ${overall.wins}-${overall.losses}-${overall.pushes}`}
+              unit="%"
+              size={85}
+              color={overall.win_rate >= 55 ? CHART_COLORS.green : overall.win_rate >= 50 ? CHART_COLORS.gold : CHART_COLORS.crimson}
+            />
+            <GaugeRing
+              value={overall.win_rate}
+              max={100}
+              label="WIN RATE"
+              unit="%"
+              size={85}
+              color={overall.win_rate >= 55 ? CHART_COLORS.green : CHART_COLORS.gold}
+            />
+            <GaugeRing
+              value={Math.abs(overall.roi)}
+              max={50}
+              label="ROI"
+              unit="%"
+              size={85}
+              color={overall.roi >= 0 ? CHART_COLORS.green : CHART_COLORS.crimson}
+            />
+            {/* CLV gauge if average CLV exists in any bet */}
+            <GaugeRing
+              value={overall.pending}
+              max={Math.max(overall.pending, 20)}
+              label="PENDING"
+              unit=""
+              size={85}
+              color={CHART_COLORS.gold}
+            />
           </div>
-          <div className="card-surface rounded-sm p-4">
-            <p className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1">WIN RATE</p>
-            <p className={`font-mono text-xl ${overall.win_rate >= 55 ? "text-success" : overall.win_rate >= 50 ? "text-foreground" : "text-primary"}`}>
-              {overall.win_rate.toFixed(1)}%
-            </p>
+        </HudPanel>
+      ) : isLoading ? (
+        <HudPanel title="LOADING METRICS...">
+          <div className="flex items-center justify-around gap-4 py-2">
+            <GaugeSkeleton />
+            <GaugeSkeleton />
+            <GaugeSkeleton />
+            <GaugeSkeleton />
           </div>
-          <div className="card-surface rounded-sm p-4">
-            <p className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1">ROI</p>
-            <p className={`font-mono text-xl ${overall.roi >= 0 ? "text-success" : "text-primary"}`}>
-              {overall.roi >= 0 ? "+" : ""}{overall.roi.toFixed(1)}%
-            </p>
-          </div>
-          <div className="card-surface rounded-sm p-4">
-            <p className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1">TOTAL</p>
-            <p className="font-mono text-xl text-foreground">{overall.total}</p>
-          </div>
-          <div className="card-surface rounded-sm p-4">
-            <p className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1">PENDING</p>
-            <p className="font-mono text-xl text-warning">{overall.pending}</p>
-          </div>
-        </div>
-      )}
+        </HudPanel>
+      ) : null}
 
-      {/* Sport filter */}
-      <div className="flex items-center gap-1 mb-2">
-        <span className="text-[10px] font-heading tracking-wider text-muted-foreground mr-1">SPORT:</span>
+      {/* ── Sport Filter (HexBadge row) ── */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase mr-1">SPORT:</span>
         {SPORT_FILTERS.map((sf) => (
-          <button
+          <HexBadge
             key={sf.label}
+            label={sf.label}
+            color={sf.value ? (sportHexColor[sf.value] ?? CHART_COLORS.muted) : CHART_COLORS.crimson}
+            size="md"
+            active={activeSport === sf.value}
             onClick={() => setSportFilter(sf.value)}
-            className={`px-2 py-1 text-[10px] font-heading tracking-wider rounded-sm transition-colors ${
-              activeSport === sf.value
-                ? "bg-secondary text-secondary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-            }`}
-          >
-            {sf.label}
-          </button>
+          />
         ))}
       </div>
 
-      {/* Status filter */}
-      <div className="flex items-center gap-1 mb-2">
-        {statuses.map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s === "ALL" ? undefined : s)}
-            className={`px-3 py-1.5 text-xs font-heading tracking-wider rounded-sm transition-colors ${
-              (s === "ALL" && !statusFilter) || statusFilter === s
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+      {/* ── Status Filter (angular buttons) ── */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase mr-1">STATUS:</span>
+        {statuses.map((s) => {
+          const isActive = (s === "ALL" && !statusFilter) || statusFilter === s;
+          const rs = resultStyle[s] ?? resultStyle.PENDING;
+          return (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s === "ALL" ? undefined : s)}
+              className="px-3 py-1 text-[10px] font-heading tracking-widest uppercase border transition-all"
+              style={{
+                borderColor: isActive ? `${rs.color}60` : "hsla(0,0%,100%,0.06)",
+                backgroundColor: isActive ? `${rs.color}15` : "transparent",
+                color: isActive ? rs.color : CHART_COLORS.muted,
+                clipPath: "polygon(6% 0%, 94% 0%, 100% 50%, 94% 100%, 6% 100%, 0% 50%)",
+              }}
+            >
+              {s}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Date range filter */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <span className="text-[10px] font-heading tracking-wider text-muted-foreground">DATE RANGE:</span>
+      {/* ── Date Range Filter ── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase">Date Range:</span>
         <input
           type="date"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
-          className="px-2 py-1 text-xs font-mono bg-background border border-border rounded-sm text-foreground"
+          className="px-2 py-1 text-xs font-mono bg-transparent border border-white/10 text-foreground focus:border-white/20 outline-none"
         />
-        <span className="text-muted-foreground text-xs">to</span>
+        <span className="text-muted-foreground text-[10px] font-heading tracking-widest">TO</span>
         <input
           type="date"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
-          className="px-2 py-1 text-xs font-mono bg-background border border-border rounded-sm text-foreground"
+          className="px-2 py-1 text-xs font-mono bg-transparent border border-white/10 text-foreground focus:border-white/20 outline-none"
         />
         {(startDate || endDate) && (
           <button
             onClick={() => { setStartDate(""); setEndDate(""); }}
-            className="px-2 py-1 text-[10px] font-heading text-muted-foreground hover:text-foreground transition-colors"
+            className="px-2 py-1 text-[9px] font-heading tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
           >
             CLEAR
           </button>
         )}
       </div>
 
-      {isLoading && (
-        <LogoLoader text="LOADING BETS..." size="sm" />
-      )}
+      {/* ── Loading ── */}
+      {isLoading && <LogoLoader text="LOADING FIELD LOG..." size="sm" />}
 
+      {/* ── Bet List ── */}
       {bets.length > 0 && (
-        <div className="card-surface rounded-sm overflow-hidden">
+        <HudPanel title={`TRACKED OPERATIONS  [${bets.length}]`} status="online">
           {bets.map((bet) => (
-            <BetLine key={bet.id} bet={bet} />
+            <BetLine key={bet.id} bet={bet} onDelete={(id) => deleteBet.mutate(id)} />
           ))}
-        </div>
+        </HudPanel>
       )}
 
+      {/* ── Empty state ── */}
       {!isLoading && bets.length === 0 && (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            No bets found
+        <HudPanel title="NO OPERATIONS" status="offline">
+          <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-8">
+            No tracked operations found. Begin tracking from the Props or Picks interface.
           </p>
-        </div>
+        </HudPanel>
       )}
     </div>
   );

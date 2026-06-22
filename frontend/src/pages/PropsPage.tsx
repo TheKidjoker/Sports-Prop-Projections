@@ -1,9 +1,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTopProps } from "@/hooks/use-props";
-import { PropRow } from "@/components/picks/PropRow";
 import { LogoLoader } from "@/components/ui/LogoLoader";
 import { toLowerSport, type Sport, type PropSignal } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { HexBadge } from "@/components/jarvis/HexBadge";
+import { StatusIndicator } from "@/components/jarvis/StatusIndicator";
+import { TableRowSkeleton } from "@/components/jarvis/TableRowSkeleton";
+import { CHART_COLORS } from "@/lib/chart-theme";
 
 const PROPS_PER_PAGE = 25;
 
@@ -11,6 +15,16 @@ interface PropsPageProps {
   sport: Sport | null;
   onTrackBet?: (bet: BetSlipItem) => void;
 }
+
+/* ── signal color map ── */
+const signalColor: Record<string, string> = {
+  STRONG: CHART_COLORS.green,
+  LEAN: CHART_COLORS.gold,
+  PASS: CHART_COLORS.muted,
+};
+
+/* ── stat-type hex badge color ── */
+const statColor = CHART_COLORS.gold;
 
 export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
   const [page, setPage] = useState(0);
@@ -64,177 +78,265 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
     });
   };
 
+  /* ── edge mini-bar helper ── */
+  const EdgeBar = ({ edge }: { edge: number }) => {
+    const absEdge = Math.min(Math.abs(edge), 10);
+    const pct = (absEdge / 10) * 100;
+    const color = edge > 0 ? CHART_COLORS.green : CHART_COLORS.crimson;
+    return (
+      <div className="w-14 flex items-center gap-1">
+        <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+        </div>
+        <span className="font-mono text-[10px] tabular-nums" style={{ color }}>
+          {edge > 0 ? "+" : ""}{edge.toFixed(1)}
+        </span>
+      </div>
+    );
+  };
+
   return (
-    <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="font-heading text-xl tracking-wider text-foreground">
-            PLAYER <span className="text-secondary">PROPS</span>
+          <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
+            Operative Intelligence{" "}
+            <span style={{ color: CHART_COLORS.crimson }}>/ Player Props</span>
           </h2>
-          <span className="text-[9px] font-heading px-1.5 py-0.5 border rounded-sm bg-success/15 text-success border-success/30">
-            VALIDATED
-          </span>
+          <StatusIndicator status={propsAvailable ? "online" : "offline"} label={propsAvailable ? "ACTIVE" : "UNAVAILABLE"} />
         </div>
         {propsAvailable && (
           <button
             onClick={() => { setPage(0); refetch(); }}
             disabled={isLoading}
-            className="px-4 py-2 text-xs font-heading tracking-wider bg-secondary/15 text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/25 transition-colors disabled:opacity-50"
+            className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+            style={{
+              borderColor: `${CHART_COLORS.crimson}50`,
+              color: CHART_COLORS.crimson,
+              background: `${CHART_COLORS.crimson}10`,
+            }}
           >
-            {isLoading ? "LOADING..." : "REFRESH"}
+            {isLoading ? "SCANNING..." : "REFRESH"}
           </button>
         )}
       </div>
 
+      {/* ── Not available notice ── */}
       {!propsAvailable && (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            Props are available for NBA, NHL, CBB, and MLB
+        <HudPanel title="SYSTEM NOTICE" status="warning">
+          <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-4">
+            Props intelligence available for NBA, NHL, CBB, and MLB theatres only
           </p>
-        </div>
+        </HudPanel>
       )}
 
+      {/* ── Error ── */}
       {error && (
-        <div className="mb-4 px-4 py-2 bg-primary/10 border border-primary/30 rounded-sm flex items-center justify-between">
-          <span className="text-xs text-primary font-mono">
-            Error: {(error as Error).message}
-          </span>
-          <button
-            onClick={() => refetch()}
-            className="text-xs text-primary font-heading tracking-wider hover:underline ml-4"
-          >
-            RETRY
-          </button>
-        </div>
+        <HudPanel title="ALERT" status="error">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono" style={{ color: CHART_COLORS.crimson }}>
+              {(error as Error).message}
+            </span>
+            <button
+              onClick={() => refetch()}
+              className="text-[10px] font-heading tracking-widest uppercase hover:underline"
+              style={{ color: CHART_COLORS.crimson }}
+            >
+              RETRY
+            </button>
+          </div>
+        </HudPanel>
       )}
 
-      {isLoading && (
-        <LogoLoader text="LOADING PROPS..." />
-      )}
+      {/* ── Loading states ── */}
+      {isLoading && <LogoLoader text="ACQUIRING PROP INTELLIGENCE..." />}
 
       {isRefreshing && !isLoading && (
         <div className="text-center py-6">
-          <LogoLoader text="COMPUTING PROPS..." />
-          <p className="text-muted-foreground text-xs font-heading tracking-wider mt-2">
-            Props are being computed server-side. Auto-refreshing...
+          <LogoLoader text="COMPUTING PROJECTIONS..." />
+          <p className="text-muted-foreground text-[10px] font-heading tracking-widest mt-2">
+            Server-side computation in progress. Auto-refreshing...
           </p>
         </div>
       )}
 
-      {/* Desktop table view */}
+      {/* ── Desktop Table ── */}
       {pagedProps.length > 0 && (
-        <div className="hidden sm:block card-surface rounded-sm overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-muted/30 text-[10px] font-heading tracking-wider text-muted-foreground">
-            <div className="flex-1">PLAYER</div>
-            <span className="w-12 text-center">STAT</span>
+        <HudPanel title={`PROP SIGNALS  [${sortedProps.length}]`} status="online" className="hidden sm:block">
+          {/* Angular header row */}
+          <div className="flex items-center gap-3 px-2 py-1.5 border-b border-white/[0.06] text-[9px] font-heading tracking-widest text-muted-foreground uppercase">
+            <div className="flex-1">OPERATIVE</div>
+            <span className="w-14 text-center">TYPE</span>
             <span className="w-10 text-right">LINE</span>
             <span className="w-12 text-right">PROJ</span>
-            <span className="w-14 text-right">EDGE</span>
+            <span className="w-20 text-right">EDGE</span>
             <span className="w-14 text-center">SIGNAL</span>
             <span className="w-8 text-right">CONF</span>
-            <span className="w-6" />
+            <span className="w-7" />
           </div>
+
+          {/* Data rows */}
           {pagedProps.map((prop, i) => (
-            <PropRow
+            <div
               key={`${prop.player_name}-${prop.stat_type}-${page}-${i}`}
-              prop={prop}
-              onTrack={onTrackBet ? handleTrackProp : undefined}
-            />
+              className="flex items-center gap-3 px-2 py-2 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors"
+            >
+              {/* Player */}
+              <div className="flex-1 min-w-0">
+                <span className="font-heading text-xs tracking-wider text-foreground truncate block">
+                  {prop.player_name}
+                </span>
+                <span className="text-[9px] text-muted-foreground font-mono">{prop.team} vs {prop.opponent}</span>
+              </div>
+
+              {/* Stat type hex badge */}
+              <span className="w-14 flex justify-center">
+                <HexBadge label={prop.stat_type} color={statColor} size="sm" active />
+              </span>
+
+              {/* Line */}
+              <span className="font-mono text-xs text-foreground w-10 text-right tabular-nums">
+                {prop.line}
+              </span>
+
+              {/* Projection */}
+              <span className="font-mono text-xs text-foreground w-12 text-right tabular-nums">
+                {prop.projection.toFixed(1)}
+              </span>
+
+              {/* Edge mini bar */}
+              <span className="w-20 flex justify-end">
+                <EdgeBar edge={prop.edge} />
+              </span>
+
+              {/* Signal badge */}
+              <span className="w-14 flex justify-center">
+                <HexBadge
+                  label={prop.signal}
+                  color={signalColor[prop.signal] ?? CHART_COLORS.muted}
+                  size="sm"
+                  active
+                />
+              </span>
+
+              {/* Confidence */}
+              <span className="font-mono text-[10px] text-muted-foreground w-8 text-right tabular-nums">
+                {prop.confidence}
+              </span>
+
+              {/* Track button */}
+              <span className="w-7 flex justify-center">
+                {onTrackBet && (
+                  <button
+                    onClick={() => handleTrackProp(prop)}
+                    className="w-5 h-5 flex items-center justify-center text-[10px] font-heading border rounded-sm transition-all hover:scale-110"
+                    style={{
+                      borderColor: `${CHART_COLORS.crimson}50`,
+                      color: CHART_COLORS.crimson,
+                    }}
+                  >
+                    +
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </HudPanel>
+      )}
+
+      {/* ── Loading skeleton ── */}
+      {isLoading && (
+        <div className="hidden sm:block">
+          <HudPanel title="LOADING SIGNALS...">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <TableRowSkeleton key={i} cols={7} />
+            ))}
+          </HudPanel>
+        </div>
+      )}
+
+      {/* ── Mobile Cards ── */}
+      {pagedProps.length > 0 && (
+        <div className="sm:hidden space-y-2">
+          {pagedProps.map((prop, i) => (
+            <HudPanel key={`mobile-${prop.player_name}-${prop.stat_type}-${page}-${i}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className="font-heading text-xs tracking-wider text-foreground truncate">
+                    {prop.player_name}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground font-mono">{prop.team}</span>
+                </div>
+                <HexBadge
+                  label={prop.signal}
+                  color={signalColor[prop.signal] ?? CHART_COLORS.muted}
+                  size="sm"
+                  active
+                />
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <HexBadge label={prop.stat_type} color={statColor} size="sm" active />
+                <span className="font-mono text-xs text-foreground tabular-nums">
+                  L:{prop.line}
+                </span>
+                <span className="font-mono text-xs text-foreground tabular-nums">
+                  P:{prop.projection.toFixed(1)}
+                </span>
+                <EdgeBar edge={prop.edge} />
+                <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                  {prop.confidence}%
+                </span>
+              </div>
+
+              {onTrackBet && (
+                <button
+                  onClick={() => handleTrackProp(prop)}
+                  className="mt-2 w-full py-1.5 text-[10px] font-heading tracking-widest uppercase border transition-all hover:bg-white/[0.03]"
+                  style={{
+                    borderColor: `${CHART_COLORS.crimson}40`,
+                    color: CHART_COLORS.crimson,
+                  }}
+                >
+                  + TRACK OPERATIVE
+                </button>
+              )}
+            </HudPanel>
           ))}
         </div>
       )}
 
-      {/* Mobile card view */}
-      {pagedProps.length > 0 && (
-        <div className="sm:hidden space-y-2">
-          {pagedProps.map((prop, i) => {
-            const edge = prop.edge;
-            const edgeColor = edge > 0 ? "text-success" : edge < 0 ? "text-primary" : "text-muted-foreground";
-            const signalColors: Record<string, string> = {
-              STRONG: "bg-success/15 text-success border-success/30",
-              LEAN: "bg-secondary/15 text-secondary border-secondary/30",
-              PASS: "bg-muted text-muted-foreground border-border",
-            };
-
-            return (
-              <div
-                key={`mobile-${prop.player_name}-${prop.stat_type}-${page}-${i}`}
-                className="card-surface rounded-sm p-3"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="min-w-0">
-                    <span className="font-heading text-xs tracking-wider text-foreground truncate">
-                      {prop.player_name}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{prop.team}</span>
-                  </div>
-                  <span className={`text-[9px] font-heading px-1.5 py-0.5 border rounded-sm ${signalColors[prop.signal] ?? signalColors.PASS}`}>
-                    {prop.signal}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] font-heading font-semibold tracking-wider px-1.5 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30">
-                    {prop.stat_type}
-                  </span>
-                  <span className="font-mono text-xs text-foreground">
-                    Line: {prop.line}
-                  </span>
-                  <span className="font-mono text-xs text-foreground">
-                    Proj: {prop.projection.toFixed(1)}
-                  </span>
-                  <span className={`font-mono text-xs ${edgeColor}`}>
-                    {edge > 0 ? "+" : ""}{edge.toFixed(1)}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {prop.confidence}%
-                  </span>
-                </div>
-
-                {onTrackBet && (
-                  <button
-                    onClick={() => handleTrackProp(prop)}
-                    className="mt-2 w-full px-2 py-1.5 text-[10px] font-heading text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/15 transition-colors text-center"
-                  >
-                    + TRACK
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Pagination */}
+      {/* ── Pagination ── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 mt-4">
+        <div className="flex items-center justify-center gap-4 pt-2">
           <button
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={page === 0}
-            className="px-3 py-1.5 text-xs font-heading tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+            className="px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
           >
-            PREV
+            &laquo; PREV
           </button>
-          <span className="text-xs font-mono text-muted-foreground">
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">
             {page + 1} / {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             disabled={page >= totalPages - 1}
-            className="px-3 py-1.5 text-xs font-heading tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+            className="px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
           >
-            NEXT
+            NEXT &raquo;
           </button>
         </div>
       )}
 
+      {/* ── Empty state ── */}
       {!isLoading && !isRefreshing && sortedProps.length === 0 && propsAvailable && (
-        <div className="text-center py-10">
-          <p className="text-muted-foreground text-sm font-heading tracking-wider">
-            No props available right now
+        <HudPanel title="NO SIGNALS" status="offline">
+          <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-6">
+            No prop intelligence available at this time. Standby for next scan window.
           </p>
-        </div>
+        </HudPanel>
       )}
     </div>
   );

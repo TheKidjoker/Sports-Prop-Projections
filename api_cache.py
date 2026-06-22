@@ -50,16 +50,9 @@ def clear_cache():
         _cache.clear()
 
 
-# ESPN URL builder
-SPORT_MAP = {
-    "nba": {"category": "basketball", "league": "nba"},
-    "nhl": {"category": "hockey", "league": "nhl"},
-    "cfb": {"category": "football", "league": "college-football"},
-    "nfl": {"category": "football", "league": "nfl"},
-    "cbb": {"category": "basketball", "league": "mens-college-basketball"},
-    "mlb": {"category": "baseball", "league": "mlb"},
-    "soccer": {"category": "soccer", "league": "eng.1"},
-}
+# ESPN URL builder — mapping sourced from sport_registry
+from sport_registry import get_espn_sport_map
+SPORT_MAP = get_espn_sport_map()
 
 
 def _espn_url(sport, endpoint):

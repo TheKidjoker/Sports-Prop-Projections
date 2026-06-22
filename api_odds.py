@@ -7,34 +7,55 @@ import os
 import logging
 import requests
 from api_cache import _cached_request, _espn_url
+from sport_registry import get_odds_api_sport_map
 import api_odds_io
 
 logger = logging.getLogger(__name__)
 
-ODDS_API_SPORT_MAP = {
-    "nba": "basketball_nba",
-    "nhl": "icehockey_nhl",
-    "nfl": "americanfootball_nfl",
-    "cfb": "americanfootball_ncaaf",
-    "cbb": "basketball_ncaab",
-    "mlb": "baseball_mlb",
-    "soccer_epl": "soccer_epl",
-    "soccer_spain_la_liga": "soccer_spain_la_liga",
-    "soccer_germany_bundesliga": "soccer_germany_bundesliga",
-    "soccer_italy_serie_a": "soccer_italy_serie_a",
-    "soccer_france_ligue_one": "soccer_france_ligue_one",
-    "soccer_usa_mls": "soccer_usa_mls",
-    "soccer_uefa_champs_league": "soccer_uefa_champs_league",
-    "soccer_netherlands_eredivisie": "soccer_netherlands_eredivisie",
-    "soccer_portugal_primeira_liga": "soccer_portugal_primeira_liga",
-    "soccer_turkey_super_league": "soccer_turkey_super_league",
-    "soccer_england_league1": "soccer_england_league1",
-    "soccer_mexico_ligamx": "soccer_mexico_ligamx",
-    "soccer_australia_aleague": "soccer_australia_aleague",
-    "soccer_japan_j_league": "soccer_japan_j_league",
-    "soccer_korea_kleague1": "soccer_korea_kleague1",
-    "soccer_saudi_pro_league": "soccer_saudi_professional_league",
+ODDS_API_SPORT_MAP = get_odds_api_sport_map()
+
+# ─── Prop Market → Stat Mappings ──────────────────────────────────────────────
+# Shared between _get_player_props_odds_theodds and _get_player_props_odds_full_theodds.
+
+THEODDS_MARKET_MAP = {
+    "nhl": {
+        "markets_str": "player_points,player_goals,player_assists,player_shots_on_goal",
+        "market_to_stat": {
+            "player_points": "points",
+            "player_goals": "goals",
+            "player_assists": "assists",
+            "player_shots_on_goal": "shots_on_goal",
+        },
+    },
+    "mlb": {
+        "markets_str": "pitcher_strikeouts,batter_hits,batter_total_bases,batter_home_runs,batter_runs_batted_in",
+        "market_to_stat": {
+            "pitcher_strikeouts": "strikeouts",
+            "batter_hits": "hits",
+            "batter_total_bases": "total_bases",
+            "batter_home_runs": "home_runs",
+            "batter_runs_batted_in": "rbis",
+        },
+    },
+    "_default": {
+        "markets_str": "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists",
+        "market_to_stat": {
+            "player_points": "points",
+            "player_rebounds": "rebounds",
+            "player_assists": "assists",
+            "player_points_rebounds_assists": "points_rebounds_assists",
+            "player_points_rebounds": "points_rebounds",
+            "player_points_assists": "points_assists",
+            "player_rebounds_assists": "rebounds_assists",
+        },
+    },
 }
+
+
+def _get_theodds_market_config(sport):
+    """Get markets_str and market_to_stat for a sport."""
+    config = THEODDS_MARKET_MAP.get(sport, THEODDS_MARKET_MAP["_default"])
+    return config["markets_str"], config["market_to_stat"]
 
 
 # ─── Primary/Fallback Wrappers ──────────────────────────────────────────────
@@ -219,34 +240,7 @@ def _get_player_props_odds_theodds(sport="nba"):
     try:
         url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
 
-        if sport == "nhl":
-            markets_str = "player_points,player_goals,player_assists,player_shots_on_goal"
-            market_to_stat = {
-                "player_points": "points",
-                "player_goals": "goals",
-                "player_assists": "assists",
-                "player_shots_on_goal": "shots_on_goal",
-            }
-        elif sport == "mlb":
-            markets_str = "pitcher_strikeouts,batter_hits,batter_total_bases,batter_home_runs,batter_runs_batted_in"
-            market_to_stat = {
-                "pitcher_strikeouts": "strikeouts",
-                "batter_hits": "hits",
-                "batter_total_bases": "total_bases",
-                "batter_home_runs": "home_runs",
-                "batter_runs_batted_in": "rbis",
-            }
-        else:
-            markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"
-            market_to_stat = {
-                "player_points": "points",
-                "player_rebounds": "rebounds",
-                "player_assists": "assists",
-                "player_points_rebounds_assists": "points_rebounds_assists",
-                "player_points_rebounds": "points_rebounds",
-                "player_points_assists": "points_assists",
-                "player_rebounds_assists": "rebounds_assists",
-            }
+        markets_str, market_to_stat = _get_theodds_market_config(sport)
 
         params = {
             "apiKey": api_key,
@@ -295,34 +289,7 @@ def _get_player_props_odds_full_theodds(sport="nba"):
     try:
         url = f"https://api.the-odds-api.com/v4/sports/{odds_sport}/odds/"
 
-        if sport == "nhl":
-            markets_str = "player_points,player_goals,player_assists,player_shots_on_goal"
-            market_to_stat = {
-                "player_points": "points",
-                "player_goals": "goals",
-                "player_assists": "assists",
-                "player_shots_on_goal": "shots_on_goal",
-            }
-        elif sport == "mlb":
-            markets_str = "pitcher_strikeouts,batter_hits,batter_total_bases,batter_home_runs,batter_runs_batted_in"
-            market_to_stat = {
-                "pitcher_strikeouts": "strikeouts",
-                "batter_hits": "hits",
-                "batter_total_bases": "total_bases",
-                "batter_home_runs": "home_runs",
-                "batter_runs_batted_in": "rbis",
-            }
-        else:
-            markets_str = "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists"
-            market_to_stat = {
-                "player_points": "points",
-                "player_rebounds": "rebounds",
-                "player_assists": "assists",
-                "player_points_rebounds_assists": "points_rebounds_assists",
-                "player_points_rebounds": "points_rebounds",
-                "player_points_assists": "points_assists",
-                "player_rebounds_assists": "rebounds_assists",
-            }
+        markets_str, market_to_stat = _get_theodds_market_config(sport)
 
         params = {
             "apiKey": api_key,

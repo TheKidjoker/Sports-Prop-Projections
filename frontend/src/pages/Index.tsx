@@ -1,21 +1,25 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { TopNav } from "../components/navigation/TopNav";
-import { AppSidebar } from "../components/navigation/AppSidebar";
 import { GameTicker } from "../components/navigation/GameTicker";
 import { MobileNav } from "../components/navigation/MobileNav";
-import { HeroSection } from "../components/home/HeroSection";
-import { ScanResults } from "../components/picks/ScanResults";
 import { SportPills } from "../components/navigation/SportPills";
-import { PropsPage } from "./PropsPage";
-import { ParlayPage } from "./ParlayPage";
-import { LedgerPage } from "./LedgerPage";
-import { MyBetsPage } from "./MyBetsPage";
-import { AdminPage } from "./AdminPage";
-import { TestModelPage } from "./TestModelPage";
+import { CommandCenter } from "../components/home/CommandCenter";
 import { BetSlip, type BetSlipItem } from "@/components/bets/BetSlip";
 import { LogoLoader } from "@/components/ui/LogoLoader";
+import { HudPanel } from "@/components/jarvis/HudPanel";
+import { ScanlineOverlay } from "@/components/jarvis/ScanlineOverlay";
 import { useAuth } from "@/lib/auth";
 import type { Sport } from "@/lib/types";
+
+// Lazy-load heavy pages
+const ScanResults = lazy(() => import("../components/picks/ScanResults").then(m => ({ default: m.ScanResults })));
+const PropsPage = lazy(() => import("./PropsPage").then(m => ({ default: m.PropsPage })));
+const ParlayPage = lazy(() => import("./ParlayPage").then(m => ({ default: m.ParlayPage })));
+const LedgerPage = lazy(() => import("./LedgerPage").then(m => ({ default: m.LedgerPage })));
+const MyBetsPage = lazy(() => import("./MyBetsPage").then(m => ({ default: m.MyBetsPage })));
+const TestModelPage = lazy(() => import("./TestModelPage").then(m => ({ default: m.TestModelPage })));
+const AdminPage = lazy(() => import("./AdminPage").then(m => ({ default: m.AdminPage })));
 
 function LoginForm() {
   const { signIn, signUp } = useAuth();
@@ -24,72 +28,100 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [bootPhase, setBootPhase] = useState(0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
+    setBootPhase(1);
     try {
       if (isSignUp) {
         await signUp(email, password);
         setError("Check your email to confirm your account.");
         setIsSignUp(false);
+        setBootPhase(0);
       } else {
+        setTimeout(() => setBootPhase(2), 600);
         await signIn(email, password);
+        setBootPhase(3);
       }
     } catch (err) {
       setError((err as Error).message);
+      setBootPhase(0);
     } finally {
       setLoading(false);
     }
   };
 
+  const bootMessages = ["", "AUTHENTICATING...", "VERIFYING CLEARANCE...", "ACCESS GRANTED"];
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="card-surface rounded-sm p-8 max-w-sm w-full">
-        <h1 className="text-2xl font-heading tracking-[0.15em] text-foreground mb-1 text-center">
-          <span className="text-primary">JOKER'S</span>{" "}
-          <span className="text-secondary">EDGE</span>
-        </h1>
-        <p className="text-xs text-muted-foreground text-center mb-6 font-heading tracking-wider">
-          {isSignUp ? "CREATE AN ACCOUNT" : "SIGN IN TO CONTINUE"}
-        </p>
+    <div className="min-h-screen bg-background flex items-center justify-center hex-grid-bg">
+      <div className="hud-panel p-8 max-w-sm w-full mx-4">
+        <div className="text-center mb-6">
+          <img
+            src="/static/logo.png"
+            alt="Joker's Edge"
+            className="w-20 h-20 mx-auto mb-4"
+            style={{ filter: "drop-shadow(0 0 20px hsla(0, 72%, 51%, 0.4))" }}
+          />
+          <h1 className="text-2xl font-heading tracking-[0.15em] text-foreground mb-1">
+            <span className="text-primary">JOKER'S</span>{" "}
+            <span className="text-secondary">EDGE</span>
+          </h1>
+          <p className="text-[10px] text-muted-foreground font-heading tracking-[0.2em]">
+            {isSignUp ? "CREATE OPERATIVE ACCOUNT" : "SYSTEM ACCESS REQUIRED"}
+          </p>
+        </div>
+
+        {bootPhase > 0 && (
+          <div className="mb-4 text-center">
+            <span className="text-[10px] font-mono text-primary animate-boot-text">
+              {bootMessages[bootPhase]}
+            </span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 bg-muted border border-border rounded-sm text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            className="w-full px-3 py-2 bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
+            style={{ clipPath: "polygon(0 4px, 4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)" }}
           />
           <input
             type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 bg-muted border border-border rounded-sm text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            className="w-full px-3 py-2 bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
+            style={{ clipPath: "polygon(0 4px, 4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)" }}
           />
           {error && (
-            <p className="text-xs text-primary">{error}</p>
+            <p className="text-xs text-primary font-mono">{error}</p>
           )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-primary text-primary-foreground font-heading tracking-[0.15em] text-sm rounded-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+            className="w-full py-2.5 bg-primary text-primary-foreground font-heading tracking-[0.15em] text-sm transition-all duration-200 hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+            style={{ clipPath: "polygon(0 4px, 4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px))" }}
           >
             {loading
-              ? isSignUp ? "CREATING ACCOUNT..." : "SIGNING IN..."
-              : isSignUp ? "SIGN UP" : "SIGN IN"}
+              ? isSignUp ? "CREATING ACCOUNT..." : "DEPLOYING..."
+              : isSignUp ? "REGISTER" : "DEPLOY"}
           </button>
         </form>
-        <p className="text-xs text-muted-foreground text-center mt-4">
-          {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
+        <p className="text-[10px] text-muted-foreground text-center mt-4 font-heading tracking-wider">
+          {isSignUp ? "Existing operative?" : "New operative?"}{" "}
           <button
             type="button"
             onClick={() => { setIsSignUp(!isSignUp); setError(""); }}
-            className="text-primary hover:underline font-heading tracking-wider"
+            className="text-primary hover:underline"
           >
-            {isSignUp ? "Sign In" : "Sign Up"}
+            {isSignUp ? "SIGN IN" : "REGISTER"}
           </button>
         </p>
       </div>
@@ -97,11 +129,22 @@ function LoginForm() {
   );
 }
 
+// Map old section IDs to new ones for compatibility
+const SECTION_MAP: Record<string, string> = {
+  home: "command",
+  picks: "intel",
+  props: "operatives",
+  parlays: "strike-ops",
+  ledger: "war-room",
+  bets: "field-log",
+  test: "diagnostics",
+  admin: "admin",
+};
+
 const Index = () => {
   const { isLoading, isAuthenticated, isAdmin } = useAuth();
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
-  const [activeSection, setActiveSection] = useState("picks");
-  const [scanning, setScanning] = useState(false);
+  const [activeSection, setActiveSection] = useState("command");
   const [selectedBets, setSelectedBets] = useState<BetSlipItem[]>([]);
 
   const addBet = useCallback((bet: BetSlipItem) => {
@@ -128,102 +171,87 @@ const Index = () => {
     return <LoginForm />;
   }
 
-  const handleScan = () => {
-    if (selectedSport) {
-      setScanning(true);
-      setActiveSection("picks");
-    }
-  };
-
   const handleSelectSport = (sport: Sport | null) => {
     setSelectedSport(sport);
-    if (sport) {
-      setScanning(true);
-      setActiveSection("picks");
-    } else {
-      setScanning(false);
+    if (sport && activeSection === "command") {
+      setActiveSection("intel");
     }
-  };
-
-  const handleHome = () => {
-    setSelectedSport(null);
-    setScanning(false);
-    setActiveSection("picks");
   };
 
   const handleSelectSection = (id: string) => {
-    if (id === "home") {
-      handleHome();
-    } else {
-      setActiveSection(id);
+    // Map old IDs to new if needed
+    const mapped = SECTION_MAP[id] ?? id;
+    setActiveSection(mapped);
+    if (mapped === "command") {
+      setSelectedSport(null);
     }
   };
 
   const renderContent = () => {
     switch (activeSection) {
-      case "props":
-        return <PropsPage sport={selectedSport} onTrackBet={addBet} />;
-      case "parlays":
-        return <ParlayPage onTrackBet={addBet} />;
-      case "ledger":
-        return <LedgerPage sport={selectedSport} />;
-      case "bets":
-        return <MyBetsPage sport={selectedSport} />;
-      case "test":
-        return <TestModelPage sport={selectedSport} />;
-      case "admin":
-        if (isAdmin) return <AdminPage sport={selectedSport} />;
-        return null;
-      case "picks":
-      default:
-        if (!scanning) {
-          return (
-            <HeroSection
-              onSelectSport={(sport) => handleSelectSport(sport)}
-              onScan={handleScan}
-              selectedSport={selectedSport}
-            />
-          );
-        }
+      case "intel":
         if (selectedSport) {
           return <ScanResults sport={selectedSport} isAdmin={isAdmin} onTrackBet={addBet} />;
         }
         return (
-          <HeroSection
-            onSelectSport={(sport) => handleSelectSport(sport)}
-            onScan={handleScan}
-            selectedSport={selectedSport}
-          />
+          <div className="py-12 text-center">
+            <p className="text-muted-foreground font-heading tracking-wider text-sm">SELECT A SPORT TO BEGIN INTEL SCAN</p>
+            <div className="flex justify-center mt-4">
+              <SportPills selected={selectedSport} onSelect={handleSelectSport} />
+            </div>
+          </div>
         );
+      case "operatives":
+        return <PropsPage sport={selectedSport} onTrackBet={addBet} />;
+      case "strike-ops":
+        return <ParlayPage onTrackBet={addBet} />;
+      case "war-room":
+        return <LedgerPage sport={selectedSport} />;
+      case "field-log":
+        return <MyBetsPage sport={selectedSport} />;
+      case "diagnostics":
+        return <TestModelPage sport={selectedSport} />;
+      case "admin":
+        if (isAdmin) return <AdminPage sport={selectedSport} />;
+        return null;
+      case "command":
+      default:
+        return <CommandCenter onSelectSport={handleSelectSport} />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background hex-grid-bg">
       <TopNav
+        activeSection={activeSection}
+        onSelectSection={handleSelectSection}
         selectedSport={selectedSport}
         onSelectSport={handleSelectSport}
         onAdminClick={() => setActiveSection("admin")}
-        onHomeClick={handleHome}
+        betCount={selectedBets.length}
       />
       <GameTicker />
 
       {/* Mobile sport pills */}
-      <div className="md:hidden overflow-x-auto px-4 py-2 border-b border-border">
+      <div className="md:hidden overflow-x-auto px-3 py-2 border-b border-border">
         <SportPills selected={selectedSport} onSelect={handleSelectSport} />
       </div>
 
-      <div className="flex w-full">
-        <AppSidebar
-          activeSection={activeSection}
-          onSelectSection={handleSelectSection}
-          isAdmin={isAdmin}
-        />
-
-        <main className="flex-1 pb-24 lg:pb-0">
-          {renderContent()}
-        </main>
-      </div>
+      <main className="flex-1 pb-20 md:pb-0">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeSection}
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.15, exit: { duration: 0.1 } }}
+          >
+            <Suspense fallback={<LogoLoader text="LOADING MODULE..." />}>
+              {renderContent()}
+            </Suspense>
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
       <MobileNav activeSection={activeSection} onSelectSection={handleSelectSection} />
 
