@@ -400,9 +400,13 @@ def _update_bet_result(bet_id, user_email, result, actual_value,
 
 # ─── get_tracked_dashboard ────────────────────────────────────────────────────
 
-def get_tracked_dashboard(user_email, sport=None):
+def get_tracked_dashboard(user_email, sport=None, start_date=None, end_date=None):
     """Aggregates bet tracking stats for the dashboard."""
     all_bets = get_tracked_bets(user_email, sport=sport)
+
+    # Apply date filtering if provided
+    if start_date or end_date:
+        all_bets = _filter_bets_by_date(all_bets, start_date, end_date)
 
     decided = [b for b in all_bets if b["result"] in ("WIN", "LOSS", "PUSH")]
     pending = [b for b in all_bets if b["result"] == "PENDING"]
@@ -444,6 +448,14 @@ def get_tracked_dashboard(user_email, sport=None):
     beat_close = sum(1 for b in clv_bets if b.get("clv_direction") == 1)
     beat_close_rate = round(beat_close / clv_total * 100, 1) if clv_total else None
 
+    # Analytics
+    wl_decided = [b for b in decided if b["result"] in ("WIN", "LOSS")]
+    drawdown = _compute_drawdown(wl_decided)
+    variance = _compute_variance(wl_decided, all_bets)
+    streaks = _compute_streak_analysis(decided)
+    cumulative_pnl = _compute_cumulative_pnl(wl_decided)
+    monthly_breakdown = _compute_monthly_breakdown(all_bets)
+
     return {
         "overall": {
             "wins": w,
@@ -466,16 +478,24 @@ def get_tracked_dashboard(user_email, sport=None):
         "by_recommendation": by_rec,
         "by_stat_type": by_stat,
         "recent": [_bet_to_dict(b) for b in all_bets[:50]],
+        "drawdown": drawdown,
+        "variance": variance,
+        "streaks": streaks,
+        "cumulative_pnl": cumulative_pnl,
+        "monthly_breakdown": monthly_breakdown,
     }
 
 
-def get_bets_with_dashboard(user_email, sport=None, status=None):
+def get_bets_with_dashboard(user_email, sport=None, status=None, start_date=None, end_date=None):
     """Combined bets list + dashboard in single DB query (saves duplicate round trip)."""
     all_bets = get_tracked_bets(user_email, sport=sport)
 
-    # Build dashboard from all_bets (same logic as get_tracked_dashboard)
-    decided = [b for b in all_bets if b["result"] in ("WIN", "LOSS", "PUSH")]
-    pending = [b for b in all_bets if b["result"] == "PENDING"]
+    # Apply date filtering for dashboard computation
+    dashboard_bets = _filter_bets_by_date(all_bets, start_date, end_date) if (start_date or end_date) else all_bets
+
+    # Build dashboard from dashboard_bets
+    decided = [b for b in dashboard_bets if b["result"] in ("WIN", "LOSS", "PUSH")]
+    pending = [b for b in dashboard_bets if b["result"] == "PENDING"]
 
     w = sum(1 for b in decided if b["result"] == "WIN")
     l = sum(1 for b in decided if b["result"] == "LOSS")
@@ -497,11 +517,19 @@ def get_bets_with_dashboard(user_email, sport=None, status=None):
     prop_decided = [b for b in decided if b["bet_type"] == "prop"]
     by_stat = _aggregate_by_field(prop_decided, "stat_type")
 
-    clv_bets = [b for b in all_bets if b.get("bet_type") == "spread" and b.get("clv") is not None]
+    clv_bets = [b for b in dashboard_bets if b.get("bet_type") == "spread" and b.get("clv") is not None]
     clv_total = len(clv_bets)
     avg_clv = round(sum(b["clv"] for b in clv_bets) / clv_total, 2) if clv_total else None
     beat_close = sum(1 for b in clv_bets if b.get("clv_direction") == 1)
     beat_close_rate = round(beat_close / clv_total * 100, 1) if clv_total else None
+
+    # Analytics
+    wl_decided = [b for b in decided if b["result"] in ("WIN", "LOSS")]
+    drawdown = _compute_drawdown(wl_decided)
+    variance = _compute_variance(wl_decided, dashboard_bets)
+    streaks = _compute_streak_analysis(decided)
+    cumulative_pnl = _compute_cumulative_pnl(wl_decided)
+    monthly_breakdown = _compute_monthly_breakdown(dashboard_bets)
 
     dashboard = {
         "overall": {
@@ -513,12 +541,35 @@ def get_bets_with_dashboard(user_email, sport=None, status=None):
         "clv": {"avg_clv": avg_clv, "beat_close_rate": beat_close_rate, "clv_total": clv_total},
         "by_type": by_type, "by_sport": by_sport,
         "by_recommendation": by_rec, "by_stat_type": by_stat,
-        "recent": [_bet_to_dict(b) for b in all_bets[:50]],
+        "recent": [_bet_to_dict(b) for b in dashboard_bets[:50]],
+        "drawdown": drawdown,
+        "variance": variance,
+        "streaks": streaks,
+        "cumulative_pnl": cumulative_pnl,
+        "monthly_breakdown": monthly_breakdown,
     }
 
     # Apply status filter for the bets list (dashboard uses all bets)
-    filtered = [b for b in all_bets if b["result"] == status] if status else all_bets
+    filtered = [b for b in dashboard_bets if b["result"] == status] if status else dashboard_bets
     return {"bets": filtered, "dashboard": dashboard}
+
+
+def _filter_bets_by_date(bets, start_date=None, end_date=None):
+    """Filter bets by date range using game_date or created_at."""
+    if not start_date and not end_date:
+        return bets
+    filtered = []
+    for b in bets:
+        date_str = b.get("game_date") or b.get("created_at", "")[:10]
+        if not date_str:
+            filtered.append(b)
+            continue
+        if start_date and date_str < start_date:
+            continue
+        if end_date and date_str > end_date:
+            continue
+        filtered.append(b)
+    return filtered
 
 
 def _compute_streak(decided):
@@ -537,6 +588,179 @@ def _compute_streak(decided):
         else:
             break
     return {"type": streak_type, "count": count}
+
+
+def _compute_drawdown(decided):
+    """Compute drawdown metrics from decided bets (chronological)."""
+    sorted_bets = sorted(decided, key=lambda b: b.get("created_at", ""))
+    if not sorted_bets:
+        return {"max_drawdown": 0, "current_drawdown": 0, "recovery_length": 0, "peak_pnl": 0}
+
+    cumulative = 0
+    peak = 0
+    max_dd = 0
+    bets_since_peak = 0
+
+    for b in sorted_bets:
+        if b["result"] == "WIN":
+            cumulative += 100.0 / 110.0
+        elif b["result"] == "LOSS":
+            cumulative -= 1.0
+
+        if cumulative > peak:
+            peak = cumulative
+            bets_since_peak = 0
+        else:
+            bets_since_peak += 1
+
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+
+    return {
+        "max_drawdown": round(max_dd, 2),
+        "current_drawdown": round(peak - cumulative, 2),
+        "recovery_length": bets_since_peak,
+        "peak_pnl": round(peak, 2),
+    }
+
+
+def _compute_variance(decided, all_bets=None):
+    """Compute variance and Sharpe ratio from decided bets."""
+    if not decided:
+        return {"std_dev": 0, "sharpe_ratio": 0, "by_sport": {}}
+
+    returns = [100.0 / 110.0 if b["result"] == "WIN" else -1.0 for b in decided]
+    n = len(returns)
+    mean_ret = sum(returns) / n
+    variance = sum((r - mean_ret) ** 2 for r in returns) / n if n > 1 else 0
+    std_dev = variance ** 0.5
+
+    # CLV-based Sharpe
+    clv_bets = all_bets or decided
+    clv_values = [b["clv"] for b in clv_bets if b.get("clv") is not None]
+    sharpe = 0
+    if clv_values and len(clv_values) >= 2:
+        clv_mean = sum(clv_values) / len(clv_values)
+        clv_var = sum((v - clv_mean) ** 2 for v in clv_values) / len(clv_values)
+        clv_std = clv_var ** 0.5
+        if clv_std > 0:
+            sharpe = round(clv_mean / clv_std, 2)
+
+    # By sport
+    by_sport = {}
+    for sp in sorted(set(b.get("sport", "") for b in decided if b.get("sport"))):
+        sp_decided = [b for b in decided if b.get("sport") == sp]
+        sp_returns = [100.0 / 110.0 if b["result"] == "WIN" else -1.0 for b in sp_decided]
+        sp_n = len(sp_returns)
+        sp_mean = sum(sp_returns) / sp_n
+        sp_var = sum((r - sp_mean) ** 2 for r in sp_returns) / sp_n if sp_n > 1 else 0
+        by_sport[sp] = {"std_dev": round(sp_var ** 0.5, 4), "count": sp_n}
+
+    return {"std_dev": round(std_dev, 4), "sharpe_ratio": sharpe, "by_sport": by_sport}
+
+
+def _compute_streak_analysis(decided):
+    """Max win/loss streaks, current streak, distribution."""
+    sorted_bets = sorted(decided, key=lambda b: b.get("created_at", ""))
+    wl = [b for b in sorted_bets if b["result"] in ("WIN", "LOSS")]
+
+    if not wl:
+        return {"max_win": 0, "max_loss": 0, "current": {"type": "none", "count": 0}, "distribution": {}}
+
+    max_win = 0
+    max_loss = 0
+    cur_type = wl[0]["result"]
+    cur_count = 1
+    streak_lengths = {"WIN": [], "LOSS": []}
+
+    for i in range(1, len(wl)):
+        if wl[i]["result"] == cur_type:
+            cur_count += 1
+        else:
+            streak_lengths[cur_type].append(cur_count)
+            if cur_type == "WIN":
+                max_win = max(max_win, cur_count)
+            else:
+                max_loss = max(max_loss, cur_count)
+            cur_type = wl[i]["result"]
+            cur_count = 1
+
+    streak_lengths[cur_type].append(cur_count)
+    if cur_type == "WIN":
+        max_win = max(max_win, cur_count)
+    else:
+        max_loss = max(max_loss, cur_count)
+
+    distribution = {}
+    for lengths in streak_lengths.values():
+        for length in lengths:
+            distribution[length] = distribution.get(length, 0) + 1
+
+    latest_type = wl[-1]["result"]
+    latest_count = 0
+    for b in reversed(wl):
+        if b["result"] == latest_type:
+            latest_count += 1
+        else:
+            break
+
+    return {
+        "max_win": max_win,
+        "max_loss": max_loss,
+        "current": {"type": latest_type, "count": latest_count},
+        "distribution": distribution,
+    }
+
+
+def _compute_cumulative_pnl(decided):
+    """Compute cumulative P&L series for charting. Returns list of {date, pnl}."""
+    sorted_bets = sorted(decided, key=lambda b: b.get("created_at", ""))
+    series = []
+    cumulative = 0
+    for b in sorted_bets:
+        if b["result"] == "WIN":
+            cumulative += 100.0 / 110.0
+        elif b["result"] == "LOSS":
+            cumulative -= 1.0
+        date_str = b.get("game_date") or b.get("created_at", "")[:10]
+        series.append({"date": date_str, "pnl": round(cumulative, 2)})
+    return series
+
+
+def _compute_monthly_breakdown(all_bets):
+    """Group bets by month, compute W/L/ROI/CLV per period."""
+    decided = [b for b in all_bets if b.get("result") in ("WIN", "LOSS", "PUSH")]
+    by_period = {}
+    for b in decided:
+        date_str = b.get("game_date") or b.get("created_at", "")
+        if not date_str:
+            continue
+        period_label = date_str[:7]
+        if period_label not in by_period:
+            by_period[period_label] = {"wins": 0, "losses": 0, "pushes": 0, "clv_values": []}
+        if b["result"] == "WIN":
+            by_period[period_label]["wins"] += 1
+        elif b["result"] == "LOSS":
+            by_period[period_label]["losses"] += 1
+        elif b["result"] == "PUSH":
+            by_period[period_label]["pushes"] += 1
+        if b.get("clv") is not None:
+            by_period[period_label]["clv_values"].append(b["clv"])
+
+    result = []
+    for label in sorted(by_period.keys()):
+        data = by_period[label]
+        w, l = data["wins"], data["losses"]
+        total = w + l
+        win_rate = round(w / total * 100, 1) if total > 0 else 0
+        roi = round((w * (100 / 110) - l) / total * 100, 1) if total > 0 else 0
+        avg_clv = round(sum(data["clv_values"]) / len(data["clv_values"]), 2) if data["clv_values"] else None
+        result.append({
+            "period_label": label, "wins": w, "losses": l, "pushes": data["pushes"],
+            "win_rate": win_rate, "roi": roi, "avg_clv": avg_clv,
+        })
+    return result
 
 
 def _aggregate_by_field(bets, field):

@@ -1,22 +1,162 @@
 # ─── Soccer API Client (API-Football) ─────────────────────────────────────────
 # Fetches fixtures, xG, team stats, H2H, lineups from api-football.com.
 # Supports 1000+ leagues via API-Football (RapidAPI).
+#
+# Rate limiting: 100 calls/day on free tier. We cache responses with an
+# 8-hour TTL so data refreshes at most 3 times per day. A file-backed
+# budget tracker survives server restarts.
 
 import os
+import json
 import time
 import logging
 import requests
-from api_cache import _cached_request
+from datetime import date, datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://v3.football.api-sports.io"
 RAPID_API_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
-# Rate limit: 10 req/min on free tier, 300/min on paid
-_rate_limit = {"remaining": None, "last_request": 0}
+# ─── Budget & Cache Config ────────────────────────────────────────────────────
+DAILY_CALL_LIMIT = 100
+CACHE_TTL_SECONDS = 8 * 60 * 60  # 8 hours → 3 refreshes per day
 _MIN_INTERVAL = 0.2  # 200ms between requests
 
+# File paths (next to this module)
+_MODULE_DIR = Path(__file__).parent
+_BUDGET_FILE = _MODULE_DIR / ".soccer_api_budget.json"
+_CACHE_FILE = _MODULE_DIR / ".soccer_api_cache.json"
+
+# In-memory state (loaded from files on first use)
+_budget = None   # {"date": "YYYY-MM-DD", "calls": int}
+_cache = None    # {"endpoint|params_hash": {"ts": float, "data": ...}, ...}
+_rate_limit = {"last_request": 0}
+
+
+# ─── Budget Tracking ─────────────────────────────────────────────────────────
+
+def _load_budget():
+    """Load daily budget from file, reset if it's a new day."""
+    global _budget
+    today = date.today().isoformat()
+
+    if _budget and _budget["date"] == today:
+        return _budget
+
+    # Try to load from file
+    try:
+        if _BUDGET_FILE.exists():
+            raw = json.loads(_BUDGET_FILE.read_text())
+            if raw.get("date") == today:
+                _budget = raw
+                return _budget
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    # New day or corrupt file → reset
+    _budget = {"date": today, "calls": 0}
+    _save_budget()
+    return _budget
+
+
+def _save_budget():
+    """Persist budget to file."""
+    try:
+        _BUDGET_FILE.write_text(json.dumps(_budget))
+    except OSError as e:
+        logger.warning("[soccer_api] Could not save budget file: %s", e)
+
+
+def _increment_budget():
+    """Record one API call. Returns False if over budget."""
+    budget = _load_budget()
+    if budget["calls"] >= DAILY_CALL_LIMIT:
+        return False
+    budget["calls"] += 1
+    _save_budget()
+    return True
+
+
+def get_budget_status():
+    """Return current daily budget status for diagnostics."""
+    budget = _load_budget()
+    return {
+        "date": budget["date"],
+        "calls_used": budget["calls"],
+        "calls_remaining": max(0, DAILY_CALL_LIMIT - budget["calls"]),
+        "daily_limit": DAILY_CALL_LIMIT,
+    }
+
+
+# ─── Response Cache ──────────────────────────────────────────────────────────
+
+def _cache_key(endpoint, params):
+    """Build a deterministic cache key from endpoint + params."""
+    sorted_params = sorted((params or {}).items())
+    return f"{endpoint}|{json.dumps(sorted_params, sort_keys=True)}"
+
+
+def _load_cache():
+    """Load response cache from file."""
+    global _cache
+    if _cache is not None:
+        return _cache
+
+    try:
+        if _CACHE_FILE.exists():
+            _cache = json.loads(_CACHE_FILE.read_text())
+            return _cache
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    _cache = {}
+    return _cache
+
+
+def _save_cache():
+    """Persist cache to file. Prune entries older than 24h."""
+    global _cache
+    if _cache is None:
+        return
+
+    now = time.time()
+    max_age = 24 * 60 * 60  # Never keep entries older than 24h
+    pruned = {k: v for k, v in _cache.items() if now - v.get("ts", 0) < max_age}
+    _cache = pruned
+
+    try:
+        _CACHE_FILE.write_text(json.dumps(_cache))
+    except OSError as e:
+        logger.warning("[soccer_api] Could not save cache file: %s", e)
+
+
+def _get_cached(endpoint, params):
+    """Return cached response if fresh (within TTL), or stale data + flag."""
+    cache = _load_cache()
+    key = _cache_key(endpoint, params)
+    entry = cache.get(key)
+
+    if not entry:
+        return None, False  # No cache at all
+
+    age = time.time() - entry.get("ts", 0)
+    if age < CACHE_TTL_SECONDS:
+        return entry["data"], True   # Fresh cache
+    else:
+        return entry["data"], False  # Stale cache (usable as fallback)
+
+
+def _set_cached(endpoint, params, data):
+    """Store response in cache."""
+    cache = _load_cache()
+    key = _cache_key(endpoint, params)
+    cache[key] = {"ts": time.time(), "data": data}
+    _save_cache()
+
+
+# ─── Core API ────────────────────────────────────────────────────────────────
 
 def _get_api_key():
     return os.environ.get("FOOTBALL_API_KEY", "")
@@ -36,40 +176,94 @@ def _get_headers():
 
 
 def _api_request(endpoint, params=None):
-    """Make a rate-limited request to API-Football."""
+    """
+    Make a rate-limited, budget-aware, cached request to API-Football.
+
+    Flow:
+    1. Check cache — if fresh, return immediately (no API call).
+    2. Check daily budget — if exhausted, return stale cache or None.
+    3. Make the API call, cache the response.
+    """
+    # 1. Check cache first
+    cached_data, is_fresh = _get_cached(endpoint, params)
+    if is_fresh:
+        logger.debug("[soccer_api] Cache hit (fresh) for %s", endpoint)
+        return cached_data
+
+    # 2. Check headers (API key configured?)
     headers = _get_headers()
     if not headers:
         logger.debug("[soccer_api] No FOOTBALL_API_KEY set")
-        return None
+        return cached_data  # Return stale cache if available
 
-    # Rate limiting
+    # 3. Check daily budget
+    budget = _load_budget()
+    if budget["calls"] >= DAILY_CALL_LIMIT:
+        remaining_calls = 0
+        if cached_data is not None:
+            logger.info(
+                "[soccer_api] Daily budget exhausted (%d/%d). "
+                "Serving stale cache for %s",
+                budget["calls"], DAILY_CALL_LIMIT, endpoint,
+            )
+            return cached_data
+        else:
+            logger.warning(
+                "[soccer_api] Daily budget exhausted (%d/%d) and no cache "
+                "available for %s",
+                budget["calls"], DAILY_CALL_LIMIT, endpoint,
+            )
+            return None
+
+    # 4. Rate limiting (200ms between requests)
     now = time.time()
     elapsed = now - _rate_limit["last_request"]
     if elapsed < _MIN_INTERVAL:
         time.sleep(_MIN_INTERVAL - elapsed)
 
+    # 5. Make the request
     url = f"{BASE_URL}/{endpoint}"
     try:
         response = requests.get(url, params=params, headers=headers, timeout=15)
         _rate_limit["last_request"] = time.time()
 
         if response.status_code == 429:
-            logger.warning("[soccer_api] Rate limited, waiting 60s")
-            time.sleep(60)
-            return None
+            logger.warning("[soccer_api] Rate limited by API, serving stale cache")
+            return cached_data
 
         if response.status_code != 200:
             logger.warning("[soccer_api] HTTP %d for %s", response.status_code, endpoint)
-            return None
+            return cached_data
 
         data = response.json()
         if data.get("errors"):
-            logger.warning("[soccer_api] API errors: %s", data["errors"])
-            return None
+            errors = data["errors"]
+            # API-Football returns errors as dict or list
+            if isinstance(errors, dict) and errors:
+                logger.warning("[soccer_api] API errors: %s", errors)
+                return cached_data
+            elif isinstance(errors, list) and errors:
+                logger.warning("[soccer_api] API errors: %s", errors)
+                return cached_data
 
-        return data.get("response", [])
+        result = data.get("response", [])
+
+        # 6. Record the call and cache the result
+        _increment_budget()
+        _set_cached(endpoint, params, result)
+
+        remaining = get_budget_status()
+        logger.info(
+            "[soccer_api] %s OK — %d/%d calls used today",
+            endpoint, remaining["calls_used"], DAILY_CALL_LIMIT,
+        )
+
+        return result
     except (requests.RequestException, ValueError) as e:
         logger.warning("[soccer_api] Request failed: %s", e)
+        if cached_data is not None:
+            logger.info("[soccer_api] Serving stale cache after error")
+            return cached_data
         return None
 
 
@@ -93,8 +287,8 @@ def get_fixtures(league_id, date_str=None, season=None):
         list of fixture dicts
     """
     if date_str is None:
-        from datetime import date
-        date_str = date.today().isoformat()
+        from datetime import date as _date
+        date_str = _date.today().isoformat()
 
     if season is None:
         season = int(date_str[:4])
@@ -146,7 +340,6 @@ def get_team_stats(team_id, league_id, season=None):
         dict with form, goals, xG, clean sheets, etc.
     """
     if season is None:
-        from datetime import date
         season = date.today().year
         if date.today().month < 7:
             season -= 1
@@ -169,7 +362,7 @@ def get_team_stats(team_id, league_id, season=None):
         "games_played": stats.get("fixtures", {}).get("played", {}).get("total", 0),
         "wins": stats.get("fixtures", {}).get("wins", {}).get("total", 0),
         "draws": stats.get("fixtures", {}).get("draws", {}).get("total", 0),
-        "losses": stats.get("fixtures", {}).get("losses", {}).get("total", 0),
+        "losses": stats.get("fixtures", {}).get("loses", {}).get("total", 0),
         "goals_for_total": goals_for.get("total", {}).get("total", 0),
         "goals_for_avg": goals_for.get("average", {}).get("total"),
         "goals_against_total": goals_against.get("total", {}).get("total", 0),
@@ -256,7 +449,6 @@ def get_fixture_xg(fixture_id):
 def get_standings(league_id, season=None):
     """Get league standings."""
     if season is None:
-        from datetime import date
         season = date.today().year
         if date.today().month < 7:
             season -= 1
@@ -293,7 +485,6 @@ def get_standings(league_id, season=None):
 def get_top_scorers(league_id, season=None):
     """Get top scorers for a league season."""
     if season is None:
-        from datetime import date
         season = date.today().year
         if date.today().month < 7:
             season -= 1

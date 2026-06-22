@@ -137,7 +137,15 @@ export function PickCard({ pick, index, isAdmin = false, onTrackBet }: PickCardP
           </div>
         </div>
         {pick.spreadLine && (
-          <p className="text-xs text-muted-foreground">{pick.spreadLine}</p>
+          <p className="text-xs text-muted-foreground">
+            {pick.spreadLine}
+            {pick.bestLine && pick.bestLine.spread !== undefined && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-success/10 text-success border border-success/20">
+                Best: {pick.bestLine.book} {pick.bestLine.spread > 0 ? "+" : ""}{pick.bestLine.spread}
+                {pick.bestLine.spread_odds ? ` ${pick.bestLine.spread_odds}` : ""}
+              </span>
+            )}
+          </p>
         )}
       </div>
 

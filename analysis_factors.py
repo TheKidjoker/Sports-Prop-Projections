@@ -196,6 +196,130 @@ def _analyze_nfl_weather(game, event_id):
     return result
 
 
+# ─── MLB WEATHER ANALYSIS ──────────────────────────────────────────────────
+
+MLB_OPEN_AIR_PARKS = {
+    "Wrigley Field",           # Cubs
+    "Fenway Park",             # Red Sox
+    "Kauffman Stadium",        # Royals
+    "Oracle Park",             # Giants
+    "Citi Field",              # Mets
+    "Dodger Stadium",          # Dodgers
+    "Yankee Stadium",          # Yankees
+    "Petco Park",              # Padres
+    "Great American Ball Park",  # Reds
+    "PNC Park",                # Pirates
+    "Nationals Park",          # Nationals
+    "Oriole Park at Camden Yards",  # Orioles
+    "Progressive Field",       # Guardians
+    "Guaranteed Rate Field",   # White Sox
+    "Target Field",            # Twins
+    "Busch Stadium",           # Cardinals
+    "Comerica Park",           # Tigers
+    "Angel Stadium",           # Angels
+    "Oakland Coliseum",        # Athletics
+    "Citizens Bank Park",      # Phillies
+}
+
+MLB_RETRACTABLE_PARKS = {
+    "Globe Life Field",        # Rangers
+    "T-Mobile Park",           # Mariners
+    "Minute Maid Park",        # Astros
+    "loanDepot park",          # Marlins
+    "American Family Field",   # Brewers
+    "Chase Field",             # Diamondbacks
+    "Rogers Centre",           # Blue Jays
+}
+
+MLB_DOME_PARKS = {
+    "Tropicana Field",         # Rays
+}
+
+MLB_HIGH_ALTITUDE_PARKS = {
+    "Coors Field": {"altitude_ft": 5280, "run_factor": 1.15},
+}
+
+
+def _analyze_mlb_weather(game, event_id):
+    """
+    MLB weather analysis with 3-tier fetch (same pattern as NFL).
+    MLB-specific thresholds:
+      - Wind >= 12 mph: affects fly balls
+      - Temp >= 90F: ball carries further, lean offense
+      - Temp <= 45F: ball doesn't carry, lean defense
+      - Any precipitation: game impact
+      - Altitude factor for Coors Field
+
+    Returns:
+        Dict with is_dome, alerts, weather, altitude_factor.
+    """
+    venue_name = game.get("venue_name", "")
+
+    # Check if dome or retractable roof
+    if venue_name in MLB_DOME_PARKS or venue_name in MLB_RETRACTABLE_PARKS:
+        result = {"is_dome": True, "alerts": []}
+        # Still check altitude even for retractable (Coors is open-air though)
+        if venue_name in MLB_HIGH_ALTITUDE_PARKS:
+            alt_data = MLB_HIGH_ALTITUDE_PARKS[venue_name]
+            result["altitude_factor"] = alt_data
+            result["alerts"].append(
+                f"High Altitude ({alt_data['altitude_ft']}ft) — "
+                f"run factor {alt_data['run_factor']}x, lean OVER"
+            )
+        return result
+
+    result = {"is_dome": False, "alerts": []}
+
+    # Check altitude first (always applies for open-air)
+    if venue_name in MLB_HIGH_ALTITUDE_PARKS:
+        alt_data = MLB_HIGH_ALTITUDE_PARKS[venue_name]
+        result["altitude_factor"] = alt_data
+        result["alerts"].append(
+            f"High Altitude ({alt_data['altitude_ft']}ft) — "
+            f"run factor {alt_data['run_factor']}x, lean OVER"
+        )
+
+    # Skip weather fetch for non-open-air parks not in our list
+    # (they might be unlisted retractable or new parks)
+    if venue_name and venue_name not in MLB_OPEN_AIR_PARKS and venue_name not in MLB_HIGH_ALTITUDE_PARKS:
+        return result
+
+    # Tier 1: inline weather from scoreboard
+    weather = game.get("weather")
+
+    # Tier 2: ESPN summary
+    if not weather:
+        weather = get_game_weather_espn(event_id)
+
+    # Tier 3: OpenWeather fallback
+    if not weather:
+        city = game.get("venue_city", "")
+        state = game.get("venue_state", "")
+        if city and state:
+            weather = get_game_weather_openweather(city, state)
+
+    if not weather:
+        return result
+
+    result["weather"] = weather
+    temp = weather.get("temperature")
+    wind = weather.get("wind_speed")
+    condition = weather.get("condition", "")
+    precip = weather.get("precipitation")
+
+    # MLB-specific thresholds (lower wind threshold than NFL)
+    if wind is not None and float(wind) >= 12:
+        result["alerts"].append(f"Wind {wind} mph — affects fly balls")
+    if temp is not None and float(temp) >= 90:
+        result["alerts"].append(f"Temp {temp}°F — ball carries, lean offense")
+    if temp is not None and float(temp) <= 45:
+        result["alerts"].append(f"Temp {temp}°F — cold, lean defense")
+    if precip and float(precip) > 0:
+        result["alerts"].append(f"Precipitation: {condition}")
+
+    return result
+
+
 # ─── FEEDBACK LOOP CACHE ────────────────────────────────────────────────────
 _feedback_cache = {}
 _feedback_lock = threading.Lock()

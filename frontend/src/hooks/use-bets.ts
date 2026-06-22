@@ -45,16 +45,16 @@ export function useDeleteBet() {
   });
 }
 
-export function useBetsDashboard(sport?: SportLower) {
+export function useBetsDashboard(sport?: SportLower, startDate?: string, endDate?: string) {
   return useQuery({
-    queryKey: ["bets-dashboard", sport ?? "all"],
-    queryFn: () => fetchBetsDashboard(sport),
+    queryKey: ["bets-dashboard", sport ?? "all", startDate ?? "", endDate ?? ""],
+    queryFn: () => fetchBetsDashboard(sport, startDate, endDate),
   });
 }
 
-export function useBetsCombined(sport?: SportLower, status?: string) {
+export function useBetsCombined(sport?: SportLower, status?: string, startDate?: string, endDate?: string) {
   return useQuery({
-    queryKey: ["bets-combined", sport ?? "all", status ?? "all"],
-    queryFn: () => fetchBetsCombined(sport, status),
+    queryKey: ["bets-combined", sport ?? "all", status ?? "all", startDate ?? "", endDate ?? ""],
+    queryFn: () => fetchBetsCombined(sport, status, startDate, endDate),
   });
 }

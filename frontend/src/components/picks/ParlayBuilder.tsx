@@ -1,5 +1,7 @@
-import type { PickData, PropSignal, SportLower } from "@/lib/types";
+import { useState, useEffect } from "react";
+import type { PickData, PropSignal, SportLower, ParlayAnalysis } from "@/lib/types";
 import type { BetSlipItem } from "@/components/bets/BetSlip";
+import { analyzeParlayCorrelation } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────
 
@@ -235,15 +237,40 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
     1
   );
 
+  const [analysis, setAnalysis] = useState<ParlayAnalysis | null>(null);
+
+  useEffect(() => {
+    const legsPayload = parlay.legs.map((leg) => ({
+      sport: leg.sport,
+      stat_type: leg.statType ?? "SPREAD",
+      coverPct: leg.coverPct,
+    }));
+    analyzeParlayCorrelation(legsPayload)
+      .then((res) => {
+        if (res.success) setAnalysis(res.analysis);
+      })
+      .catch(() => {}); // Graceful degradation
+  }, [parlay.legs.length]);
+
+  const hasCorrelation = analysis && analysis.correlation_penalty_pct > 5;
+  const adjustedProb = analysis?.adjusted_joint_prob;
+
   return (
     <div
       className={`card-surface rounded-sm border-l-2 ${parlay.className}`}
     >
       {/* Header */}
       <div className="px-4 pt-3 pb-2">
-        <h4 className="font-heading text-sm tracking-wider text-foreground">
-          {parlay.name}
-        </h4>
+        <div className="flex items-center gap-2">
+          <h4 className="font-heading text-sm tracking-wider text-foreground">
+            {parlay.name}
+          </h4>
+          {hasCorrelation && (
+            <span className="px-1.5 py-0.5 text-[8px] font-heading tracking-wider rounded bg-warning/15 text-warning border border-warning/30">
+              CORRELATED
+            </span>
+          )}
+        </div>
         <p className="text-[10px] text-muted-foreground">{parlay.subtitle}</p>
       </div>
 
@@ -284,21 +311,37 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-border/30 flex items-center justify-between">
-        <span className="text-[10px] font-heading tracking-wider text-muted-foreground">
-          COMBINED:{" "}
-          <span className="text-foreground">
-            {(combinedProb * 100).toFixed(1)}%
-          </span>
-        </span>
+      <div className="px-4 py-2 border-t border-border/30 flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-heading tracking-wider text-muted-foreground">
+              COMBINED:{" "}
+              <span className="text-foreground">
+                {(combinedProb * 100).toFixed(1)}%
+              </span>
+            </span>
+            {adjustedProb != null && adjustedProb !== combinedProb && (
+              <span className="text-[10px] font-heading tracking-wider text-warning">
+                ADJ: {(adjustedProb * 100).toFixed(1)}%
+              </span>
+            )}
+          </div>
 
-        {onTrackAll && (
-          <button
-            onClick={() => onTrackAll(parlayLegsToSlipItems(parlay.legs))}
-            className="px-3 py-1 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors"
-          >
-            TRACK ALL LEGS
-          </button>
+          {onTrackAll && (
+            <button
+              onClick={() => onTrackAll(parlayLegsToSlipItems(parlay.legs))}
+              className="px-3 py-1 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 rounded-sm hover:bg-primary/25 transition-colors"
+            >
+              TRACK ALL LEGS
+            </button>
+          )}
+        </div>
+
+        {hasCorrelation && analysis.correlated_pairs.length > 0 && (
+          <div className="text-[9px] text-warning font-mono">
+            Correlated: {analysis.correlated_pairs.map((p) => `${p.stat_a}+${p.stat_b} (${(p.correlation * 100).toFixed(0)}%)`).join(", ")}
+            {" "} — penalty {analysis.correlation_penalty_pct.toFixed(1)}%
+          </div>
         )}
       </div>
     </div>

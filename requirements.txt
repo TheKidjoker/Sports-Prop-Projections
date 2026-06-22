@@ -8,3 +8,4 @@ vaderSentiment
 numpy
 PyJWT[crypto]
 python-dotenv
+APScheduler>=3.10.0

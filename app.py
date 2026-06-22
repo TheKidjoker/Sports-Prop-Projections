@@ -114,6 +114,15 @@ if HAS_TEST_MODEL:
 
 scan_cache.init()
 
+# ─── Scheduler Init ──────────────────────────────────────────────────────
+if os.environ.get("ENABLE_SCHEDULER") == "true":
+    try:
+        from scheduler import init_scheduler
+        init_scheduler()
+        print("[scheduler] Scheduler enabled and started", flush=True)
+    except Exception as _sched_err:
+        print(f"[scheduler] Init failed: {_sched_err}", flush=True)
+
 # ─── Auto-run Test Model on Startup ─────────────────────────────────────
 # Skipped by default on Render to avoid OOM. Set SKIP_AUTO_TRAIN=0 to enable.
 _skip_auto_train = os.environ.get("SKIP_AUTO_TRAIN", "1") == "1"
@@ -216,7 +225,6 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "chanc
 _jwks_client = None
 _jwks_failed = False
 _jwks_last_attempt = 0
-_jwks_warning_logged = False
 
 
 def _get_jwks_client():
@@ -271,31 +279,10 @@ def require_auth(f):
                     audience="authenticated",
                 )
             elif alg == "ES256" and jwks:
-                # ES256 via JWKS
-                try:
-                    signing_key = jwks.get_signing_key_from_jwt(token)
-                    payload = jwt.decode(
-                        token, signing_key.key,
-                        algorithms=["ES256"],
-                        audience="authenticated",
-                    )
-                except Exception as jwks_err:
-                    if isinstance(jwks_err, (jwt.ExpiredSignatureError, jwt.InvalidTokenError)):
-                        raise
-                    # JWKS unavailable — verify claims without signature (log once)
-                    global _jwks_warning_logged
-                    if not _jwks_warning_logged:
-                        print(f"[AUTH] JWKS unavailable ({jwks_err}), verifying claims only (future warnings suppressed)", flush=True)
-                        _jwks_warning_logged = True
-                    payload = jwt.decode(
-                        token, options={"verify_signature": False},
-                        algorithms=["ES256"],
-                        audience="authenticated",
-                    )
-            elif alg == "ES256" and SUPABASE_JWT_SECRET:
-                # ES256 token but no JWKS — verify claims without signature
+                # ES256 via JWKS — signature must be verified
+                signing_key = jwks.get_signing_key_from_jwt(token)
                 payload = jwt.decode(
-                    token, options={"verify_signature": False},
+                    token, signing_key.key,
                     algorithms=["ES256"],
                     audience="authenticated",
                 )
@@ -1089,7 +1076,9 @@ def api_dashboard():
         sport = request.args.get("sport", "").lower() or None
         if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
-        stats = tracker.get_dashboard_stats(sport)
+        start_date = request.args.get("start_date") or None
+        end_date = request.args.get("end_date") or None
+        stats = tracker.get_dashboard_stats(sport, start_date=start_date, end_date=end_date)
         return jsonify({"success": True, **stats})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1276,6 +1265,7 @@ def _require_test_model():
 
 
 @app.route("/api/soccer/leagues", methods=["GET"])
+@require_auth
 def api_soccer_leagues():
     """Available soccer leagues."""
     from constants import SOCCER_LEAGUES
@@ -1287,6 +1277,7 @@ def api_soccer_leagues():
 
 
 @app.route("/api/soccer/scan", methods=["POST"])
+@require_auth
 def api_soccer_scan():
     """Scan soccer matches for a league."""
     data = request.get_json() or {}
@@ -1300,6 +1291,7 @@ def api_soccer_scan():
 
 
 @app.route("/api/soccer/props", methods=["GET"])
+@require_auth
 def api_soccer_props():
     """Player props for soccer (goals, assists, shots)."""
     league = request.args.get("league", "epl")
@@ -1309,6 +1301,16 @@ def api_soccer_props():
         "league": league,
         "note": "Soccer player props require API-Football integration",
     })
+
+
+@app.route("/api/soccer/budget", methods=["GET"])
+@require_auth
+def api_soccer_budget():
+    """Check API-Football daily call budget status."""
+    from api_soccer import get_budget_status, is_available
+    status = get_budget_status()
+    status["api_configured"] = is_available()
+    return jsonify(status)
 
 
 @app.route("/api/tm/collect", methods=["POST"])
@@ -1953,7 +1955,10 @@ def api_bets_dashboard():
         sport = request.args.get("sport", "").lower() or None
         if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
-        stats = bet_tracker.get_tracked_dashboard(request.user_email, sport=sport)
+        start_date = request.args.get("start_date") or None
+        end_date = request.args.get("end_date") or None
+        stats = bet_tracker.get_tracked_dashboard(request.user_email, sport=sport,
+                                                   start_date=start_date, end_date=end_date)
         return jsonify({"success": True, **stats})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1970,7 +1975,10 @@ def api_bets_combined():
         if sport and sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = None
         status = request.args.get("status", "").upper() or None
-        result = bet_tracker.get_bets_with_dashboard(request.user_email, sport=sport, status=status)
+        start_date = request.args.get("start_date") or None
+        end_date = request.args.get("end_date") or None
+        result = bet_tracker.get_bets_with_dashboard(request.user_email, sport=sport, status=status,
+                                                      start_date=start_date, end_date=end_date)
         return jsonify({"success": True, **result})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -2137,6 +2145,38 @@ def api_tm_data_quality():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/tm/feature-drift", methods=["GET"])
+@require_auth
+def api_tm_feature_drift():
+    """Check feature drift for a sport's historical data."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        sport = request.args.get("sport", "nba").lower()
+        window = int(request.args.get("window", 50))
+        from test_model.data_quality import detect_feature_drift
+        report = detect_feature_drift(sport, recent_window=window)
+        return jsonify({"success": True, **report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/tm/health", methods=["GET"])
+@require_auth
+def api_tm_health():
+    """Full system health check: data quality, feature drift, API freshness."""
+    err = _require_test_model()
+    if err:
+        return err
+    try:
+        from test_model.data_quality import full_health_check
+        report = full_health_check()
+        return jsonify({"success": True, **report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ─── PRISM Auto-Tracking Endpoints ───────────────────────────────────────
 
 
@@ -2269,6 +2309,63 @@ def api_tm_injury_backfill_status():
         from test_model.injury_backfill import get_backfill_status
         progress = get_backfill_status(sport)
         return jsonify({"success": True, "progress": progress})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Parlay Correlation Analysis ─────────────────────────────────────────────
+
+@app.route("/api/parlay/analyze", methods=["POST"])
+@require_auth
+def api_parlay_analyze():
+    """Analyze parlay legs for correlation and adjusted odds."""
+    try:
+        from parlay_math import adjust_parlay_odds, compute_correlated_ev
+        data = request.get_json(silent=True) or {}
+        legs = data.get("legs", [])
+        if not legs or len(legs) < 2:
+            return jsonify({"success": False, "error": "Need at least 2 legs"}), 400
+
+        # Extract win probabilities from legs (coverPct / 100)
+        win_probs = [max(0.01, min(0.99, (leg.get("coverPct") or leg.get("cover_pct") or 50) / 100.0)) for leg in legs]
+
+        # Compute raw parlay odds (naive multiplication)
+        raw_odds = 1.0
+        for p in win_probs:
+            raw_odds *= (1.0 / p)
+
+        # Correlation-adjusted odds
+        odds_analysis = adjust_parlay_odds(legs, raw_odds)
+
+        # Correlated EV
+        ev_analysis = compute_correlated_ev(legs, win_probs)
+
+        return jsonify({
+            "success": True,
+            "analysis": {
+                **odds_analysis,
+                **ev_analysis,
+                "leg_count": len(legs),
+            }
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── Scheduler Status ───────────────────────────────────────────────────────
+
+@app.route("/api/scheduler/status", methods=["GET"])
+@require_auth
+def api_scheduler_status():
+    """Return scheduler status and job schedule (admin-only)."""
+    if not _is_admin():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    try:
+        from scheduler import get_scheduler_status
+        status = get_scheduler_status()
+        return jsonify({"success": True, **status})
+    except ImportError:
+        return jsonify({"success": True, "enabled": False, "jobs": [], "message": "Scheduler not available"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

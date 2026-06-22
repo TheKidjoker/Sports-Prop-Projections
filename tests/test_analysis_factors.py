@@ -25,12 +25,13 @@ class TestDetermineLean:
         assert _determine_lean("public", "Home", "Away", -1.5, "nhl") == "Away"
         assert _determine_lean("vegas", "Home", "Away", -1.5, "nhl") == "Away"
 
-    def test_nfl_flipped(self):
-        """NFL: public=underdog, vegas=favorite."""
-        # Home favored, public slot -> lean underdog (away)
-        assert _determine_lean("public", "Home", "Away", -6.5, "nfl") == "Away"
-        # Home favored, vegas slot -> lean favorite (home)
-        assert _determine_lean("vegas", "Home", "Away", -6.5, "nfl") == "Home"
+    def test_nfl_insufficient_data_uses_default(self):
+        """NFL: lean_direction override is insufficient_data, so falls back to default slot-dependent."""
+        # Default: public=favorite, vegas=underdog
+        # Home favored (neg spread), public slot -> lean favorite (home)
+        assert _determine_lean("public", "Home", "Away", -6.5, "nfl") == "Home"
+        # Home favored, vegas slot -> lean underdog (away)
+        assert _determine_lean("vegas", "Home", "Away", -6.5, "nfl") == "Away"
 
     def test_default_slot_dependent(self):
         """CFB has no validated override, uses default: public=fav, vegas=dog."""
@@ -135,7 +136,7 @@ class TestCalculateScore:
 
 class TestAnalyzeAtsRecord:
     @patch("analysis_factors.tracker")
-    @patch("analysis_factors.get_real_team_ats", side_effect=Exception("no db"))
+    @patch("test_model.db.get_real_team_ats", side_effect=Exception("no db"))
     def test_hot_ats(self, mock_db, mock_tracker):
         mock_tracker.get_team_ats_record.return_value = {
             "wins": 15, "losses": 5, "rate": 75.0,
@@ -145,7 +146,7 @@ class TestAnalyzeAtsRecord:
         assert result["ats_penalty"] is False
 
     @patch("analysis_factors.tracker")
-    @patch("analysis_factors.get_real_team_ats", side_effect=Exception("no db"))
+    @patch("test_model.db.get_real_team_ats", side_effect=Exception("no db"))
     def test_cold_ats(self, mock_db, mock_tracker):
         mock_tracker.get_team_ats_record.return_value = {
             "wins": 5, "losses": 15, "rate": 25.0,

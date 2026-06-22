@@ -361,10 +361,15 @@ def _determine_result(lean_team, home_team, away_team, spread, action,
 
 # ─── get_dashboard_stats ──────────────────────────────────────────────────────
 
-def get_dashboard_stats(sport=None):
+def get_dashboard_stats(sport=None, start_date=None, end_date=None):
     """
     Returns aggregated dashboard stats.
     Auto-grades all pending predictions before computing stats.
+
+    Args:
+        sport: Optional sport filter
+        start_date: Optional start date (YYYY-MM-DD) for filtering
+        end_date: Optional end date (YYYY-MM-DD) for filtering
     """
     try:
         grade_predictions(sport)
@@ -374,7 +379,7 @@ def get_dashboard_stats(sport=None):
     if _use_supabase():
         return _dashboard_supabase(sport)
     else:
-        return _dashboard_sqlite(sport)
+        return _dashboard_sqlite(sport, start_date=start_date, end_date=end_date)
 
 
 def _dashboard_supabase(sport=None):
@@ -471,7 +476,7 @@ def _aggregate_stats_supabase(where_column, where_value, sport=None):
     }
 
 
-def _dashboard_sqlite(sport=None):
+def _dashboard_sqlite(sport=None, start_date=None, end_date=None):
     conn = _get_sqlite()
     cur = conn.cursor()
 
@@ -481,51 +486,65 @@ def _dashboard_sqlite(sport=None):
         sport_filter = " AND sport = ?"
         params = [sport]
 
-    overall = _aggregate_stats_sqlite(cur, sport_filter, params)
+    # Date range filtering
+    date_filter = ""
+    date_params = []
+    if start_date:
+        date_filter += " AND game_date >= ?"
+        date_params.append(start_date)
+    if end_date:
+        date_filter += " AND game_date <= ?"
+        date_params.append(end_date)
+
+    combined_filter = sport_filter + date_filter
+    combined_params = params + date_params
+
+    overall = _aggregate_stats_sqlite(cur, combined_filter, combined_params)
 
     # By sport
     cur.execute(
-        "SELECT DISTINCT sport FROM predictions WHERE 1=1" + sport_filter,
-        params
+        "SELECT DISTINCT sport FROM predictions WHERE 1=1" + combined_filter,
+        combined_params
     )
     sports = [dict(row) for row in cur.fetchall()]
     by_sport = []
     for s in sports:
-        stats = _aggregate_stats_sqlite(cur, " AND sport = ?", [s["sport"]])
+        sp_params = [s["sport"]] + date_params
+        stats = _aggregate_stats_sqlite(cur, " AND sport = ?" + date_filter, sp_params)
         stats["sport"] = s["sport"]
         by_sport.append(stats)
 
     # By slot
     cur.execute(
-        "SELECT DISTINCT slot_type FROM predictions WHERE slot_type != ''" + sport_filter,
-        params
+        "SELECT DISTINCT slot_type FROM predictions WHERE slot_type != ''" + combined_filter,
+        combined_params
     )
     slots = [dict(row) for row in cur.fetchall()]
     by_slot = []
     for s in slots:
-        slot_params = [s["slot_type"]] + params
-        stats = _aggregate_stats_sqlite(cur, " AND slot_type = ?" + sport_filter, slot_params)
+        slot_params = [s["slot_type"]] + combined_params
+        stats = _aggregate_stats_sqlite(cur, " AND slot_type = ?" + combined_filter, slot_params)
         stats["slot_type"] = s["slot_type"]
         by_slot.append(stats)
 
     # By recommendation
     cur.execute(
-        "SELECT DISTINCT recommendation FROM predictions WHERE recommendation != ''" + sport_filter,
-        params
+        "SELECT DISTINCT recommendation FROM predictions WHERE recommendation != ''" + combined_filter,
+        combined_params
     )
     recs = [dict(row) for row in cur.fetchall()]
     by_recommendation = []
     for r in recs:
-        rec_params = [r["recommendation"]] + params
-        stats = _aggregate_stats_sqlite(cur, " AND recommendation = ?" + sport_filter, rec_params)
+        rec_params = [r["recommendation"]] + combined_params
+        stats = _aggregate_stats_sqlite(cur, " AND recommendation = ?" + combined_filter, rec_params)
         stats["recommendation"] = r["recommendation"]
         by_recommendation.append(stats)
 
     # Recent
     cur.execute(
-        "SELECT * FROM predictions WHERE 1=1" + sport_filter +
+        "SELECT * FROM predictions WHERE 1=1" + combined_filter +
         " ORDER BY created_at DESC",
-        params
+        combined_params
     )
     recent = [dict(row) for row in cur.fetchall()]
 
@@ -534,6 +553,12 @@ def _dashboard_sqlite(sport=None):
 
     clv = _compute_clv_metrics(recent)
 
+    # Drawdown, variance, streak analytics
+    drawdown = compute_drawdown_metrics(recent)
+    variance = compute_variance_metrics(recent)
+    streaks = compute_streak_analysis(recent)
+    monthly_breakdown = get_performance_by_period(recent)
+
     return {
         "overall": overall,
         "by_sport": by_sport,
@@ -541,6 +566,10 @@ def _dashboard_sqlite(sport=None):
         "by_recommendation": by_recommendation,
         "recent": recent,
         "clv": clv,
+        "drawdown": drawdown,
+        "variance": variance,
+        "streaks": streaks,
+        "monthly_breakdown": monthly_breakdown,
     }
 
 
@@ -904,6 +933,204 @@ def _compute_clv_metrics(predictions):
         "clv_by_tier": clv_by_tier,
         "clv_by_sport": clv_by_sport,
     }
+
+
+# ─── Drawdown, Variance & Streak Analytics ────────────────────────────────────
+
+def compute_drawdown_metrics(predictions):
+    """
+    Walk decided predictions chronologically and compute cumulative P&L
+    at -110 odds. Track peak P&L, max drawdown, current drawdown, recovery length.
+    """
+    decided = [
+        p for p in predictions
+        if p.get("result") in ("HIT", "MISS")
+    ]
+    decided.sort(key=lambda p: p.get("created_at", "") or "")
+
+    if not decided:
+        return {"max_drawdown": 0, "current_drawdown": 0, "recovery_length": 0, "peak_pnl": 0}
+
+    cumulative = 0
+    peak = 0
+    max_dd = 0
+    bets_since_peak = 0
+
+    for p in decided:
+        if p["result"] == "HIT":
+            cumulative += 100.0 / 110.0  # Win pays +0.909 units
+        else:
+            cumulative -= 1.0  # Loss costs 1 unit
+
+        if cumulative > peak:
+            peak = cumulative
+            bets_since_peak = 0
+        else:
+            bets_since_peak += 1
+
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+
+    return {
+        "max_drawdown": round(max_dd, 2),
+        "current_drawdown": round(peak - cumulative, 2),
+        "recovery_length": bets_since_peak,
+        "peak_pnl": round(peak, 2),
+    }
+
+
+def compute_variance_metrics(predictions):
+    """
+    Compute standard deviation of per-bet returns and CLV-based Sharpe ratio.
+    Returns breakdown by sport.
+    """
+    decided = [p for p in predictions if p.get("result") in ("HIT", "MISS")]
+    if not decided:
+        return {"std_dev": 0, "sharpe_ratio": 0, "by_sport": {}}
+
+    returns = [100.0 / 110.0 if p["result"] == "HIT" else -1.0 for p in decided]
+    n = len(returns)
+    mean_ret = sum(returns) / n
+    variance = sum((r - mean_ret) ** 2 for r in returns) / n if n > 1 else 0
+    std_dev = variance ** 0.5
+
+    # CLV-based Sharpe ratio
+    clv_values = [p["clv"] for p in predictions if p.get("clv") is not None]
+    sharpe = 0
+    if clv_values and len(clv_values) >= 2:
+        clv_mean = sum(clv_values) / len(clv_values)
+        clv_var = sum((v - clv_mean) ** 2 for v in clv_values) / len(clv_values)
+        clv_std = clv_var ** 0.5
+        if clv_std > 0:
+            sharpe = round(clv_mean / clv_std, 2)
+
+    # By sport
+    by_sport = {}
+    sports_seen = set(p.get("sport", "") for p in decided if p.get("sport"))
+    for sp in sorted(sports_seen):
+        sp_decided = [p for p in decided if p.get("sport") == sp]
+        sp_returns = [100.0 / 110.0 if p["result"] == "HIT" else -1.0 for p in sp_decided]
+        sp_n = len(sp_returns)
+        sp_mean = sum(sp_returns) / sp_n
+        sp_var = sum((r - sp_mean) ** 2 for r in sp_returns) / sp_n if sp_n > 1 else 0
+        by_sport[sp] = {
+            "std_dev": round(sp_var ** 0.5, 4),
+            "count": sp_n,
+        }
+
+    return {
+        "std_dev": round(std_dev, 4),
+        "sharpe_ratio": sharpe,
+        "by_sport": by_sport,
+    }
+
+
+def compute_streak_analysis(predictions):
+    """
+    Compute max win/loss streaks, current streak, and streak distribution.
+    """
+    decided = [p for p in predictions if p.get("result") in ("HIT", "MISS")]
+    decided.sort(key=lambda p: p.get("created_at", "") or "")
+
+    if not decided:
+        return {"max_win": 0, "max_loss": 0, "current": {"type": "none", "count": 0}, "distribution": {}}
+
+    max_win = 0
+    max_loss = 0
+    current_type = decided[0]["result"]
+    current_count = 1
+    streak_lengths = {"HIT": [], "MISS": []}
+
+    for i in range(1, len(decided)):
+        if decided[i]["result"] == current_type:
+            current_count += 1
+        else:
+            streak_lengths[current_type].append(current_count)
+            if current_type == "HIT":
+                max_win = max(max_win, current_count)
+            else:
+                max_loss = max(max_loss, current_count)
+            current_type = decided[i]["result"]
+            current_count = 1
+
+    # Final streak
+    streak_lengths[current_type].append(current_count)
+    if current_type == "HIT":
+        max_win = max(max_win, current_count)
+    else:
+        max_loss = max(max_loss, current_count)
+
+    # Distribution histogram: count of streaks by length
+    distribution = {}
+    for lengths in streak_lengths.values():
+        for length in lengths:
+            distribution[length] = distribution.get(length, 0) + 1
+
+    # Current streak from most recent
+    latest_type = decided[-1]["result"]
+    latest_count = 0
+    for p in reversed(decided):
+        if p["result"] == latest_type:
+            latest_count += 1
+        else:
+            break
+
+    return {
+        "max_win": max_win,
+        "max_loss": max_loss,
+        "current": {"type": latest_type, "count": latest_count},
+        "distribution": distribution,
+    }
+
+
+def get_performance_by_period(predictions, period="monthly"):
+    """
+    Group predictions by month and compute W/L/ROI/CLV per period.
+    Returns list of {period_label, wins, losses, win_rate, roi, avg_clv}.
+    """
+    decided = [p for p in predictions if p.get("result") in ("HIT", "MISS", "PUSH")]
+
+    by_period = {}
+    for p in decided:
+        date_str = p.get("game_date") or p.get("created_at", "")
+        if not date_str:
+            continue
+        # Extract YYYY-MM for monthly grouping
+        period_label = date_str[:7]  # "2025-01"
+        if period_label not in by_period:
+            by_period[period_label] = {"wins": 0, "losses": 0, "pushes": 0, "clv_values": []}
+
+        if p["result"] == "HIT":
+            by_period[period_label]["wins"] += 1
+        elif p["result"] == "MISS":
+            by_period[period_label]["losses"] += 1
+        elif p["result"] == "PUSH":
+            by_period[period_label]["pushes"] += 1
+
+        if p.get("clv") is not None:
+            by_period[period_label]["clv_values"].append(p["clv"])
+
+    result = []
+    for label in sorted(by_period.keys()):
+        data = by_period[label]
+        w, l = data["wins"], data["losses"]
+        total = w + l
+        win_rate = round(w / total * 100, 1) if total > 0 else 0
+        roi = round((w * (100 / 110) - l) / total * 100, 1) if total > 0 else 0
+        avg_clv = round(sum(data["clv_values"]) / len(data["clv_values"]), 2) if data["clv_values"] else None
+
+        result.append({
+            "period_label": label,
+            "wins": w,
+            "losses": l,
+            "pushes": data["pushes"],
+            "win_rate": win_rate,
+            "roi": roi,
+            "avg_clv": avg_clv,
+        })
+
+    return result
 
 
 def get_clv_trend(sport=None):

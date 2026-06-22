@@ -103,6 +103,10 @@ export interface ScanGame {
   league_name?: string;
   best_edge?: number;
   best_market?: string;
+  // Best line from line shopping
+  best_line?: { book: string; spread: number; spread_odds?: number };
+  // Altitude factor (MLB)
+  altitude_factor?: Record<string, unknown>;
   // admin curation
   approval_status?: string;
   admin_notes?: string;
@@ -150,6 +154,7 @@ export interface PickData {
   hasUnvalidated?: boolean;
   eventId?: string;
   sport?: SportLower;
+  bestLine?: { book: string; spread: number; spread_odds?: number };
 }
 
 // Props
@@ -217,6 +222,36 @@ export interface DashboardBreakdown {
   [key: string]: unknown; // recommendation, slot_type, sport — varies by breakdown
 }
 
+export interface DrawdownMetrics {
+  max_drawdown: number;
+  current_drawdown: number;
+  recovery_length: number;
+  peak_pnl: number;
+}
+
+export interface VarianceMetrics {
+  std_dev: number;
+  sharpe_ratio: number;
+  by_sport: Record<string, { std_dev: number; count: number }>;
+}
+
+export interface StreakMetrics {
+  max_win: number;
+  max_loss: number;
+  current: { type: string; count: number };
+  distribution?: Record<number, number>;
+}
+
+export interface PeriodBreakdown {
+  period_label: string;
+  wins: number;
+  losses: number;
+  pushes: number;
+  win_rate: number;
+  roi: number;
+  avg_clv: number | null;
+}
+
 export interface DashboardResponse {
   success: boolean;
   overall: DashboardOverall;
@@ -225,6 +260,10 @@ export interface DashboardResponse {
   by_slot: DashboardBreakdown[];
   by_sport: DashboardBreakdown[];
   clv?: Record<string, unknown>;
+  drawdown?: DrawdownMetrics;
+  variance?: VarianceMetrics;
+  streaks?: StreakMetrics;
+  monthly_breakdown?: PeriodBreakdown[];
 }
 
 // Bets dashboard — matches actual Flask /api/bets/dashboard response
@@ -279,6 +318,22 @@ export interface BetDashboardResponse {
   by_type: DashboardBreakdown[];
   by_recommendation: DashboardBreakdown[];
   by_stat_type?: DashboardBreakdown[];
+  drawdown?: DrawdownMetrics;
+  variance?: VarianceMetrics;
+  streaks?: StreakMetrics;
+  cumulative_pnl?: { date: string; pnl: number }[];
+  monthly_breakdown?: PeriodBreakdown[];
+}
+
+export interface ParlayAnalysis {
+  raw_odds: number;
+  adjusted_odds: number;
+  correlation_penalty_pct: number;
+  correlated_pairs: { sport: string; stat_a: string; stat_b: string; correlation: number }[];
+  naive_joint_prob: number;
+  adjusted_joint_prob: number;
+  ev_impact_pct: number;
+  leg_count: number;
 }
 
 // Picks curation
@@ -622,5 +677,6 @@ export function scanGameToPickData(game: ScanGame, sport: SportLower): PickData 
     hasUnvalidated,
     eventId: game.event_id,
     sport,
+    bestLine: game.best_line,
   };
 }

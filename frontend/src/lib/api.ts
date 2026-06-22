@@ -21,6 +21,7 @@ import type {
   TmEvMetricsResponse,
   SoccerLeaguesResponse,
   SoccerScanResponse,
+  ParlayAnalysis,
 } from "./types";
 
 let _accessToken: string | null = null;
@@ -128,9 +129,13 @@ export function fetchTopProps(sport: SportLower) {
 }
 
 // ─── Dashboard ─────────────────────────────────────────
-export function fetchDashboard(sport?: SportLower) {
-  const qs = sport ? `?sport=${sport}` : "";
-  return get<DashboardResponse>(`/api/dashboard${qs}`);
+export function fetchDashboard(sport?: SportLower, startDate?: string, endDate?: string) {
+  const params = new URLSearchParams();
+  if (sport) params.set("sport", sport);
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const qs = params.toString();
+  return get<DashboardResponse>(`/api/dashboard${qs ? `?${qs}` : ""}`);
 }
 
 export function gradePredictions(sport?: SportLower) {
@@ -160,19 +165,25 @@ export function gradeBets() {
   return post<{ success: boolean; graded: number; wins: number; losses: number; pushes: number; not_final: number }>("/api/bets/grade");
 }
 
-export function fetchBetsDashboard(sport?: SportLower) {
-  const qs = sport ? `?sport=${sport}` : "";
-  return get<BetDashboardResponse>(`/api/bets/dashboard${qs}`);
+export function fetchBetsDashboard(sport?: SportLower, startDate?: string, endDate?: string) {
+  const params = new URLSearchParams();
+  if (sport) params.set("sport", sport);
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const qs = params.toString();
+  return get<BetDashboardResponse>(`/api/bets/dashboard${qs ? `?${qs}` : ""}`);
 }
 
 export function deleteBet(betId: number) {
   return del<{ success: boolean }>(`/api/bets/${betId}`);
 }
 
-export function fetchBetsCombined(sport?: SportLower, status?: string) {
+export function fetchBetsCombined(sport?: SportLower, status?: string, startDate?: string, endDate?: string) {
   const params = new URLSearchParams();
   if (sport) params.set("sport", sport);
   if (status) params.set("status", status);
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
   const qs = params.toString();
   return get<{ success: boolean; bets: TrackedBet[]; dashboard: Omit<BetDashboardResponse, "success"> }>(`/api/bets/combined${qs ? `?${qs}` : ""}`);
 }
@@ -279,4 +290,9 @@ export function scanSoccerLeague(league: string) {
 
 export function fetchSoccerProps(league: string) {
   return get<PropsResponse>(`/api/soccer/props?league=${league}`);
+}
+
+// ─── Parlay Analysis ─────────────────────────────────
+export function analyzeParlayCorrelation(legs: unknown[]) {
+  return post<{ success: boolean; analysis: ParlayAnalysis }>("/api/parlay/analyze", { legs });
 }

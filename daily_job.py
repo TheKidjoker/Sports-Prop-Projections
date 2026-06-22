@@ -57,10 +57,12 @@ def run_scan(logger):
     tracker.init_db()
 
     total_saved = 0
+    scan_results_by_sport = {}
     for sport in SPORTS:
         try:
             results = scan_all_games(sport)
             games_scanned = len(results)
+            scan_results_by_sport[sport] = results
 
             # Count qualifying predictions (same filter as tracker.save_predictions)
             qualifying = [
@@ -82,6 +84,16 @@ def run_scan(logger):
             logger.exception("Error scanning %s", sport.upper())
 
     logger.info("=== SCAN COMPLETE - %d total predictions saved ===", total_saved)
+
+    # Send Discord summary
+    try:
+        from notifications import DiscordWebhook
+        webhook = DiscordWebhook()
+        if webhook.is_configured():
+            webhook.send_daily_summary(scan_results_by_sport)
+            logger.info("Discord daily summary sent")
+    except Exception:
+        logger.exception("Discord notification failed")
 
 
 def run_grade(logger):
@@ -106,6 +118,16 @@ def run_grade(logger):
     except Exception:
         logger.exception("Error grading predictions")
         raise
+
+    # Send Discord grade results
+    try:
+        from notifications import DiscordWebhook
+        webhook = DiscordWebhook()
+        if webhook.is_configured():
+            webhook.send_grade_results(result)
+            logger.info("Discord grade results sent")
+    except Exception:
+        logger.exception("Discord grade notification failed")
 
     logger.info("=== GRADE COMPLETE ===")
 

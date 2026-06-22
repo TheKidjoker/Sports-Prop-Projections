@@ -129,8 +129,10 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
   );
   const activeSport = sportFilter;
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
 
-  const { data: combinedData, isLoading } = useBetsCombined(activeSport, statusFilter);
+  const { data: combinedData, isLoading } = useBetsCombined(activeSport, statusFilter, startDate || undefined, endDate || undefined);
   const bets = combinedData?.bets ?? [];
   const dashboard = combinedData?.dashboard;
   const gradeBets = useGradeBets();
@@ -233,7 +235,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
       </div>
 
       {/* Status filter */}
-      <div className="flex items-center gap-1 mb-4">
+      <div className="flex items-center gap-1 mb-2">
         {statuses.map((s) => (
           <button
             key={s}
@@ -247,6 +249,32 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
             {s}
           </button>
         ))}
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <span className="text-[10px] font-heading tracking-wider text-muted-foreground">DATE RANGE:</span>
+        <input
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          className="px-2 py-1 text-xs font-mono bg-background border border-border rounded-sm text-foreground"
+        />
+        <span className="text-muted-foreground text-xs">to</span>
+        <input
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="px-2 py-1 text-xs font-mono bg-background border border-border rounded-sm text-foreground"
+        />
+        {(startDate || endDate) && (
+          <button
+            onClick={() => { setStartDate(""); setEndDate(""); }}
+            className="px-2 py-1 text-[10px] font-heading text-muted-foreground hover:text-foreground transition-colors"
+          >
+            CLEAR
+          </button>
+        )}
       </div>
 
       {isLoading && (

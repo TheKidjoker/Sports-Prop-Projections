@@ -28,7 +28,10 @@ from api_client import (
 from api_odds import get_player_props_odds_full
 import tracker
 from time_slots import classify_slot, first_game_slot_override
-from line_movement import detect_movement, confirms_slot, score_line_movement
+from line_movement import (
+    detect_movement, confirms_slot, score_line_movement,
+    classify_line_move_source, detect_reverse_line_movement,
+)
 from trell_rule import is_star_player, is_recent_injury, evaluate_trell_rule
 from prism import calculate_prism_projection, get_league_defensive_average, _apply_slot_integration, _calculate_confidence
 from rank_analysis import (
@@ -40,12 +43,14 @@ from market_maker import SyntheticMarketMaker
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
+    _analyze_mlb_weather,
     _analyze_overunder,
     _get_feedback_adjustment, _analyze_ats_record, _analyze_public_betting,
     _analyze_back_to_back, _analyze_head_to_head, _analyze_home_away_split,
     _detect_vegas_trap,
     _calculate_score, _determine_lean, _fmt_spread,
 )
+from api_odds import get_multibook_lines
 
 
 def compute_kelly_sizing(cover_pct, recommendation, sport="nba", ev_model=None):
@@ -221,6 +226,15 @@ def scan_all_games(sport="nba", date_str=None):
     except Exception:
         odds_data = []
 
+    # Fetch multibook lines for best line shopping (graceful if no API key)
+    multibook_data = {}
+    try:
+        raw_multibook = get_multibook_lines(sport)
+        if raw_multibook:
+            multibook_data = raw_multibook
+    except Exception:
+        pass
+
     # Sort by game_date to determine first game / game index
     sorted_games = sorted(games, key=lambda g: g.get("game_date", ""))
 
@@ -287,6 +301,7 @@ def scan_all_games(sport="nba", date_str=None):
             odds_data=odds_data,
             lightweight=is_tomorrow,
             team_stats_cache=_team_stats_cache,
+            multibook_data=multibook_data,
         )
 
     with ThreadPoolExecutor(max_workers=_GAME_WORKERS) as pool:
@@ -338,6 +353,89 @@ def _build_action_string(lean_team, current_spread, home_team, moneyline_recomme
         return (spread_action + " (Best Bet)"
                 + " | " + lean_team + " ML (Aggressive)")
     return spread_action
+
+
+def _normalize_team_name(name):
+    """Normalize team name for fuzzy matching between ESPN and Odds API."""
+    return name.strip().lower().replace(".", "").replace("'", "")
+
+
+def _find_best_line(multibook_data, home_team, away_team, lean_team, current_spread):
+    """
+    Search multibook data for the best available spread for the lean team's side.
+    Returns {book, spread, spread_odds} or None.
+    """
+    if not multibook_data:
+        return None
+
+    home_norm = _normalize_team_name(home_team)
+    away_norm = _normalize_team_name(away_team)
+
+    # multibook_data can be a list of game dicts or a dict keyed by matchup
+    games_list = multibook_data if isinstance(multibook_data, list) else list(multibook_data.values())
+
+    for game_data in games_list:
+        if not isinstance(game_data, dict):
+            continue
+
+        # Match by team names
+        mb_home = _normalize_team_name(game_data.get("home_team", ""))
+        mb_away = _normalize_team_name(game_data.get("away_team", ""))
+
+        # Try both team names appearing in either home or away
+        match = False
+        if (home_norm in mb_home or mb_home in home_norm) and (away_norm in mb_away or mb_away in away_norm):
+            match = True
+        elif (home_norm in mb_away or mb_away in home_norm) and (away_norm in mb_home or mb_home in away_norm):
+            match = True
+
+        if not match:
+            continue
+
+        # Found the game — look for best spread
+        books = game_data.get("books", game_data.get("spreads", []))
+        if not books:
+            # Try alternate format: best_spread at top level
+            best = game_data.get("best_spread") or game_data.get("best_home_spread")
+            if best is not None:
+                return {"book": game_data.get("best_book", "Best"), "spread": best}
+            continue
+
+        lean_is_home = (lean_team == home_team)
+        best_spread = None
+        best_book = None
+        best_odds = None
+
+        for book_data in books:
+            if not isinstance(book_data, dict):
+                continue
+            book_name = book_data.get("book", book_data.get("bookmaker", ""))
+            home_spread = book_data.get("home_spread") or book_data.get("spread")
+            spread_odds = book_data.get("spread_odds") or book_data.get("odds")
+
+            if home_spread is None:
+                continue
+
+            try:
+                home_spread = float(home_spread)
+            except (ValueError, TypeError):
+                continue
+
+            lean_spread = home_spread if lean_is_home else -home_spread
+
+            # Best spread = most favorable for the lean team (most positive)
+            if best_spread is None or lean_spread > best_spread:
+                best_spread = lean_spread
+                best_book = book_name
+                best_odds = spread_odds
+
+        if best_spread is not None and best_spread != current_spread:
+            result = {"book": best_book, "spread": best_spread}
+            if best_odds is not None:
+                result["spread_odds"] = best_odds
+            return result
+
+    return None
 
 
 def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
@@ -398,6 +496,16 @@ def _build_game_result(game, sport, score, cover_pct, recommendation, lean_team,
             result["weather_alerts"] = nfl_weather.get("alerts", [])
         if nfl_trend.get("applies"):
             result["trend_discrepancy"] = nfl_trend
+
+    # MLB weather data (reuses nfl_weather variable)
+    if sport == "mlb":
+        if nfl_weather.get("is_dome"):
+            result["weather_dome"] = True
+        if nfl_weather.get("weather") or nfl_weather.get("alerts"):
+            result["weather"] = nfl_weather.get("weather", {})
+            result["weather_alerts"] = nfl_weather.get("alerts", [])
+        if nfl_weather.get("altitude_factor"):
+            result["altitude_factor"] = nfl_weather["altitude_factor"]
 
     # Factor badges
     if b2b_result["b2b_bonus"] or b2b_result["b2b_penalty"]:
@@ -473,7 +581,8 @@ def _detect_pace_mismatch(home_stats, away_stats, home_team, away_team, sport="n
 def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                           sport="nba", total_games_on_slate=1, game_index=0,
                           is_last_sunday_game=False, odds_data=None,
-                          lightweight=False, team_stats_cache=None):
+                          lightweight=False, team_stats_cache=None,
+                          multibook_data=None):
     """
     Returns analysis dict for one game.
     lightweight=True skips expensive API calls (PRISM, B2B, H2H, NFL weather/trends)
@@ -551,6 +660,8 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
         home_stats_future = None
         away_stats_future = None
 
+        mlb_weather_future = None
+
         if not lightweight:
             if sport in ("nba", "nhl") and home_team_id and away_team_id:
                 b2b_home_future = api_pool.submit(check_back_to_back, home_team_id, game_date_str, sport)
@@ -563,6 +674,9 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
                 if slot_type == "vegas" and home_team_id and away_team_id:
                     nfl_trend_future = api_pool.submit(_analyze_nfl_trend_discrepancy, home_team_id, away_team_id)
                 nfl_weather_future = api_pool.submit(_analyze_nfl_weather, game, event_id)
+
+            if sport == "mlb":
+                mlb_weather_future = api_pool.submit(_analyze_mlb_weather, game, event_id)
 
             # O/U analysis — validated sports always, unvalidated only on vegas slots
             if home_team_id and away_team_id:
@@ -696,6 +810,12 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             nfl_trend = nfl_trend_future.result()
         if nfl_weather_future:
             nfl_weather = nfl_weather_future.result()
+
+        # MLB weather
+        if mlb_weather_future:
+            mlb_result = mlb_weather_future.result()
+            # Reuse nfl_weather shape for uniform downstream handling
+            nfl_weather = mlb_result
 
         # O/U result (all sports)
         if ou_future:
@@ -836,6 +956,12 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
     if pace_mismatch.get("is_mismatch"):
         result["pace_mismatch"] = pace_mismatch
 
+    # ── Best Line (Line Shopping) ─────────────────────────────────────
+    if multibook_data and lean_team and current_spread is not None:
+        best_line = _find_best_line(multibook_data, home_team, away_team, lean_team, current_spread)
+        if best_line:
+            result["best_line"] = best_line
+
     # ── Synthetic Market Maker comparison ──────────────────────────────
     try:
         smm = SyntheticMarketMaker()
@@ -851,6 +977,30 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
             }
     except Exception:
         pass  # Graceful degradation — don't block scan on market maker errors
+
+    # ── Sharp/Public Money Classification + Reverse Line Movement ─────
+    try:
+        if opening is not None and current_spread is not None:
+            move_source = classify_line_move_source(opening, current_spread)
+            result["line_move_source"] = move_source
+
+            # Determine public side for RLM detection
+            # Public generally backs the favorite
+            public_side = "home" if (current_spread or 0) < 0 else "away"
+            movement_dir, move_mag = detect_movement(opening, current_spread)
+            rlm = detect_reverse_line_movement(movement_dir, public_side, move_mag)
+            result["reverse_line_movement"] = rlm
+
+            # Bonus scoring: RLM adds confidence when it aligns with lean
+            if rlm.get("is_rlm"):
+                rlm_strength = rlm.get("strength", "weak")
+                rlm_bonus = {"strong": 3, "moderate": 2, "weak": 1}.get(rlm_strength, 0)
+                score += rlm_bonus
+                result["confirmation_score"] = min(score, get_max_score(sport))
+                result["score_breakdown"] = result.get("score_breakdown", {})
+                result["score_breakdown"]["rlm"] = rlm_bonus
+    except Exception:
+        pass
 
     # ── Kelly Criterion bet sizing ────────────────────────────────────
     kelly_data = compute_kelly_sizing(cover_pct_cal or cover_pct, recommendation, sport=sport, ev_model=ev_model_data)
