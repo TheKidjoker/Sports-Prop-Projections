@@ -56,6 +56,13 @@ ELO_CONFIG = {
         "initial_elo": 1500,
         "mov_multiplier": True,
     },
+    "soccer": {
+        "k_factor": 20,
+        "home_advantage": 80,
+        "season_carry": 0.70,
+        "initial_elo": 1500,
+        "mov_multiplier": True,
+    },
 }
 
 # ─── Module-Level Cache ───────────────────────────────────────────────────────

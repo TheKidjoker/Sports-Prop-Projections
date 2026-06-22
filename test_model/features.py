@@ -31,6 +31,9 @@ FEATURE_COLUMNS = [
     "is_rank_scam", "spread_discrepancy",
     "has_h2h", "h2h_margin",
     "has_sentiment", "home_sentiment", "away_sentiment", "sentiment_diff",
+    "elo_diff",
+    "synthetic_spread_diff", "vig_shading_direction", "market_width",
+    "public_side_estimate", "reverse_line_movement",
 ]
 
 DAY_MAP = {
@@ -221,6 +224,13 @@ def _extract_features_from_state(game, home_st, away_st, sport):
     features["away_sentiment"] = 0.0
     features["sentiment_diff"] = 0.0
 
+    # ── Market maker features (not available for historical) ──
+    features["synthetic_spread_diff"] = 0.0
+    features["vig_shading_direction"] = 0.0
+    features["market_width"] = 0.0
+    features["public_side_estimate"] = 0.0
+    features["reverse_line_movement"] = 0
+
     return features
 
 
@@ -327,9 +337,160 @@ def compute_live_features(game_analysis, sport, sentiment_data=None):
         features["away_sentiment"] = 0.0
         features["sentiment_diff"] = 0.0
 
+    # ── Market maker features (populated from live scan data) ──
+    sm = game_analysis.get("synthetic_market", {})
+    features["synthetic_spread_diff"] = sm.get("line_discrepancy", 0.0) or 0.0
+    features["vig_shading_direction"] = sm.get("edge", 0.0) or 0.0
+    features["market_width"] = 0.0  # Populated when multibook data available
+
+    # Public side estimate from analysis
+    pb = game_analysis.get("public_betting", {})
+    features["public_side_estimate"] = pb.get("public_pct", 0.0) or 0.0
+
+    # Reverse line movement flag
+    features["reverse_line_movement"] = 0
+    try:
+        from line_movement import detect_reverse_line_movement
+        opening = game_analysis.get("opening_spread")
+        current = game_analysis.get("current_spread")
+        if opening is not None and current is not None:
+            spread_dir = "fav" if current < opening else "dog" if current > opening else None
+            public_pct = pb.get("public_pct", 50)
+            public_side = "fav" if public_pct > 55 else "dog" if public_pct < 45 else None
+            if spread_dir and public_side:
+                magnitude = abs(current - opening)
+                rlm = detect_reverse_line_movement(spread_dir, public_side, magnitude)
+                features["reverse_line_movement"] = 1 if rlm.get("is_rlm") else 0
+    except Exception:
+        pass
+
     return features
 
 
 def features_to_array(features_dict):
     """Convert feature dict to ordered list matching FEATURE_COLUMNS."""
     return [features_dict.get(col, 0) for col in FEATURE_COLUMNS]
+
+
+# ─── Soccer-Specific Feature Engineering ──────────────────────────────────
+
+SOCCER_FEATURE_COLUMNS = [
+    "home_xg_regressed", "away_xg_regressed",
+    "home_xga_regressed", "away_xga_regressed",
+    "elo_diff",
+    "home_form_5", "away_form_5",
+    "h2h_goals_diff",
+    "home_advantage_league",
+    "match_importance",
+]
+
+
+def compute_soccer_features(sport="soccer"):
+    """
+    Compute soccer-specific features for historical matches.
+    Uses xG proxies (goals scored/conceded) and Elo ratings.
+
+    Returns count of features computed.
+    """
+    games = tm_db.get_historical_games(sport)
+    if not games:
+        return 0
+
+    _LEAGUE_AVG_XG = 1.35
+    _PRIOR_WEIGHT = 10
+
+    team_state = {}
+
+    def _get_state(team):
+        if team not in team_state:
+            team_state[team] = {
+                "goals_for": [],
+                "goals_against": [],
+                "results": [],  # 1=win, 0.5=draw, 0=loss
+                "dates": [],
+            }
+        return team_state[team]
+
+    def _regress(values, prior=_LEAGUE_AVG_XG, weight=_PRIOR_WEIGHT):
+        if not values:
+            return prior
+        avg = sum(values) / len(values)
+        n = len(values)
+        return (avg * n + prior * weight) / (n + weight)
+
+    count = 0
+    for game in games:
+        if game.get("game_status") != "STATUS_FINAL":
+            continue
+
+        home = game["home_team"]
+        away = game["away_team"]
+        home_st = _get_state(home)
+        away_st = _get_state(away)
+
+        home_score = game.get("home_score", 0) or 0
+        away_score = game.get("away_score", 0) or 0
+
+        # Extract features BEFORE recording result
+        features = {}
+        features["home_xg_regressed"] = round(_regress(home_st["goals_for"]), 3)
+        features["away_xg_regressed"] = round(_regress(away_st["goals_for"]), 3)
+        features["home_xga_regressed"] = round(_regress(home_st["goals_against"]), 3)
+        features["away_xga_regressed"] = round(_regress(away_st["goals_against"]), 3)
+
+        # Elo diff
+        try:
+            from power_ratings import get_elo_diff
+            features["elo_diff"] = get_elo_diff(home, away, "soccer")
+        except Exception:
+            features["elo_diff"] = 0
+
+        # Form (last 5 results as points: win=3, draw=1, loss=0)
+        home_form = home_st["results"][-5:] if home_st["results"] else []
+        away_form = away_st["results"][-5:] if away_st["results"] else []
+        features["home_form_5"] = sum(3 if r == 1 else (1 if r == 0.5 else 0) for r in home_form)
+        features["away_form_5"] = sum(3 if r == 1 else (1 if r == 0.5 else 0) for r in away_form)
+
+        features["h2h_goals_diff"] = 0  # H2H not available from state alone
+        features["home_advantage_league"] = 0.45  # Default
+        features["match_importance"] = 1.0  # Default
+
+        # Target: 0=home_win, 1=draw, 2=away_win
+        if home_score > away_score:
+            target = 0
+        elif home_score == away_score:
+            target = 1
+        else:
+            target = 2
+
+        tm_db.upsert_game_features(
+            game["event_id"], sport, features,
+            cluster_id=None, target=target,
+        )
+        count += 1
+
+        # NOW update team_state
+        home_st["goals_for"].append(home_score)
+        home_st["goals_against"].append(away_score)
+        away_st["goals_for"].append(away_score)
+        away_st["goals_against"].append(home_score)
+
+        if home_score > away_score:
+            home_st["results"].append(1)
+            away_st["results"].append(0)
+        elif home_score == away_score:
+            home_st["results"].append(0.5)
+            away_st["results"].append(0.5)
+        else:
+            home_st["results"].append(0)
+            away_st["results"].append(1)
+
+        home_st["dates"].append(game.get("game_date", ""))
+        away_st["dates"].append(game.get("game_date", ""))
+
+    return count
+
+
+def soccer_features_to_array(features_dict):
+    """Convert soccer feature dict to ordered list matching SOCCER_FEATURE_COLUMNS."""
+    return [features_dict.get(col, 0) for col in SOCCER_FEATURE_COLUMNS]

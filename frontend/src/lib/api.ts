@@ -19,6 +19,8 @@ import type {
   TmRulesMetricsResponse,
   TmCalibrationResponse,
   TmEvMetricsResponse,
+  SoccerLeaguesResponse,
+  SoccerScanResponse,
 } from "./types";
 
 let _accessToken: string | null = null;
@@ -264,4 +266,17 @@ export function tmEvStatus(sport: SportLower) {
 
 export function tmEvMetrics(sport: SportLower) {
   return get<TmEvMetricsResponse>(`/api/tm/${sport}-ev/metrics`);
+}
+
+// ─── Soccer ───────────────────────────────────────────
+export function fetchSoccerLeagues() {
+  return get<SoccerLeaguesResponse>("/api/soccer/leagues");
+}
+
+export function scanSoccerLeague(league: string) {
+  return post<SoccerScanResponse>("/api/soccer/scan", { league });
+}
+
+export function fetchSoccerProps(league: string) {
+  return get<PropsResponse>(`/api/soccer/props?league=${league}`);
 }

@@ -1,17 +1,27 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { scanSport } from "@/lib/api";
-import { scanGameToPickData, type PickData, type SportLower } from "@/lib/types";
+import { scanSport, scanSoccerLeague } from "@/lib/api";
+import { scanGameToPickData, type PickData, type SportLower, type ScanResponse } from "@/lib/types";
 
 export function useScan(sport: SportLower) {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () => scanSport(sport),
+    mutationFn: async (): Promise<ScanResponse> => {
+      if (sport === "soccer") {
+        // Soccer uses a different endpoint; scan EPL as default league
+        const res = await scanSoccerLeague("epl");
+        return {
+          success: res.success,
+          games: res.matches ?? [],
+        };
+      }
+      return scanSport(sport);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(["scan", sport], data);
       // Seed props cache from scan response (avoids separate fetch)
-      if (data.props) {
-        queryClient.setQueryData(["top-props", sport], { success: true, props: data.props });
+      if ((data as Record<string, unknown>).props) {
+        queryClient.setQueryData(["top-props", sport], { success: true, props: (data as Record<string, unknown>).props });
       }
     },
   });

@@ -10,8 +10,8 @@ import math
 from constants import USE_DYNAMIC_PRISM_WEIGHTS, USE_ZSCORE_MATCHUP
 
 # League average defaults (fallback if dynamic fetch fails)
-LEAGUE_AVG_TOTALS = {"nba": 224.0, "nhl": 6.0, "mlb": 8.5}
-LEAGUE_AVG_DEF = {"nba": 112.0, "nhl": 3.0, "mlb": 4.25}
+LEAGUE_AVG_TOTALS = {"nba": 224.0, "nhl": 6.0, "mlb": 8.5, "soccer": 2.7}
+LEAGUE_AVG_DEF = {"nba": 112.0, "nhl": 3.0, "mlb": 4.25, "soccer": 1.35}
 
 # League averages for stat-specific matchup multipliers (hardcoded fallbacks)
 _LEAGUE_AVG_STATS_DEFAULTS = {

@@ -1786,3 +1786,194 @@ def _snapshot_weights(weights):
         "line_movement_tiers": dict(weights["line_movement_tiers"]),
         "thresholds": dict(weights["thresholds"]),
     }
+
+
+# ─── Soccer Multinomial Walk-Forward ─────────────────────────────────────
+
+SOCCER_ROLLING_TRAIN = 200
+SOCCER_ROLLING_TEST = 50
+SOCCER_ROLLING_STEP = 50
+
+
+def run_soccer_walkforward(sport="soccer"):
+    """
+    Walk-forward validation for soccer's multinomial logistic regression.
+    Rolling 200-train / 50-test, step-50.
+
+    Unlike US sports walk-forward (which derives scoring weights),
+    this trains and evaluates the SoccerEVModel per fold.
+    """
+    from test_model import db as tm_db
+
+    games = tm_db.get_historical_games(sport)
+    if not games:
+        with _wf_lock:
+            _wf_progress[sport] = {"status": "error", "message": "No soccer games found."}
+        return
+
+    eligible = [
+        g for g in games
+        if g.get("game_status") == "STATUS_FINAL"
+        and g.get("home_score") is not None
+        and g.get("away_score") is not None
+    ]
+    del games
+
+    if len(eligible) < SOCCER_ROLLING_TRAIN + SOCCER_ROLLING_TEST:
+        with _wf_lock:
+            _wf_progress[sport] = {
+                "status": "error",
+                "message": f"Need at least {SOCCER_ROLLING_TRAIN + SOCCER_ROLLING_TEST} games, have {len(eligible)}.",
+            }
+        return
+
+    with _wf_lock:
+        _wf_progress[sport] = {
+            "status": "running",
+            "total_games": len(eligible),
+            "processed": 0,
+        }
+
+    # Build xG proxies per team
+    _LEAGUE_AVG_XG = 1.35
+    _PRIOR = 10
+    team_state = {}
+
+    def _get_st(team):
+        if team not in team_state:
+            team_state[team] = {"gf": [], "ga": [], "results": []}
+        return team_state[team]
+
+    def _regress(vals):
+        if not vals:
+            return _LEAGUE_AVG_XG
+        avg = sum(vals) / len(vals)
+        n = len(vals)
+        return (avg * n + _LEAGUE_AVG_XG * _PRIOR) / (n + _PRIOR)
+
+    # Precompute features and targets for all games
+    all_features = []
+    all_targets = []
+    for game in eligible:
+        home = game["home_team"]
+        away = game["away_team"]
+        hs = _get_st(home)
+        as_ = _get_st(away)
+
+        features = {
+            "home_xg_regressed": _regress(hs["gf"]),
+            "away_xg_regressed": _regress(as_["gf"]),
+            "home_xga_regressed": _regress(hs["ga"]),
+            "away_xga_regressed": _regress(as_["ga"]),
+            "elo_diff": 0,
+            "home_form_5": sum(3 if r == 1 else (1 if r == 0.5 else 0) for r in hs["results"][-5:]),
+            "away_form_5": sum(3 if r == 1 else (1 if r == 0.5 else 0) for r in as_["results"][-5:]),
+            "h2h_goals_diff": 0,
+            "home_advantage_league": 0.45,
+            "match_importance": 1.0,
+        }
+        all_features.append(features)
+
+        h_score = game.get("home_score", 0) or 0
+        a_score = game.get("away_score", 0) or 0
+        if h_score > a_score:
+            target = 0
+        elif h_score == a_score:
+            target = 1
+        else:
+            target = 2
+        all_targets.append(target)
+
+        # Update state
+        hs["gf"].append(h_score)
+        hs["ga"].append(a_score)
+        as_["gf"].append(a_score)
+        as_["ga"].append(h_score)
+        if h_score > a_score:
+            hs["results"].append(1)
+            as_["results"].append(0)
+        elif h_score == a_score:
+            hs["results"].append(0.5)
+            as_["results"].append(0.5)
+        else:
+            hs["results"].append(0)
+            as_["results"].append(1)
+
+    # Rolling walk-forward folds
+    fold_results = []
+    n = len(all_features)
+    fold_idx = 0
+
+    for start in range(0, n - SOCCER_ROLLING_TRAIN - SOCCER_ROLLING_TEST + 1, SOCCER_ROLLING_STEP):
+        train_end = start + SOCCER_ROLLING_TRAIN
+        test_end = train_end + SOCCER_ROLLING_TEST
+
+        if test_end > n:
+            break
+
+        train_features = all_features[start:train_end]
+        train_targets = all_targets[start:train_end]
+        test_features = all_features[train_end:test_end]
+        test_targets = all_targets[train_end:test_end]
+
+        # Train soccer EV model on this fold
+        training_data = []
+        from soccer_ev_model import SoccerEVModel
+        model = SoccerEVModel()
+        for f, t in zip(train_features, train_targets):
+            entry = dict(f)
+            entry["outcome"] = t
+            training_data.append(entry)
+
+        train_result = model.train(training_data)
+
+        # Evaluate on test set
+        correct = 0
+        for f, t in zip(test_features, test_targets):
+            probs = model.predict_probabilities(f)
+            predicted = max(probs, key=probs.get)
+            actual_map = {0: "home_win", 1: "draw", 2: "away_win"}
+            if predicted == actual_map.get(t):
+                correct += 1
+
+        test_acc = round(correct / len(test_targets) * 100, 1)
+        fold_results.append({
+            "fold": fold_idx,
+            "train_size": len(train_features),
+            "test_size": len(test_features),
+            "accuracy": test_acc,
+            "auc": train_result.get("auc", 0),
+        })
+        fold_idx += 1
+
+        with _wf_lock:
+            _wf_progress[sport]["processed"] = test_end
+
+    # Aggregate
+    if fold_results:
+        avg_acc = round(sum(f["accuracy"] for f in fold_results) / len(fold_results), 1)
+        avg_auc = round(sum(f["auc"] for f in fold_results) / len(fold_results), 4)
+    else:
+        avg_acc = 0
+        avg_auc = 0
+
+    metrics = {
+        "oos_accuracy": avg_acc,
+        "oos_auc": avg_auc,
+        "folds": fold_results,
+        "total_folds": len(fold_results),
+        "total_games": n,
+    }
+
+    with _wf_lock:
+        _wf_progress[sport] = {
+            "status": "complete",
+            "total_games": n,
+            "processed": n,
+            "metrics": metrics,
+        }
+
+    try:
+        tm_db.save_backtest_metrics(sport, {"model_params": metrics}, model_type="walkforward")
+    except Exception:
+        pass

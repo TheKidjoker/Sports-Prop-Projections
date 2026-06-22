@@ -20,6 +20,7 @@ export const SPORTS: SportConfig[] = [
   { id: "NFL", label: "NFL", subtitle: "Gotham Gridiron", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "CFB", label: "CFB", subtitle: "Gotham College", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
   { id: "CBB", label: "CBB", subtitle: "Gotham Hardwood", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
+  { id: "SOCCER", label: "SOCCER", subtitle: "Gotham Pitch", confidence: "experimental", confidenceLabel: "Experimental", gamesCount: 0 },
 ];
 
 const confidenceDotColor = {

@@ -1,5 +1,5 @@
-export type Sport = "NHL" | "NBA" | "NFL" | "CFB" | "CBB" | "MLB";
-export type SportLower = "nhl" | "nba" | "nfl" | "cfb" | "cbb" | "mlb";
+export type Sport = "NHL" | "NBA" | "NFL" | "CFB" | "CBB" | "MLB" | "SOCCER";
+export type SportLower = "nhl" | "nba" | "nfl" | "cfb" | "cbb" | "mlb" | "soccer";
 
 export function toLowerSport(s: Sport): SportLower {
   return s.toLowerCase() as SportLower;
@@ -78,6 +78,31 @@ export interface ScanGame {
   weather_dome?: boolean;
   trend_discrepancy?: Record<string, unknown>;
   overunder?: Record<string, unknown>;
+  synthetic_market?: Record<string, unknown>;
+  // Soccer-specific fields
+  match_result_1x2?: {
+    home_prob?: number;
+    draw_prob?: number;
+    away_prob?: number;
+    home_odds?: number;
+    draw_odds?: number;
+    away_odds?: number;
+  };
+  over_under?: {
+    line?: number;
+    over_prob?: number;
+    under_prob?: number;
+    expected_total?: number;
+  };
+  btts?: {
+    btts_prob?: number;
+    btts_no_prob?: number;
+    home_scoring_prob?: number;
+    away_scoring_prob?: number;
+  };
+  league_name?: string;
+  best_edge?: number;
+  best_market?: string;
   // admin curation
   approval_status?: string;
   admin_notes?: string;
@@ -444,6 +469,26 @@ export interface TmEvMetricsResponse {
     };
   } | null;
   model_active: boolean;
+}
+
+// Soccer league types
+export interface SoccerLeague {
+  key: string;
+  name: string;
+  country: string;
+  api_id: number;
+}
+
+export interface SoccerLeaguesResponse {
+  success: boolean;
+  leagues: SoccerLeague[];
+}
+
+export interface SoccerScanResponse {
+  success: boolean;
+  matches: ScanGame[];
+  league: string;
+  league_name: string;
 }
 
 /** Transform a ScanGame from the API into PickData for the UI */

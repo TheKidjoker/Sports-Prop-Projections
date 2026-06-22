@@ -129,9 +129,86 @@ def init_tm_db():
             predictions_json TEXT
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tm_historical_odds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            sport TEXT NOT NULL,
+            bookmaker TEXT NOT NULL,
+            market TEXT NOT NULL,
+            snapshot_ts TEXT NOT NULL,
+            home_odds REAL,
+            away_odds REAL,
+            draw_odds REAL,
+            line REAL,
+            UNIQUE(event_id, sport, bookmaker, market, snapshot_ts)
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
+
+
+# ─── CRUD: Historical Odds ────────────────────────────────────────────────
+
+def save_historical_odds(odds_dict):
+    """
+    Save a snapshot of odds for a specific event/bookmaker/market.
+
+    Args:
+        odds_dict: dict with event_id, sport, bookmaker, market,
+                   snapshot_ts, home_odds, away_odds, draw_odds, line
+    """
+    row = {
+        "event_id": odds_dict["event_id"],
+        "sport": odds_dict["sport"],
+        "bookmaker": odds_dict["bookmaker"],
+        "market": odds_dict["market"],
+        "snapshot_ts": odds_dict["snapshot_ts"],
+        "home_odds": odds_dict.get("home_odds"),
+        "away_odds": odds_dict.get("away_odds"),
+        "draw_odds": odds_dict.get("draw_odds"),
+        "line": odds_dict.get("line"),
+    }
+
+    if _use_supabase():
+        sb = _get_supabase()
+        sb.table("tm_historical_odds").upsert(row).execute()
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO tm_historical_odds
+            (event_id, sport, bookmaker, market, snapshot_ts,
+             home_odds, away_odds, draw_odds, line)
+            VALUES (:event_id, :sport, :bookmaker, :market, :snapshot_ts,
+                    :home_odds, :away_odds, :draw_odds, :line)
+        """, row)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+
+def get_historical_odds(event_id, sport):
+    """Get all odds snapshots for a specific event."""
+    if _use_supabase():
+        sb = _get_supabase()
+        resp = sb.table("tm_historical_odds").select("*").eq(
+            "event_id", event_id
+        ).eq("sport", sport).order("snapshot_ts").execute()
+        return resp.data or []
+
+    conn = _get_sqlite()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM tm_historical_odds
+        WHERE event_id = ? AND sport = ?
+        ORDER BY snapshot_ts
+    """, (event_id, sport))
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
 
 
 # ─── CRUD: Historical Games ────────────────────────────────────────────────

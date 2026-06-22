@@ -1272,6 +1272,45 @@ def _require_test_model():
     return None
 
 
+# ─── Soccer Routes ──────────────────────────────────────────────────────────
+
+
+@app.route("/api/soccer/leagues", methods=["GET"])
+def api_soccer_leagues():
+    """Available soccer leagues."""
+    from constants import SOCCER_LEAGUES
+    leagues = [
+        {"key": key, "name": cfg["name"], "country": cfg["country"]}
+        for key, cfg in SOCCER_LEAGUES.items()
+    ]
+    return jsonify({"leagues": leagues})
+
+
+@app.route("/api/soccer/scan", methods=["POST"])
+def api_soccer_scan():
+    """Scan soccer matches for a league."""
+    data = request.get_json() or {}
+    league = data.get("league", "epl")
+    date_str = data.get("date")
+
+    from soccer_scanner import get_scanner
+    scanner = get_scanner()
+    matches = scanner.scan_matches(league, date_str)
+    return jsonify({"matches": matches, "league": league, "count": len(matches)})
+
+
+@app.route("/api/soccer/props", methods=["GET"])
+def api_soccer_props():
+    """Player props for soccer (goals, assists, shots)."""
+    league = request.args.get("league", "epl")
+    # Soccer props are less common; return structured placeholder
+    return jsonify({
+        "props": [],
+        "league": league,
+        "note": "Soccer player props require API-Football integration",
+    })
+
+
 @app.route("/api/tm/collect", methods=["POST"])
 @require_auth
 def api_tm_collect():

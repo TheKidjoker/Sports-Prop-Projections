@@ -1020,6 +1020,110 @@ def get_clv_trend(sport=None):
     }
 
 
+def get_rolling_clv(sport=None, window=50):
+    """
+    Compute rolling N-bet CLV average per sport.
+    Returns rolling CLV series, CLV vs results correlation, and significance.
+
+    Args:
+        sport: filter to a single sport, or None for all
+        window: number of bets in the rolling window (default 50)
+
+    Returns:
+        dict with rolling_clv list, correlation, and per-sport breakdowns
+    """
+    if _use_supabase():
+        sb = _get_supabase()
+        query = sb.table("predictions").select(
+            "id,sport,clv,clv_direction,result,game_date"
+        ).not_.is_("clv", "null").order("game_date", desc=False)
+        if sport:
+            query = query.eq("sport", sport)
+        rows = query.execute().data
+    else:
+        conn = _get_sqlite()
+        cur = conn.cursor()
+        sql = ("SELECT id, sport, clv, clv_direction, result, game_date "
+               "FROM predictions WHERE clv IS NOT NULL ORDER BY game_date ASC")
+        params = []
+        if sport:
+            sql = ("SELECT id, sport, clv, clv_direction, result, game_date "
+                   "FROM predictions WHERE clv IS NOT NULL AND sport = ? "
+                   "ORDER BY game_date ASC")
+            params.append(sport)
+        cur.execute(sql, params)
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    if not rows:
+        return {"rolling_clv": [], "correlation": None, "by_sport": {}}
+
+    # Compute rolling window averages
+    rolling_series = []
+    for i in range(window, len(rows) + 1):
+        batch = rows[i - window:i]
+        avg = sum(r["clv"] for r in batch) / len(batch)
+        beat_rate = sum(1 for r in batch if r.get("clv_direction") == 1) / len(batch)
+        rolling_series.append({
+            "bet_number": i,
+            "avg_clv": round(avg, 3),
+            "beat_rate": round(beat_rate * 100, 1),
+            "date": batch[-1].get("game_date", ""),
+        })
+
+    # CLV vs results correlation (positive CLV + negative results = variance)
+    clv_vals = [r["clv"] for r in rows if r.get("result") in ("win", "loss")]
+    result_vals = [1 if r["result"] == "win" else 0
+                   for r in rows if r.get("result") in ("win", "loss")]
+
+    correlation = None
+    if len(clv_vals) >= 20:
+        try:
+            n = len(clv_vals)
+            mean_c = sum(clv_vals) / n
+            mean_r = sum(result_vals) / n
+            cov = sum((c - mean_c) * (r - mean_r) for c, r in zip(clv_vals, result_vals)) / n
+            std_c = (sum((c - mean_c) ** 2 for c in clv_vals) / n) ** 0.5
+            std_r = (sum((r - mean_r) ** 2 for r in result_vals) / n) ** 0.5
+            if std_c > 0 and std_r > 0:
+                correlation = round(cov / (std_c * std_r), 3)
+        except Exception:
+            pass
+
+    # Per-sport rolling CLV
+    by_sport = {}
+    sports_seen = set(r.get("sport", "") for r in rows)
+    for sp in sorted(sports_seen):
+        if not sp:
+            continue
+        sp_rows = [r for r in rows if r.get("sport") == sp]
+        if len(sp_rows) < window:
+            last_n = sp_rows[-min(len(sp_rows), window):]
+            avg = sum(r["clv"] for r in last_n) / len(last_n) if last_n else 0
+            by_sport[sp] = {
+                "avg_clv": round(avg, 3),
+                "count": len(sp_rows),
+                "sufficient": False,
+            }
+        else:
+            last_n = sp_rows[-window:]
+            avg = sum(r["clv"] for r in last_n) / len(last_n)
+            by_sport[sp] = {
+                "avg_clv": round(avg, 3),
+                "count": len(sp_rows),
+                "sufficient": True,
+            }
+
+    return {
+        "rolling_clv": rolling_series,
+        "correlation": correlation,
+        "by_sport": by_sport,
+        "window": window,
+        "total_bets": len(rows),
+    }
+
+
 # ─── PRISM Auto-Tracking ──────────────────────────────────────────────────
 
 def save_prism_predictions(props, event_id, sport):

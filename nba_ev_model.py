@@ -163,6 +163,11 @@ def _extract_features(game, team_state, feature_names):
     else:
         pace_diff = 0.0
 
+    # Features 12-14: Market maker features (default 0 for historical training)
+    synthetic_edge = game.get("synthetic_edge", 0.0)
+    market_width = game.get("market_width", 0.0)
+    vig_shading_direction = game.get("vig_shading_direction", 0.0)
+
     features = {
         "spread_abs": spread_abs,
         "clv": clv,
@@ -175,6 +180,9 @@ def _extract_features(game, team_state, feature_names):
         "home_away": home_away,
         "elo_diff": elo_diff,
         "pace_diff": pace_diff,
+        "synthetic_edge": synthetic_edge,
+        "market_width": market_width,
+        "vig_shading_direction": vig_shading_direction,
     }
     return features
 

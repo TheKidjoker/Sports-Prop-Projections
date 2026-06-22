@@ -27,7 +27,7 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
 
   // Prefetch props in background after scan completes
   useEffect(() => {
-    if (!isScanning && picks.length > 0 && ["nba", "nhl", "cbb"].includes(lowerSport)) {
+    if (!isScanning && picks.length > 0 && ["nba", "nhl", "cbb", "soccer"].includes(lowerSport)) {
       queryClient.prefetchQuery({
         queryKey: ["top-props", lowerSport],
         queryFn: () => fetchTopProps(lowerSport),

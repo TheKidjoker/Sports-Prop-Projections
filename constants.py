@@ -40,6 +40,11 @@ THRESHOLDS = {
         "lean": 4,
         "max_score": 25,
     },
+    "soccer": {
+        "strong": 8,
+        "lean": 5,
+        "max_score": 25,
+    },
 }
 
 # Moneyline spread thresholds — recommend ML when |spread| >= threshold
@@ -352,6 +357,48 @@ USE_ZSCORE_MATCHUP = True
 USE_ELO_FEATURES = True
 USE_POISSON_VARIANCE = True
 
+# ─── Synthetic Market Maker Constants ─────────────────────────────────────────
+
+POINTS_PER_ELO = {
+    "nba": 28.0,
+    "nhl": 67.0,
+    "nfl": 25.0,
+    "cfb": 25.0,
+    "cbb": 28.0,
+    "mlb": 40.0,
+    "soccer": 35.0,
+}
+
+SOCCER_LEAGUES = {
+    "epl": {"name": "Premier League", "api_id": 39, "country": "England"},
+    "la_liga": {"name": "La Liga", "api_id": 140, "country": "Spain"},
+    "bundesliga": {"name": "Bundesliga", "api_id": 78, "country": "Germany"},
+    "serie_a": {"name": "Serie A", "api_id": 135, "country": "Italy"},
+    "ligue_1": {"name": "Ligue 1", "api_id": 61, "country": "France"},
+    "mls": {"name": "MLS", "api_id": 253, "country": "USA"},
+    "ucl": {"name": "Champions League", "api_id": 2, "country": "Europe"},
+    "eredivisie": {"name": "Eredivisie", "api_id": 88, "country": "Netherlands"},
+    "liga_portugal": {"name": "Liga Portugal", "api_id": 94, "country": "Portugal"},
+    "super_lig": {"name": "Super Lig", "api_id": 203, "country": "Turkey"},
+    "championship": {"name": "Championship", "api_id": 40, "country": "England"},
+    "liga_mx": {"name": "Liga MX", "api_id": 262, "country": "Mexico"},
+    "a_league": {"name": "A-League", "api_id": 188, "country": "Australia"},
+    "j_league": {"name": "J1 League", "api_id": 98, "country": "Japan"},
+    "k_league": {"name": "K League 1", "api_id": 292, "country": "South Korea"},
+    "saudi_pro": {"name": "Saudi Pro League", "api_id": 307, "country": "Saudi Arabia"},
+}
+
+STANDARD_OVERROUND = {
+    "nba": 0.045,
+    "nhl": 0.050,
+    "nfl": 0.045,
+    "cfb": 0.045,
+    "cbb": 0.045,
+    "mlb": 0.040,
+    "soccer": 0.055,
+}
+
+
 EV_CONFIG = {
     "auc_gate": 0.60,               # Minimum AUC-ROC to activate model (raised for elo_diff)
     "auc_gate_standalone": 0.62,    # Higher gate when EV is the ONLY model (no rules)
@@ -372,5 +419,6 @@ EV_CONFIG = {
         "dog_off_regressed", "fav_off_regressed", "net_rating_diff",
         "dog_win_pct_10", "fav_win_pct_10",
         "home_away", "elo_diff", "pace_diff",
+        "synthetic_edge", "market_width", "vig_shading_direction",
     ],
 }

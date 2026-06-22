@@ -42,6 +42,7 @@ MLB_EV_CONFIG = {
         "moneyline_implied", "clv", "line_movement_abs",
         "dog_runs_regressed", "fav_runs_regressed", "run_diff_net",
         "total", "elo_diff", "home_away",
+        "synthetic_edge", "market_width", "vig_shading_direction",
     ],
     "rolling_train_size": 300,
     "rolling_test_size": 75,
@@ -208,6 +209,9 @@ def _extract_features(game, team_state):
         "total": total,
         "elo_diff": elo_diff,
         "home_away": home_away,
+        "synthetic_edge": game.get("synthetic_edge", 0.0),
+        "market_width": game.get("market_width", 0.0),
+        "vig_shading_direction": game.get("vig_shading_direction", 0.0),
     }
 
 

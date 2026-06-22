@@ -805,6 +805,170 @@ def start_rules_backtest_thread(sport):
         if existing.get("status") == "running":
             return False
 
-    t = threading.Thread(target=run_rules_backtest, args=(sport,), daemon=True)
+    target_fn = run_soccer_backtest if sport == "soccer" else run_rules_backtest
+    t = threading.Thread(target=target_fn, args=(sport,), daemon=True)
     t.start()
     return True
+
+
+# ─── Soccer Three-Way Backtest ───────────────────────────────────────────
+
+def run_soccer_backtest(sport="soccer"):
+    """
+    Backtest soccer 1X2 predictions using the SoccerEVModel.
+    Three-way outcome: home_win (0), draw (1), away_win (2).
+    """
+    games = tm_db.get_historical_games(sport)
+    if not games:
+        with _rules_lock:
+            _rules_progress[sport] = {
+                "status": "error",
+                "message": "No historical soccer games found.",
+            }
+        return
+
+    eligible = [
+        g for g in games
+        if g.get("game_status") == "STATUS_FINAL"
+        and g.get("home_score") is not None
+        and g.get("away_score") is not None
+    ]
+    del games
+
+    if len(eligible) < 50:
+        with _rules_lock:
+            _rules_progress[sport] = {
+                "status": "error",
+                "message": f"Need at least 50 eligible games, have {len(eligible)}.",
+            }
+        return
+
+    total = len(eligible)
+    with _rules_lock:
+        _rules_progress[sport] = {
+            "status": "running",
+            "total_games": total,
+            "processed": 0,
+            "current_date": "",
+        }
+
+    # Build team state for xG proxies
+    _LEAGUE_AVG_XG = 1.35
+    _PRIOR = 10
+    team_state = {}
+
+    def _get_st(team):
+        if team not in team_state:
+            team_state[team] = {"gf": [], "ga": [], "results": []}
+        return team_state[team]
+
+    def _regress(vals):
+        if not vals:
+            return _LEAGUE_AVG_XG
+        avg = sum(vals) / len(vals)
+        n = len(vals)
+        return (avg * n + _LEAGUE_AVG_XG * _PRIOR) / (n + _PRIOR)
+
+    predictions = []
+    outcomes = {"home_win": 0, "draw": 0, "away_win": 0}
+    correct = 0
+
+    for i, game in enumerate(eligible):
+        home = game["home_team"]
+        away = game["away_team"]
+        hs = _get_st(home)
+        as_ = _get_st(away)
+
+        # Predict BEFORE recording result
+        home_xg = _regress(hs["gf"])
+        away_xg = _regress(as_["gf"])
+
+        try:
+            from power_ratings import get_elo_diff
+            elo_d = get_elo_diff(home, away, "soccer")
+        except Exception:
+            elo_d = 0
+
+        features = {
+            "home_xg_regressed": home_xg,
+            "away_xg_regressed": away_xg,
+            "elo_diff": elo_d,
+            "home_advantage_league": 0.45,
+        }
+
+        try:
+            from soccer_ev_model import SoccerEVModel
+            model = SoccerEVModel()
+            probs = model.predict_probabilities(features)
+        except Exception:
+            probs = {"home_win": 0.40, "draw": 0.27, "away_win": 0.33}
+
+        # Predicted outcome = highest probability
+        predicted = max(probs, key=probs.get)
+
+        # Actual outcome
+        h_score = game["home_score"]
+        a_score = game["away_score"]
+        if h_score > a_score:
+            actual = "home_win"
+        elif h_score == a_score:
+            actual = "draw"
+        else:
+            actual = "away_win"
+
+        outcomes[actual] = outcomes.get(actual, 0) + 1
+        if predicted == actual:
+            correct += 1
+
+        predictions.append({
+            "event_id": game["event_id"],
+            "predicted": predicted,
+            "actual": actual,
+            "probs": probs,
+            "correct": predicted == actual,
+        })
+
+        # Update state
+        hs["gf"].append(h_score)
+        hs["ga"].append(a_score)
+        as_["gf"].append(a_score)
+        as_["ga"].append(h_score)
+
+        if i % 50 == 0:
+            with _rules_lock:
+                _rules_progress[sport]["processed"] = i + 1
+                _rules_progress[sport]["current_date"] = game.get("game_date", "")[:10]
+
+    accuracy = round(correct / total * 100, 1) if total > 0 else 0
+
+    metrics = {
+        "total_games": total,
+        "accuracy": accuracy,
+        "correct": correct,
+        "outcomes": outcomes,
+        "by_outcome": {},
+    }
+
+    # Per-outcome accuracy
+    for outcome_key in ("home_win", "draw", "away_win"):
+        outcome_preds = [p for p in predictions if p["actual"] == outcome_key]
+        outcome_correct = sum(1 for p in outcome_preds if p["correct"])
+        n = len(outcome_preds)
+        metrics["by_outcome"][outcome_key] = {
+            "count": n,
+            "accuracy": round(outcome_correct / n * 100, 1) if n > 0 else 0,
+        }
+
+    with _rules_lock:
+        _rules_progress[sport] = {
+            "status": "complete",
+            "total_games": total,
+            "processed": total,
+            "metrics": metrics,
+        }
+
+    # Save metrics to DB
+    try:
+        tm_db.save_backtest_metrics(sport, {"model_params": metrics})
+    except Exception:
+        pass

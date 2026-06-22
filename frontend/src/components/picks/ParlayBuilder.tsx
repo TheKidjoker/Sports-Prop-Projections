@@ -43,6 +43,7 @@ const SPORT_COLORS: Record<string, string> = {
   cbb: "bg-accent-foreground/20 text-accent-foreground border-accent-foreground/30",
   nfl: "bg-success/20 text-success border-success/30",
   cfb: "bg-primary/20 text-primary border-primary/30",
+  soccer: "bg-success/20 text-success border-success/30",
 };
 
 // ─── Build parlays from cross-sport data ──────────────

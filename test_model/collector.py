@@ -27,6 +27,7 @@ ODDS_API_SPORT_KEYS = {
     "nfl": "americanfootball_nfl",
     "cfb": "americanfootball_ncaaf",
     "cbb": "basketball_ncaab",
+    "soccer": "soccer_epl",
 }
 
 # Season date ranges by sport (approximate)
@@ -55,6 +56,11 @@ SEASON_RANGES = {
         ("20231106", "20240409"),
         ("20241104", "20250407"),
         ("20251103", "20260406"),
+    ],
+    "soccer": [
+        ("20230812", "20240519"),   # 2023-24 EPL season
+        ("20240817", "20250525"),   # 2024-25 EPL season
+        ("20250816", "20260524"),   # 2025-26 EPL season
     ],
 }
 
@@ -438,3 +444,92 @@ def backfill_spreads_from_odds_api(sport):
 
     print(f"[ODDS API] Backfilled {updated} games for {sport}.", flush=True)
     return updated
+
+
+# ─── Soccer Collection via API-Football ──────────────────────────────────
+
+def collect_soccer(league="epl"):
+    """
+    Collect historical soccer matches from API-Football.
+    Uses the api_soccer module to fetch fixtures with results.
+
+    Args:
+        league: league key (e.g., "epl", "la_liga")
+    """
+    try:
+        from api_soccer import get_fixtures
+        from constants import SOCCER_LEAGUES
+    except ImportError:
+        print("[soccer] api_soccer or constants not available for soccer collection.", flush=True)
+        return
+
+    league_config = SOCCER_LEAGUES.get(league)
+    if not league_config:
+        print(f"[soccer] Unknown league: {league}", flush=True)
+        return
+
+    with _collection_lock:
+        _collection_progress[f"soccer_{league}"] = {
+            "status": "running",
+            "total_dates": 0,
+            "done_dates": 0,
+            "current_date": "Fetching fixtures...",
+            "games_collected": 0,
+            "errors": 0,
+        }
+
+    try:
+        # Fetch finished fixtures (API-Football returns completed matches)
+        fixtures = get_fixtures(league_config["api_id"])
+        if not fixtures:
+            with _collection_lock:
+                _collection_progress[f"soccer_{league}"]["status"] = "complete"
+            return
+
+        collected = 0
+        for match in fixtures:
+            if match.get("status") not in ("FT", "AET", "PEN"):
+                continue
+
+            home_score = match.get("home_score")
+            away_score = match.get("away_score")
+
+            # Soccer doesn't use spreads, but we store results for Elo building
+            # home_covered = 1 if home win, 0 if away win, -1 if draw
+            if home_score is not None and away_score is not None:
+                if home_score > away_score:
+                    home_covered = 1
+                elif home_score < away_score:
+                    home_covered = 0
+                else:
+                    home_covered = -1  # Draw
+            else:
+                home_covered = None
+
+            tm_db.upsert_historical_game({
+                "event_id": str(match.get("fixture_id", f"soccer_{league}_{collected}")),
+                "sport": "soccer",
+                "game_date": match.get("date", ""),
+                "home_team": match.get("home_team", "Unknown"),
+                "away_team": match.get("away_team", "Unknown"),
+                "home_team_id": str(match.get("home_team_id", "")),
+                "away_team_id": str(match.get("away_team_id", "")),
+                "home_score": home_score,
+                "away_score": away_score,
+                "home_covered": home_covered,
+                "game_status": "STATUS_FINAL",
+                "venue_name": match.get("venue", ""),
+            })
+            collected += 1
+
+        with _collection_lock:
+            _collection_progress[f"soccer_{league}"]["status"] = "complete"
+            _collection_progress[f"soccer_{league}"]["games_collected"] = collected
+
+        print(f"[soccer] Collected {collected} matches for {league}.", flush=True)
+
+    except Exception as e:
+        with _collection_lock:
+            _collection_progress[f"soccer_{league}"]["status"] = "error"
+            _collection_progress[f"soccer_{league}"]["errors"] = 1
+        print(f"[soccer] Collection error for {league}: {e}", flush=True)

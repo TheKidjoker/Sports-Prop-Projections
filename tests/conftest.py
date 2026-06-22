@@ -167,3 +167,132 @@ def make_game_log(num_games=5):
             for i in range(num_games)
         ]
     }
+
+
+# ─── Unit Test Fixtures ───────────────────────────────────────────────────────
+
+@pytest.fixture
+def sample_game_dict():
+    """A fully-populated game analysis dict for unit tests."""
+    return {
+        "event_id": "401234567",
+        "home_team": "Boston Celtics",
+        "away_team": "New York Knicks",
+        "home_team_id": "2",
+        "away_team_id": "18",
+        "current_spread": -6.5,
+        "opening_spread": -5.5,
+        "slot_type": "vegas",
+        "lean_team": "New York Knicks",
+        "confirmation_score": 12,
+        "cover_pct": 68.5,
+        "recommendation": "LEAN",
+        "sport": "nba",
+    }
+
+
+@pytest.fixture
+def sample_odds_data():
+    """Mock odds API response for testing."""
+    return [
+        {
+            "home_team": "Boston Celtics",
+            "away_team": "New York Knicks",
+            "bookmakers": [
+                {
+                    "key": "pinnacle",
+                    "title": "Pinnacle",
+                    "markets": [
+                        {
+                            "key": "spreads",
+                            "outcomes": [
+                                {"name": "Boston Celtics", "price": -110, "point": -6.5},
+                                {"name": "New York Knicks", "price": -110, "point": 6.5},
+                            ],
+                        },
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": "Boston Celtics", "price": -250},
+                                {"name": "New York Knicks", "price": 200},
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "key": "fanduel",
+                    "title": "FanDuel",
+                    "markets": [
+                        {
+                            "key": "spreads",
+                            "outcomes": [
+                                {"name": "Boston Celtics", "price": -110, "point": -7.0},
+                                {"name": "New York Knicks", "price": -110, "point": 7.0},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    ]
+
+
+@pytest.fixture
+def mock_elo_cache():
+    """Provide a mock Elo ratings dict for testing without DB."""
+    return {
+        "nba": {
+            "Boston Celtics": 1620,
+            "New York Knicks": 1530,
+            "Los Angeles Lakers": 1480,
+            "Golden State Warriors": 1550,
+        },
+        "nhl": {
+            "Boston Bruins": 1580,
+            "Toronto Maple Leafs": 1540,
+            "New York Rangers": 1520,
+        },
+        "soccer": {
+            "Manchester City": 1650,
+            "Arsenal": 1600,
+            "Liverpool": 1590,
+            "Manchester United": 1480,
+        },
+    }
+
+
+@pytest.fixture
+def sample_recent_games():
+    """Player game logs for prop variance/projection testing."""
+    return [
+        {"pts": 28, "reb": 8, "ast": 5, "min": 35, "g": 0, "sog": 3},
+        {"pts": 22, "reb": 6, "ast": 7, "min": 33, "g": 1, "sog": 4},
+        {"pts": 31, "reb": 9, "ast": 4, "min": 36, "g": 0, "sog": 2},
+        {"pts": 25, "reb": 7, "ast": 6, "min": 34, "g": 1, "sog": 5},
+        {"pts": 19, "reb": 5, "ast": 3, "min": 30, "g": 0, "sog": 3},
+        {"pts": 27, "reb": 8, "ast": 5, "min": 34, "g": 0, "sog": 4},
+        {"pts": 24, "reb": 6, "ast": 4, "min": 32, "g": 1, "sog": 3},
+        {"pts": 30, "reb": 10, "ast": 6, "min": 37, "g": 0, "sog": 2},
+        {"pts": 21, "reb": 7, "ast": 5, "min": 31, "g": 0, "sog": 3},
+        {"pts": 26, "reb": 8, "ast": 4, "min": 33, "g": 0, "sog": 4},
+    ]
+
+
+@pytest.fixture
+def sample_soccer_match():
+    """A soccer match fixture for soccer engine testing."""
+    return {
+        "fixture_id": 867530,
+        "league": "epl",
+        "home_team": "Manchester City",
+        "away_team": "Arsenal",
+        "home_xg": 1.8,
+        "away_xg": 1.3,
+        "home_xga": 0.9,
+        "away_xga": 1.1,
+        "home_form_5": "WWDWW",
+        "away_form_5": "WLWWW",
+        "h2h_goals_diff": 0.5,
+        "home_advantage_league": 0.46,
+        "match_importance": 0.8,
+    }

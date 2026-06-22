@@ -83,6 +83,95 @@ def score_line_movement(magnitude, sport="nba"):
     return 8
 
 
+def classify_line_move_source(opening, current, time_proxy=None):
+    """
+    Classify line movement as sharp, public, steam, or unknown.
+
+    Args:
+        opening: opening spread
+        current: current spread
+        time_proxy: optional indicator of when the move happened
+            "early" = within first few hours
+            "late" = close to game time
+            None = unknown
+
+    Returns:
+        dict with source ("sharp", "public", "steam", "unknown"),
+             direction, magnitude
+    """
+    direction, magnitude = detect_movement(opening, current)
+
+    if direction == "none" or magnitude < 0.5:
+        return {"source": "unknown", "direction": direction, "magnitude": magnitude}
+
+    # Large early moves = sharp money
+    if time_proxy == "early" and magnitude >= 1.5:
+        return {"source": "sharp", "direction": direction, "magnitude": magnitude}
+
+    # Gradual late drift = public money
+    if time_proxy == "late" and magnitude < 2.0:
+        return {"source": "public", "direction": direction, "magnitude": magnitude}
+
+    # Sudden large move = steam (multi-book simultaneous)
+    if magnitude >= 2.5:
+        return {"source": "steam", "direction": direction, "magnitude": magnitude}
+
+    # Moderate move without timing info
+    if magnitude >= 1.0:
+        source = "sharp" if direction == "vegas" else "public"
+        return {"source": source, "direction": direction, "magnitude": magnitude}
+
+    return {"source": "unknown", "direction": direction, "magnitude": magnitude}
+
+
+def detect_reverse_line_movement(spread_dir, public_side, magnitude=0.0):
+    """
+    Detect Reverse Line Movement (RLM).
+
+    RLM occurs when the line moves AGAINST public money — a strong sharp signal.
+    Example: 70% of public on Home -3, but line moves to Home -2.5.
+
+    Args:
+        spread_dir: direction the spread moved ("public" or "vegas")
+        public_side: which side the public is on ("home" or "away")
+        magnitude: how much the line moved
+
+    Returns:
+        dict with is_rlm (bool), strength ("weak"/"moderate"/"strong"), detail
+    """
+    result = {"is_rlm": False, "strength": None, "detail": ""}
+
+    if spread_dir == "none" or magnitude < 0.5:
+        return result
+
+    # RLM = line moves in the "vegas" direction (against public)
+    if spread_dir != "vegas":
+        return result
+
+    result["is_rlm"] = True
+
+    if magnitude >= 2.0:
+        result["strength"] = "strong"
+        result["detail"] = (
+            f"Strong RLM: line moved {magnitude:.1f} pts against "
+            f"public ({public_side}) — sharp money detected"
+        )
+    elif magnitude >= 1.0:
+        result["strength"] = "moderate"
+        result["detail"] = (
+            f"Moderate RLM: line moved {magnitude:.1f} pts against "
+            f"public ({public_side})"
+        )
+    else:
+        result["strength"] = "weak"
+        result["detail"] = (
+            f"Weak RLM: line moved {magnitude:.1f} pts against "
+            f"public ({public_side})"
+        )
+
+    return result
+
+
 def _parse_spread(value):
     """
     Parses a spread value from string or numeric to float.

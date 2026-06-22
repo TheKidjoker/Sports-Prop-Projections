@@ -53,6 +53,7 @@ NHL_EV_CONFIG = {
         "spread_abs", "clv", "line_movement_abs", "rest_diff",
         "dog_gf_regressed", "fav_gf_regressed", "goal_diff_net", "total",
         "elo_diff",
+        "synthetic_edge", "market_width", "vig_shading_direction",
     ],
     # Walk-forward rolling parameters
     "rolling_train_size": 250,
@@ -188,6 +189,11 @@ def _extract_features(game, team_state):
     else:
         elo_diff = 0.0
 
+    # Market maker features (default 0 for historical training)
+    synthetic_edge = game.get("synthetic_edge", 0.0)
+    market_width = game.get("market_width", 0.0)
+    vig_shading_direction = game.get("vig_shading_direction", 0.0)
+
     return {
         "spread_abs": spread_abs,
         "clv": clv,
@@ -198,6 +204,9 @@ def _extract_features(game, team_state):
         "goal_diff_net": goal_diff_net,
         "total": total,
         "elo_diff": elo_diff,
+        "synthetic_edge": synthetic_edge,
+        "market_width": market_width,
+        "vig_shading_direction": vig_shading_direction,
     }
 
 

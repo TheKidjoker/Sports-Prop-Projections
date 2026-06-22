@@ -58,6 +58,7 @@ SPORT_MAP = {
     "nfl": {"category": "football", "league": "nfl"},
     "cbb": {"category": "basketball", "league": "mens-college-basketball"},
     "mlb": {"category": "baseball", "league": "mlb"},
+    "soccer": {"category": "soccer", "league": "eng.1"},
 }
 
 

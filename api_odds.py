@@ -18,6 +18,22 @@ ODDS_API_SPORT_MAP = {
     "cfb": "americanfootball_ncaaf",
     "cbb": "basketball_ncaab",
     "mlb": "baseball_mlb",
+    "soccer_epl": "soccer_epl",
+    "soccer_spain_la_liga": "soccer_spain_la_liga",
+    "soccer_germany_bundesliga": "soccer_germany_bundesliga",
+    "soccer_italy_serie_a": "soccer_italy_serie_a",
+    "soccer_france_ligue_one": "soccer_france_ligue_one",
+    "soccer_usa_mls": "soccer_usa_mls",
+    "soccer_uefa_champs_league": "soccer_uefa_champs_league",
+    "soccer_netherlands_eredivisie": "soccer_netherlands_eredivisie",
+    "soccer_portugal_primeira_liga": "soccer_portugal_primeira_liga",
+    "soccer_turkey_super_league": "soccer_turkey_super_league",
+    "soccer_england_league1": "soccer_england_league1",
+    "soccer_mexico_ligamx": "soccer_mexico_ligamx",
+    "soccer_australia_aleague": "soccer_australia_aleague",
+    "soccer_japan_j_league": "soccer_japan_j_league",
+    "soccer_korea_kleague1": "soccer_korea_kleague1",
+    "soccer_saudi_pro_league": "soccer_saudi_professional_league",
 }
 
 

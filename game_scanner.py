@@ -36,6 +36,7 @@ from rank_analysis import (
 )
 from constants import get_max_score, get_recommendation, ML_THRESHOLDS, NBA_UNVALIDATED_CAPS, UNVALIDATED_SPORTS
 from calibration import get_calibrated_cover_pct
+from market_maker import SyntheticMarketMaker
 from analysis_factors import (
     NFL_INDOOR_STADIUMS, H2H_REVENGE_THRESHOLDS,
     _analyze_nfl_trend_discrepancy, _analyze_nfl_overunder, _analyze_nfl_weather,
@@ -834,6 +835,22 @@ def _analyze_single_game(game, day_of_week, all_injuries, is_first_game,
 
     if pace_mismatch.get("is_mismatch"):
         result["pace_mismatch"] = pace_mismatch
+
+    # ── Synthetic Market Maker comparison ──────────────────────────────
+    try:
+        smm = SyntheticMarketMaker()
+        synthetic_spread = smm.generate_spread(home_team, away_team, sport)
+        if synthetic_spread and current_spread is not None:
+            market_cmp = smm.compare_to_market(synthetic_spread, current_spread)
+            result["synthetic_market"] = {
+                "synthetic_spread": synthetic_spread.get("fair_spread"),
+                "market_spread": current_spread,
+                "edge": market_cmp.get("edge"),
+                "classification": market_cmp.get("classification"),
+                "line_discrepancy": market_cmp.get("spread_diff"),
+            }
+    except Exception:
+        pass  # Graceful degradation — don't block scan on market maker errors
 
     # ── Kelly Criterion bet sizing ────────────────────────────────────
     kelly_data = compute_kelly_sizing(cover_pct_cal or cover_pct, recommendation, sport=sport, ev_model=ev_model_data)
