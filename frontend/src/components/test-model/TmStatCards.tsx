@@ -20,7 +20,7 @@ export function TmStatCards({ cards }: TmStatCardsProps) {
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {cards.map((card) => (
         <div key={card.label} className="card-surface rounded-sm p-3">
-          <p className="text-[10px] text-muted-foreground font-heading tracking-wider uppercase">
+          <p className="text-[13px] text-muted-foreground font-heading tracking-wider uppercase">
             {card.label}
           </p>
           <p className={`text-lg font-mono font-bold ${colorMap[card.color ?? "default"]}`}>

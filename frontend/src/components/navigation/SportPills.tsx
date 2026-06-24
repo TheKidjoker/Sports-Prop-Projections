@@ -60,7 +60,7 @@ export function SportPills({ selected, onSelect, gameCounts }: SportPillsProps) 
               onClick={() => onSelect(sport.id === selected ? null : sport.id)}
             />
             {count > 0 && (
-              <span className="absolute -top-1 -right-1 text-[7px] font-mono text-foreground bg-muted border border-border rounded-full w-3.5 h-3.5 flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 text-[10px] font-mono text-foreground bg-muted border border-border rounded-full w-3.5 h-3.5 flex items-center justify-center">
                 {count}
               </span>
             )}

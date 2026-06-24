@@ -18,7 +18,7 @@ export function StatusIndicator({ status, label, pulse = true, className = "" }:
       <span className={`w-2 h-2 rounded-full ${colors[status]} ${pulse && status === "online" ? "animate-pulse-dot" : ""}`}
         style={pulse && status === "online" ? { boxShadow: `0 0 6px ${status === "online" ? "hsl(142,71%,45%)" : "transparent"}` } : undefined}
       />
-      {label && <span className="font-heading text-[10px] tracking-wider text-muted-foreground">{label}</span>}
+      {label && <span className="font-heading text-[13px] tracking-wider text-muted-foreground">{label}</span>}
     </div>
   );
 }

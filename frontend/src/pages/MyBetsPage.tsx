@@ -53,7 +53,7 @@ function BetLine({ bet, onDelete }: { bet: TrackedBet; onDelete: (id: number) =>
             {bet.away_team} @ {bet.home_team}
           </span>
           {bet.recommendation && (
-            <span className="text-[8px] font-heading tracking-widest uppercase px-1.5 py-0.5 border rounded-sm"
+            <span className="text-[11px] font-heading tracking-widest uppercase px-1.5 py-0.5 border rounded-sm"
               style={{
                 borderColor: `${CHART_COLORS.gold}40`,
                 color: CHART_COLORS.gold,
@@ -78,17 +78,17 @@ function BetLine({ bet, onDelete }: { bet: TrackedBet; onDelete: (id: number) =>
             </span>
           )}
           {isProp && bet.projection != null && (
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-[13px] text-muted-foreground font-mono">
               proj:{bet.projection.toFixed(1)}
             </span>
           )}
           {bet.cover_pct != null && (
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-[13px] text-muted-foreground font-mono">
               {bet.cover_pct.toFixed(1)}%
             </span>
           )}
           {bet.actual_value != null && (
-            <span className="text-[10px] font-mono text-foreground">
+            <span className="text-[13px] font-mono text-foreground">
               actual:{bet.actual_value}
             </span>
           )}
@@ -96,16 +96,16 @@ function BetLine({ bet, onDelete }: { bet: TrackedBet; onDelete: (id: number) =>
 
         {/* Row 3: date + score + clv */}
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-[10px] text-muted-foreground font-mono">
+          <span className="text-[13px] text-muted-foreground font-mono">
             {new Date(bet.created_at).toLocaleDateString()}
           </span>
           {bet.home_score != null && bet.away_score != null && (
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-[13px] text-muted-foreground font-mono">
               {bet.away_score}-{bet.home_score}
             </span>
           )}
           {bet.clv != null && (
-            <span className="text-[10px] font-mono" style={{ color: bet.clv > 0 ? CHART_COLORS.green : CHART_COLORS.crimson }}>
+            <span className="text-[13px] font-mono" style={{ color: bet.clv > 0 ? CHART_COLORS.green : CHART_COLORS.crimson }}>
               CLV:{bet.clv > 0 ? "+" : ""}{bet.clv.toFixed(1)}
             </span>
           )}
@@ -181,8 +181,8 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
       {/* ── Page Header ── */}
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
-          Field Log{" "}
-          <span style={{ color: CHART_COLORS.crimson }}>/ Tracked Operations</span>
+          My Bets{" "}
+          <span style={{ color: CHART_COLORS.crimson }}>/ Tracked Bets</span>
         </h2>
         <button
           onClick={() =>
@@ -197,7 +197,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
             })
           }
           disabled={gradeBets.isPending}
-          className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+          className="hud-btn px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase"
           style={{
             borderColor: `${CHART_COLORS.crimson}50`,
             color: CHART_COLORS.crimson,
@@ -260,7 +260,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
 
       {/* ── Sport Filter (HexBadge row) ── */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase mr-1">SPORT:</span>
+        <span className="text-[12px] font-heading tracking-widest text-muted-foreground uppercase mr-1">SPORT:</span>
         {SPORT_FILTERS.map((sf) => (
           <HexBadge
             key={sf.label}
@@ -275,7 +275,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
 
       {/* ── Status Filter (angular buttons) ── */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase mr-1">STATUS:</span>
+        <span className="text-[12px] font-heading tracking-widest text-muted-foreground uppercase mr-1">STATUS:</span>
         {statuses.map((s) => {
           const isActive = (s === "ALL" && !statusFilter) || statusFilter === s;
           const rs = resultStyle[s] ?? resultStyle.PENDING;
@@ -283,7 +283,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
             <button
               key={s}
               onClick={() => setStatusFilter(s === "ALL" ? undefined : s)}
-              className="px-3 py-1 text-[10px] font-heading tracking-widest uppercase border transition-all"
+              className="px-3 py-1 text-[13px] font-heading tracking-widest uppercase border transition-all"
               style={{
                 borderColor: isActive ? `${rs.color}60` : "hsla(0,0%,100%,0.06)",
                 backgroundColor: isActive ? `${rs.color}15` : "transparent",
@@ -299,14 +299,14 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
 
       {/* ── Date Range Filter ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase">Date Range:</span>
+        <span className="text-[12px] font-heading tracking-widest text-muted-foreground uppercase">Date Range:</span>
         <input
           type="date"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
           className="px-2 py-1 text-xs font-mono bg-transparent border border-white/10 text-foreground focus:border-white/20 outline-none"
         />
-        <span className="text-muted-foreground text-[10px] font-heading tracking-widest">TO</span>
+        <span className="text-muted-foreground text-[13px] font-heading tracking-widest">TO</span>
         <input
           type="date"
           value={endDate}
@@ -316,7 +316,7 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
         {(startDate || endDate) && (
           <button
             onClick={() => { setStartDate(""); setEndDate(""); }}
-            className="px-2 py-1 text-[9px] font-heading tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+            className="px-2 py-1 text-[12px] font-heading tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
           >
             CLEAR
           </button>
@@ -324,11 +324,11 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
       </div>
 
       {/* ── Loading ── */}
-      {isLoading && <LogoLoader text="LOADING FIELD LOG..." size="sm" />}
+      {isLoading && <LogoLoader text="LOADING MY BETS..." size="sm" />}
 
       {/* ── Bet List ── */}
       {bets.length > 0 && (
-        <HudPanel title={`TRACKED OPERATIONS  [${bets.length}]`} status="online">
+        <HudPanel title={`TRACKED BETS  [${bets.length}]`} status="online">
           {bets.map((bet) => (
             <BetLine key={bet.id} bet={bet} onDelete={(id) => deleteBet.mutate(id)} />
           ))}
@@ -337,9 +337,9 @@ export function MyBetsPage({ sport }: MyBetsPageProps) {
 
       {/* ── Empty state ── */}
       {!isLoading && bets.length === 0 && (
-        <HudPanel title="NO OPERATIONS" status="offline">
+        <HudPanel title="NO BETS YET" status="offline">
           <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-8">
-            No tracked operations found. Begin tracking from the Props or Picks interface.
+            No tracked bets yet. Start tracking from the Player Props or Picks pages.
           </p>
         </HudPanel>
       )}

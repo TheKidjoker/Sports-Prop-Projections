@@ -43,7 +43,7 @@ export function RulesPanel({ sport }: RulesPanelProps) {
           disabled={start.isPending || isRunning}
           className="px-4 py-2 bg-primary text-primary-foreground font-heading tracking-[0.12em] text-xs rounded-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
-          {isRunning ? "RUNNING..." : "RUN RULES REPLAY"}
+          {isRunning ? "RUNNING..." : "RUN RULES BACKTEST"}
         </button>
         <button
           onClick={() => metrics.refetch()}
@@ -216,7 +216,7 @@ export function RulesPanel({ sport }: RulesPanelProps) {
 
       {metrics.isSuccess && !rulesParams && (
         <p className="text-xs text-muted-foreground font-mono">
-          No rules backtest data — run Rules Replay first.
+          No rules backtest data — run Rules Backtest first.
         </p>
       )}
     </div>

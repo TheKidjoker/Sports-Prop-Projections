@@ -44,9 +44,18 @@ def _cached_request(url, params=None, timeout=10, headers=None):
     try:
         response = requests.get(url, params=params, timeout=timeout, headers=headers)
         if response.status_code != 200:
+            logger.warning("[cache] %s returned HTTP %s", url, response.status_code)
             return None
         data = response.json()
-    except (requests.RequestException, ValueError):
+    except requests.Timeout:
+        logger.warning("[cache] Timeout after %ss fetching %s", timeout, url)
+        return None
+    except requests.RequestException as e:
+        logger.warning("[cache] Request failed for %s: %s", url, e)
+        return None
+    except ValueError as e:
+        # 200 OK but body was not valid JSON (HTML error page, empty body, ...)
+        logger.warning("[cache] Invalid JSON from %s: %s", url, e)
         return None
 
     # Record the call for budget tracking

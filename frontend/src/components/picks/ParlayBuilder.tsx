@@ -202,7 +202,7 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
       }
       className={`border-l-2 ${parlay.className}`}
     >
-      <p className="text-[10px] text-muted-foreground mb-3">{parlay.subtitle}</p>
+      <p className="text-[13px] text-muted-foreground mb-3">{parlay.subtitle}</p>
 
       {/* Legs */}
       <div className="space-y-0">
@@ -210,12 +210,12 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
           <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/20 last:border-0">
             <HexBadge label={leg.sport.toUpperCase().slice(0, 3)} size="sm" active color={SPORT_COLORS[leg.sport]} />
             {leg.type === "prop" && (
-              <span className="text-[8px] font-heading tracking-wider px-1 py-0.5 bg-secondary/15 text-secondary border border-secondary/30">
+              <span className="text-[11px] font-heading tracking-wider px-1 py-0.5 bg-secondary/15 text-secondary border border-secondary/30">
                 {leg.statType ?? "PROP"}
               </span>
             )}
-            <span className="font-mono text-[10px] text-foreground truncate flex-1">{leg.label}</span>
-            <span className="font-mono text-[10px] text-success whitespace-nowrap">{leg.coverPct.toFixed(1)}%</span>
+            <span className="font-mono text-[13px] text-foreground truncate flex-1">{leg.label}</span>
+            <span className="font-mono text-[13px] text-success whitespace-nowrap">{leg.coverPct.toFixed(1)}%</span>
           </div>
         ))}
       </div>
@@ -234,7 +234,7 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
           {adjustedProb != null && adjustedProb !== combinedProb && (
             <div className="text-center">
               <span className="font-mono text-xs text-warning">{(adjustedProb * 100).toFixed(1)}%</span>
-              <p className="text-[8px] font-heading tracking-wider text-muted-foreground">ADJUSTED</p>
+              <p className="text-[11px] font-heading tracking-wider text-muted-foreground">ADJUSTED</p>
             </div>
           )}
         </div>
@@ -242,16 +242,16 @@ export function ParlayCard({ parlay, onTrackAll }: ParlayCardProps) {
         {onTrackAll && (
           <button
             onClick={() => onTrackAll(parlayLegsToSlipItems(parlay.legs))}
-            className="px-4 py-1.5 text-[10px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
+            className="px-4 py-1.5 text-[13px] font-heading tracking-wider bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors"
             style={{ clipPath: "polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px)" }}
           >
-            DEPLOY
+            ADD TO BET SLIP
           </button>
         )}
       </div>
 
       {hasCorrelation && analysis.correlated_pairs.length > 0 && (
-        <div className="mt-2 text-[9px] text-warning font-mono">
+        <div className="mt-2 text-[12px] text-warning font-mono">
           Correlated: {analysis.correlated_pairs.map((p) => `${p.stat_a}+${p.stat_b} (${(p.correlation * 100).toFixed(0)}%)`).join(", ")}
           {" "} — penalty {analysis.correlation_penalty_pct.toFixed(1)}%
         </div>

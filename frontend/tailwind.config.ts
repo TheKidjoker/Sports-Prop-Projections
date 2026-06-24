@@ -18,6 +18,20 @@ export default {
         mono: ['JetBrains Mono', 'monospace'],
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
+      // Bumped the whole named type scale up ~15-20% for readability.
+      // Only font sizes change here — layout spacing is untouched.
+      fontSize: {
+        xs: ['0.875rem', { lineHeight: '1.25rem' }],     // was 0.75rem / 12px → 14px
+        sm: ['1rem', { lineHeight: '1.5rem' }],          // was 0.875rem / 14px → 16px
+        base: ['1.125rem', { lineHeight: '1.75rem' }],   // was 1rem / 16px → 18px
+        lg: ['1.25rem', { lineHeight: '1.875rem' }],     // 20px
+        xl: ['1.375rem', { lineHeight: '1.875rem' }],    // 22px
+        '2xl': ['1.625rem', { lineHeight: '2.125rem' }], // 26px
+        '3xl': ['2rem', { lineHeight: '2.375rem' }],     // 32px
+        '4xl': ['2.5rem', { lineHeight: '2.75rem' }],    // 40px
+        '5xl': ['3.25rem', { lineHeight: '1' }],
+        '6xl': ['4rem', { lineHeight: '1' }],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

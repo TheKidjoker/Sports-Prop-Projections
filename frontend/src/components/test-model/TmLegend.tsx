@@ -10,7 +10,7 @@ const definitions: { term: string; def: string }[] = [
   { term: "ECE", def: "Expected Calibration Error — avg gap between predicted and actual probabilities" },
   { term: "Walk-Forward", def: "Out-of-sample validation: train on past data, test on future data, repeat" },
   { term: "EV Model", def: "Expected Value logistic regression model replacing heuristic scoring" },
-  { term: "Rules Replay", def: "Backtests production game_scanner scoring against historical outcomes" },
+  { term: "Rules Backtest", def: "Backtests production game_scanner scoring against historical outcomes" },
   { term: "Factor Lift", def: "Accuracy improvement when a scoring factor fires vs when it doesn't" },
   { term: "VIF", def: "Variance Inflation Factor — detects multicollinearity (>5 = concern)" },
   { term: "Isotonic", def: "Non-parametric calibration — maps scores to probabilities monotonically" },

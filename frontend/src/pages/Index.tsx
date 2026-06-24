@@ -70,14 +70,14 @@ function LoginForm() {
             <span className="text-primary">JOKER'S</span>{" "}
             <span className="text-secondary">EDGE</span>
           </h1>
-          <p className="text-[10px] text-muted-foreground font-heading tracking-[0.2em]">
-            {isSignUp ? "CREATE OPERATIVE ACCOUNT" : "SYSTEM ACCESS REQUIRED"}
+          <p className="text-[13px] text-muted-foreground font-heading tracking-[0.2em]">
+            {isSignUp ? "CREATE ACCOUNT" : "SIGN IN"}
           </p>
         </div>
 
         {bootPhase > 0 && (
           <div className="mb-4 text-center">
-            <span className="text-[10px] font-mono text-primary animate-boot-text">
+            <span className="text-[13px] font-mono text-primary animate-boot-text">
               {bootMessages[bootPhase]}
             </span>
           </div>
@@ -107,12 +107,12 @@ function LoginForm() {
             className="w-full py-2.5 bg-primary text-primary-foreground font-heading tracking-[0.15em] text-sm transition-all duration-200 hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
           >
             {loading
-              ? isSignUp ? "CREATING ACCOUNT..." : "DEPLOYING..."
-              : isSignUp ? "REGISTER" : "DEPLOY"}
+              ? isSignUp ? "CREATING ACCOUNT..." : "PLEASE WAIT..."
+              : isSignUp ? "CREATE ACCOUNT" : "SIGN IN"}
           </button>
         </form>
-        <p className="text-[10px] text-muted-foreground text-center mt-4 font-heading tracking-wider">
-          {isSignUp ? "Existing operative?" : "New operative?"}{" "}
+        <p className="text-[13px] text-muted-foreground text-center mt-4 font-heading tracking-wider">
+          {isSignUp ? "Already have an account?" : "Need an account?"}{" "}
           <button
             type="button"
             onClick={() => { setIsSignUp(!isSignUp); setError(""); }}

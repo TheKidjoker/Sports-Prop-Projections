@@ -40,13 +40,13 @@ export function LedgerPage({ sport }: LedgerPageProps) {
       {/* ── Page Header ── */}
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
-          War Room{" "}
+          Ledger{" "}
           <span style={{ color: CHART_COLORS.crimson }}>/ Performance Analytics</span>
         </h2>
         <button
           onClick={() => grade.mutate(activeSport)}
           disabled={grade.isPending}
-          className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+          className="hud-btn px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase"
           style={{
             borderColor: `${CHART_COLORS.crimson}50`,
             color: CHART_COLORS.crimson,
@@ -59,7 +59,7 @@ export function LedgerPage({ sport }: LedgerPageProps) {
 
       {/* ── Date Range Filter ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-[9px] font-heading tracking-widest text-muted-foreground uppercase">Date Range:</span>
+        <span className="text-[12px] font-heading tracking-widest text-muted-foreground uppercase">Date Range:</span>
         <input
           type="date"
           value={startDate}
@@ -67,7 +67,7 @@ export function LedgerPage({ sport }: LedgerPageProps) {
           className="px-2 py-1 text-xs font-mono bg-transparent border border-white/10 text-foreground focus:border-white/20 outline-none"
           style={{ clipPath: "polygon(4% 0%, 96% 0%, 100% 50%, 96% 100%, 4% 100%, 0% 50%)" }}
         />
-        <span className="text-muted-foreground text-[10px] font-heading tracking-widest">TO</span>
+        <span className="text-muted-foreground text-[13px] font-heading tracking-widest">TO</span>
         <input
           type="date"
           value={endDate}
@@ -78,7 +78,7 @@ export function LedgerPage({ sport }: LedgerPageProps) {
         {(startDate || endDate) && (
           <button
             onClick={() => { setStartDate(""); setEndDate(""); }}
-            className="px-2 py-1 text-[9px] font-heading tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+            className="px-2 py-1 text-[12px] font-heading tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
           >
             CLEAR
           </button>
@@ -188,7 +188,7 @@ export function LedgerPage({ sport }: LedgerPageProps) {
           {data?.by_recommendation && data.by_recommendation.length > 0 && (
             <HudPanel title="BY RECOMMENDATION TIER" status="online">
               {/* Angular table header */}
-              <div className="flex items-center gap-3 px-2 py-1.5 border-b border-white/[0.06] text-[9px] font-heading tracking-widest text-muted-foreground uppercase">
+              <div className="flex items-center gap-3 px-2 py-1.5 border-b border-white/[0.06] text-[12px] font-heading tracking-widest text-muted-foreground uppercase">
                 <div className="flex-1">TIER</div>
                 <span className="w-12 text-right">TOTAL</span>
                 <span className="w-10 text-right">W</span>
@@ -217,7 +217,7 @@ export function LedgerPage({ sport }: LedgerPageProps) {
 
           {/* ── Recent Picks as DataStream ── */}
           {data?.recent && data.recent.length > 0 && (
-            <HudPanel title="RECENT OPERATIONS FEED" status="online">
+            <HudPanel title="RECENT ACTIVITY" status="online">
               <DataStream
                 className="max-h-64"
                 items={data.recent.map((pred) => ({

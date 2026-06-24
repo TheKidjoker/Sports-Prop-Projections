@@ -119,6 +119,12 @@ def get_player_game_log(player_name, count=7, sport="nba", athlete_id=None, team
         result = get_player_game_log_espn(player_name, athlete_id, team_id, sport, count)
         with _game_log_lock:
             _game_log_cache[cache_key] = {"data": result, "ts": _time.time()}
+            # Same eviction bound as the NBA path below — without it this
+            # cache grows unbounded across distinct players (memory leak).
+            if len(_game_log_cache) > _GAME_LOG_MAX:
+                oldest = sorted(_game_log_cache, key=lambda k: _game_log_cache[k]["ts"])
+                for old_key in oldest[:len(_game_log_cache) - _GAME_LOG_MAX]:
+                    del _game_log_cache[old_key]
         return result
 
     if sport != "nba":

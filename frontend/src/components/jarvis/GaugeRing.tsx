@@ -54,7 +54,7 @@ export function GaugeRing({ value, max = 100, label, unit = "%", size = 80, colo
           <span className="text-muted-foreground leading-none" style={{ fontSize: Math.max(8, size * 0.11) }}>{unit}</span>
         </div>
       </div>
-      <span className="font-heading text-[9px] tracking-wider text-muted-foreground text-center leading-tight">{label}</span>
+      <span className="font-heading text-[12px] tracking-wider text-muted-foreground text-center leading-tight">{label}</span>
     </div>
   );
 }

@@ -32,9 +32,9 @@ const badgeVariants = cva(
         limited: "bg-primary/15 text-primary border-primary/30",
       },
       size: {
-        default: "text-[10px] px-2 py-0.5 rounded-sm",
-        sm: "text-[9px] px-1.5 py-0.5 rounded-sm",
-        xs: "text-[8px] px-1 py-0.5 rounded-sm",
+        default: "text-[13px] px-2 py-0.5 rounded-sm",
+        sm: "text-[12px] px-1.5 py-0.5 rounded-sm",
+        xs: "text-[11px] px-1 py-0.5 rounded-sm",
       },
     },
     defaultVariants: {

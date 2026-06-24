@@ -59,7 +59,11 @@ def get_todays_games(sport="nba", date_str=None):
 
         for event in data.get("events", []):
             event_id = event.get("id")
-            competition = event.get("competitions", [{}])[0]
+            # competitions can be an empty list on malformed/partial ESPN
+            # responses — guard against IndexError so one bad event doesn't
+            # blow up the whole scoreboard fetch.
+            competitions = event.get("competitions") or [{}]
+            competition = competitions[0] if competitions else {}
             competitors = competition.get("competitors", [])
 
             home_team = None

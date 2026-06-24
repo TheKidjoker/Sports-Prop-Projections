@@ -66,11 +66,11 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
     }));
     saveMutation.mutate(payload, {
       onSuccess: () => {
-        toast.success(`${payload.length} operation${payload.length > 1 ? "s" : ""} deployed`);
+        toast.success(`${payload.length} bet${payload.length > 1 ? "s" : ""} saved`);
         onClear();
       },
       onError: (err) => {
-        toast.error(`Deploy failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        toast.error(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
       },
     });
   };
@@ -88,8 +88,8 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
           {/* Header */}
           <div className="hud-panel-header justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-foreground">ACTIVE OPERATIONS</span>
-              <span className="font-mono text-primary text-[10px]">({bets.length})</span>
+              <span className="text-foreground">ACTIVE BETS</span>
+              <span className="font-mono text-primary text-[13px]">({bets.length})</span>
             </div>
             <div className="flex items-center gap-1">
               <button onClick={() => setExpanded(!expanded)} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -109,7 +109,7 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
                   <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-border/30 hover:bg-muted/20 transition-colors">
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <HexBadge label={bet.sport.toUpperCase().slice(0, 3)} size="sm" active />
-                      <span className="font-mono text-[10px] text-foreground truncate">{bet.label}</span>
+                      <span className="font-mono text-[13px] text-foreground truncate">{bet.label}</span>
                     </div>
                     <button
                       onClick={() => onRemove(i)}
@@ -124,7 +124,7 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
               {/* Wager + Deploy */}
               <div className="px-4 py-3 border-t border-border/30">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[10px] font-heading tracking-wider text-muted-foreground">WAGER</span>
+                  <span className="text-[13px] font-heading tracking-wider text-muted-foreground">WAGER</span>
                   <input
                     type="number"
                     value={wager}
@@ -139,7 +139,7 @@ export function BetSlip({ bets, onRemove, onClear }: BetSlipProps) {
                   className="w-full py-2.5 text-xs font-heading tracking-[0.15em] bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
                   style={{ clipPath: "polygon(0 4px, 4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px))" }}
                 >
-                  {saveMutation.isPending ? "DEPLOYING..." : "DEPLOY"}
+                  {saveMutation.isPending ? "SAVING..." : "SAVE BETS"}
                 </button>
               </div>
             </>

@@ -26,9 +26,9 @@ const sportHexColor: Record<string, string> = {
 
 /* ── Tab definitions ── */
 const TABS = [
-  { value: "scan",        label: "TODAY'S MODEL" },
+  { value: "scan",        label: "TODAY'S PICKS" },
   { value: "backtest",    label: "BACKTEST" },
-  { value: "rules",       label: "RULES REPLAY" },
+  { value: "rules",       label: "RULES BACKTEST" },
   { value: "calibration", label: "CALIBRATION" },
   { value: "collection",  label: "DATA" },
   { value: "metrics",     label: "METRICS" },
@@ -48,7 +48,7 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
           Diagnostics{" "}
-          <span style={{ color: CHART_COLORS.crimson }}>/ Model Laboratory</span>
+          <span style={{ color: CHART_COLORS.crimson }}>/ Model Testing</span>
         </h2>
       </div>
 
@@ -74,7 +74,7 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
               <TabsTrigger
                 key={value}
                 value={value}
-                className="text-[9px] sm:text-[10px] font-heading tracking-widest uppercase px-3 sm:px-4 py-1.5 border transition-all rounded-none
+                className="text-[12px] sm:text-[13px] font-heading tracking-widest uppercase px-3 sm:px-4 py-1.5 border transition-all rounded-none
                   data-[state=inactive]:border-white/[0.06] data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground
                   data-[state=active]:border-[hsla(0,72%,51%,0.5)] data-[state=active]:bg-[hsla(0,72%,51%,0.1)] data-[state=active]:text-[hsl(0,72%,51%)]"
                 style={{ clipPath: "polygon(6% 0%, 94% 0%, 100% 50%, 94% 100%, 6% 100%, 0% 50%)" }}
@@ -112,7 +112,7 @@ export function TestModelPage({ sport: _globalSport }: TestModelPageProps) {
 
       {/* ── Legend ── */}
       <div className="mt-6">
-        <HudPanel title="SYSTEM LEGEND" status="online">
+        <HudPanel title="GLOSSARY" status="online">
           <TmLegend />
         </HudPanel>
       </div>

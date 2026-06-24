@@ -82,13 +82,13 @@ export function MetricsPanel({ sport }: MetricsPanelProps) {
             <button
               onClick={() => ev.start.mutate()}
               disabled={ev.start.isPending || evRunning}
-              className="px-3 py-1.5 bg-primary text-primary-foreground font-heading tracking-[0.12em] text-[10px] rounded-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 bg-primary text-primary-foreground font-heading tracking-[0.12em] text-[13px] rounded-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {evRunning ? "TRAINING..." : "TRAIN EV MODEL"}
             </button>
             <button
               onClick={() => ev.metrics.refetch()}
-              className="px-3 py-1.5 border border-border text-foreground font-heading tracking-[0.12em] text-[10px] rounded-sm hover:bg-muted transition-colors"
+              className="px-3 py-1.5 border border-border text-foreground font-heading tracking-[0.12em] text-[13px] rounded-sm hover:bg-muted transition-colors"
             >
               LOAD METRICS
             </button>
