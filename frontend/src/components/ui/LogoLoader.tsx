@@ -84,7 +84,7 @@ export function LogoLoader({ text, size = "md", fullScreen = false }: LogoLoader
           </div>
         )}
       </div>
-      <span className="text-primary font-mono text-[10px] sm:text-xs tracking-wider animate-boot-text">
+      <span className="text-primary font-mono text-[13px] sm:text-xs tracking-wider animate-boot-text">
         {displayText}
       </span>
     </div>

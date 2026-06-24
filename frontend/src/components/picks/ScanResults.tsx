@@ -52,7 +52,7 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className="font-heading text-lg sm:text-xl tracking-wider text-foreground">
-            INTEL BRIEFING — <span className="text-primary">{sport}</span>
+            PICKS — <span className="text-primary">{sport}</span>
           </h2>
           <StatusIndicator status={isScanning ? "warning" : "online"} label={isScanning ? "SCANNING" : "COMPLETE"} />
         </div>
@@ -64,15 +64,15 @@ export function ScanResults({ sport, isAdmin, onTrackBet }: ScanResultsProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div>
-                <span className="text-[10px] font-heading tracking-wider text-muted-foreground">TOTAL GAMES</span>
+                <span className="text-[13px] font-heading tracking-wider text-muted-foreground">TOTAL GAMES</span>
                 <p className="font-mono text-xl text-foreground">{picks.length}</p>
               </div>
               <div>
-                <span className="text-[10px] font-heading tracking-wider text-muted-foreground">TOP PICKS</span>
+                <span className="text-[13px] font-heading tracking-wider text-muted-foreground">TOP PICKS</span>
                 <p className="font-mono text-xl text-primary">{topPicks.length}</p>
               </div>
               <div>
-                <span className="text-[10px] font-heading tracking-wider text-muted-foreground">WATCH LIST</span>
+                <span className="text-[13px] font-heading tracking-wider text-muted-foreground">WATCH LIST</span>
                 <p className="font-mono text-xl text-secondary">{watchPicks.length}</p>
               </div>
             </div>

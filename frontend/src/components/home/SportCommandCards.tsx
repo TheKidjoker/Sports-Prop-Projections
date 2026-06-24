@@ -36,7 +36,7 @@ export function SportCommandCards({ gameCounts, onSelectSport }: SportCommandCar
                 <span className="font-mono text-lg text-foreground">{count}</span>
                 <HexBadge label={sport.label} color={sportColors[sport.id]} size="sm" active={hasGames} />
               </div>
-              <p className="text-[9px] text-muted-foreground font-heading tracking-wider mt-1">
+              <p className="text-[12px] text-muted-foreground font-heading tracking-wider mt-1">
                 {hasGames ? "GAMES TODAY" : "NO GAMES"}
               </p>
             </HudPanel>

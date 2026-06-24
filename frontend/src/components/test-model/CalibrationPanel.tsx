@@ -36,7 +36,7 @@ export function CalibrationPanel({ sport }: CalibrationPanelProps) {
 
       {calQ.isSuccess && !cal && (
         <p className="text-xs text-muted-foreground font-mono">
-          No calibration data — run Rules Replay first.
+          No calibration data — run Rules Backtest first.
         </p>
       )}
 

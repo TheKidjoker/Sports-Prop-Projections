@@ -49,14 +49,14 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
 
   // Loading state: scan still running
   if (scanLoading) {
-    return <LogoLoader text="SCANNING ALL THEATRES..." />;
+    return <LogoLoader text="SCANNING ALL SPORTS..." />;
   }
 
   // Error state
   if (scanError) {
     return (
       <div className="py-6 px-3 sm:px-6 max-w-5xl mx-auto">
-        <HudPanel title="STRIKE OPS ERROR" status="error">
+        <HudPanel title="PARLAY ERROR" status="error">
           <span className="text-xs font-mono" style={{ color: CHART_COLORS.crimson }}>
             {scanError instanceof Error ? scanError.message : "Unknown error"}
           </span>
@@ -71,7 +71,7 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
-            Strike Operations{" "}
+            Parlays{" "}
             <span style={{ color: CHART_COLORS.crimson }}>/ Cross-Sport Parlays</span>
           </h2>
         </div>
@@ -79,7 +79,7 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
         <button
           onClick={() => triggerScan()}
           disabled={scanLoading}
-          className="hud-btn px-3 py-1.5 text-[10px] font-heading tracking-widest uppercase flex items-center gap-1.5"
+          className="hud-btn px-3 py-1.5 text-[13px] font-heading tracking-widest uppercase flex items-center gap-1.5"
           style={{
             borderColor: `${CHART_COLORS.crimson}50`,
             color: CHART_COLORS.crimson,
@@ -133,7 +133,7 @@ export function ParlayPage({ onTrackBet }: ParlayPageProps) {
         <HudPanel title="NO STRIKE PACKAGES" status="offline">
           <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-8">
             {allPicks.length === 0
-              ? "No actionable games across any theatre of operations"
+              ? "No strong plays in any sport right now"
               : "No parlay combinations meet confidence thresholds"}
           </p>
         </HudPanel>

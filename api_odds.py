@@ -143,9 +143,14 @@ def _get_odds_comparison_theodds(sport="nba"):
         data = _cached_request(url, params=params, timeout=15)
         if data is None:
             return []
+        if not isinstance(data, list):
+            print(f"[odds_api] Unexpected response shape for {sport}: {type(data).__name__}", flush=True)
+            return []
 
         results = []
         for game in data:
+            if not isinstance(game, dict):
+                continue
             home_team = game.get("home_team", "")
             away_team = game.get("away_team", "")
 
@@ -252,8 +257,13 @@ def _get_player_props_odds_theodds(sport="nba"):
         if data is None:
             return {}
 
+        if not isinstance(data, list):
+            print(f"[odds_api] Unexpected props response shape: {type(data).__name__}", flush=True)
+            return {}
         props = {}
         for game in data:
+            if not isinstance(game, dict):
+                continue
             for bookmaker in game.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
                     stat_name = market_to_stat.get(market.get("key"))
@@ -302,8 +312,13 @@ def _get_player_props_odds_full_theodds(sport="nba"):
             return {}
 
         # Collect all odds per player/stat, keep best odds per side
+        if not isinstance(data, list):
+            print(f"[odds_api] Unexpected props response shape: {type(data).__name__}", flush=True)
+            return {}
         props = {}
         for game in data:
+            if not isinstance(game, dict):
+                continue
             for bookmaker in game.get("bookmakers", []):
                 book_key = bookmaker.get("key", "")
                 for market in bookmaker.get("markets", []):
@@ -461,9 +476,14 @@ def _get_multibook_lines_theodds(sport="nba"):
         data = _cached_request(url, params=params, timeout=15)
         if data is None:
             return []
+        if not isinstance(data, list):
+            print(f"[odds_api] Unexpected response shape: {type(data).__name__}", flush=True)
+            return []
 
         results = []
         for game in data:
+            if not isinstance(game, dict):
+                continue
             home_team = game.get("home_team", "")
             away_team = game.get("away_team", "")
             commence_time = game.get("commence_time", "")

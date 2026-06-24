@@ -22,7 +22,7 @@ export function DataStream({ items, speed = 3000, className = "" }: DataStreamPr
   }, [items.length]);
 
   return (
-    <div ref={containerRef} className={`overflow-y-auto font-mono text-[10px] space-y-0.5 ${className}`}>
+    <div ref={containerRef} className={`overflow-y-auto font-mono text-[13px] space-y-0.5 ${className}`}>
       {items.map((item) => (
         <div key={item.id} className="flex items-center gap-2 px-2 py-1 hover:bg-muted/20 transition-colors">
           <span className={`w-1 h-1 rounded-full flex-shrink-0 ${statusColor[item.status ?? "pending"]} bg-current`} />

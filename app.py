@@ -42,6 +42,21 @@ except Exception as _tm_err:
 REACT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
 app = Flask(__name__, static_folder=None)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+# Reject oversized request bodies before they're buffered into memory
+# (cheap protection against memory-exhaustion DoS via huge payloads).
+app.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024  # 4 MB
+
+
+@app.after_request
+def _set_security_headers(response):
+    """Add baseline hardening headers to every response."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+    )
+    return response
 tracker.init_db()
 bet_tracker.init_tracked_bets_db()
 pick_curation.init_pick_approvals_db()
@@ -220,7 +235,11 @@ elif _skip_auto_train:
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
-ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "chance.kelly2003@gmail.com").split(",") if e.strip()}
+# Admin allowlist comes from the ADMIN_EMAILS env var (comma-separated).
+# No hardcoded default — a personal email in committed source is both a
+# privacy/targeting risk and means an unconfigured deploy silently ships a
+# known admin account.
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 
 _jwks_client = None
 _jwks_failed = False
@@ -280,12 +299,20 @@ def require_auth(f):
             alg = header.get("alg", "HS256")
             payload = None
 
+            # Supabase issues tokens with iss = "<SUPABASE_URL>/auth/v1".
+            # Verifying the issuer prevents accepting validly-signed tokens
+            # minted by a different Supabase project.
+            expected_issuer = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else None
+            decode_kwargs = {"audience": "authenticated"}
+            if expected_issuer:
+                decode_kwargs["issuer"] = expected_issuer
+
             if alg == "HS256" and SUPABASE_JWT_SECRET:
                 # Standard HS256 verification
                 payload = jwt.decode(
                     token, SUPABASE_JWT_SECRET,
                     algorithms=["HS256"],
-                    audience="authenticated",
+                    **decode_kwargs,
                 )
             elif alg == "ES256" and jwks:
                 # ES256 via JWKS — signature must be verified
@@ -293,7 +320,7 @@ def require_auth(f):
                 payload = jwt.decode(
                     token, signing_key.key,
                     algorithms=["ES256"],
-                    audience="authenticated",
+                    **decode_kwargs,
                 )
             else:
                 return jsonify({"error": "Unsupported token algorithm"}), 401
@@ -302,6 +329,13 @@ def require_auth(f):
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError as e:
             print(f"[AUTH] JWT error: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": "Invalid token"}), 401
+        except Exception as e:
+            # PyJWKClientError, network/timeout errors fetching the JWKS key,
+            # malformed key data, etc. are NOT subclasses of InvalidTokenError
+            # and would otherwise surface as an unhandled 500. Treat any
+            # verification failure as an auth failure (401), not a server error.
+            print(f"[AUTH] Auth verification failed: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": "Invalid token"}), 401
         return f(*args, **kwargs)
     return decorated
@@ -863,7 +897,7 @@ def api_prop_ev_metrics():
 @require_auth
 def predict():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
         if sport not in ("nba", "nhl", "cfb", "nfl", "cbb", "mlb"):
             sport = "nba"
@@ -1257,8 +1291,14 @@ def api_model_comparison():
 
 def _is_admin():
     email = getattr(request, "user_email", "")
+    # Local-dev bypass: when no auth backend is configured, require_auth lets
+    # requests through tagged as "dev@local". Treat that single sentinel as
+    # admin so local development keeps working.
+    if email == "dev@local" and not SUPABASE_JWT_SECRET and not _jwks_client:
+        return True
     if not ADMIN_EMAILS:
-        return True  # No allowlist configured = everyone is admin
+        # Fail closed: a missing/empty allowlist must NOT grant everyone admin.
+        return False
     return email.lower() in ADMIN_EMAILS
 
 
@@ -1840,7 +1880,7 @@ def api_picks_approve():
     if not _is_admin():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True) or {}
         event_id = data.get("event_id")
         sport = data.get("sport", "nba").lower()
         game_date = data.get("game_date") or _today_est()
@@ -1864,7 +1904,7 @@ def api_picks_reject():
     if not _is_admin():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True) or {}
         event_id = data.get("event_id")
         sport = data.get("sport", "nba").lower()
         game_date = data.get("game_date") or _today_est()
@@ -1884,7 +1924,7 @@ def api_picks_approve_all():
     if not _is_admin():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True) or {}
         sport = data.get("sport", "nba").lower()
         game_date = data.get("game_date") or _today_est()
         pick_curation.approve_all_picks(sport, game_date)
@@ -1916,7 +1956,7 @@ def api_bets_save():
     if not _is_admin():
         return jsonify({"success": False, "error": "Admin only"}), 403
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True) or {}
         bets = data.get("bets", [])
         if not bets:
             return jsonify({"success": False, "error": "No bets provided"}), 400
@@ -2300,7 +2340,8 @@ def api_tm_injury_backfill():
     if err:
         return err
     try:
-        sport = request.json.get("sport", "nba") if request.json else "nba"
+        data = request.get_json(silent=True) or {}
+        sport = data.get("sport", "nba")
         if sport not in ("nba", "nhl", "cbb", "mlb"):
             return jsonify({"success": False, "error": "Injury backfill only supports nba, nhl, cbb, mlb"}), 400
         from test_model.injury_backfill import start_backfill_thread
@@ -2414,5 +2455,7 @@ def react_catchall(path):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    debug = "PORT" not in os.environ
+    # Debug mode exposes the Werkzeug interactive debugger (arbitrary code
+    # execution). Never enable it implicitly — require an explicit opt-in.
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
     app.run(host="0.0.0.0", port=port, debug=debug)

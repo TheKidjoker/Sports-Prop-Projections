@@ -22,7 +22,7 @@ export function TmFactorHealthReport({ health }: TmFactorHealthReportProps) {
       {/* Standalone Lift */}
       {health.standalone_lift?.length > 0 && (
         <div>
-          <h5 className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
+          <h5 className="text-[13px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
             Standalone Lift
           </h5>
           <div className="rounded-sm border border-border overflow-hidden">
@@ -62,7 +62,7 @@ export function TmFactorHealthReport({ health }: TmFactorHealthReportProps) {
       {/* VIF */}
       {health.vif?.length > 0 && (
         <div>
-          <h5 className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
+          <h5 className="text-[13px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
             Variance Inflation Factor
           </h5>
           <div className="rounded-sm border border-border overflow-hidden">
@@ -95,7 +95,7 @@ export function TmFactorHealthReport({ health }: TmFactorHealthReportProps) {
       {/* Correlations */}
       {health.correlations?.length > 0 && (
         <div>
-          <h5 className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
+          <h5 className="text-[13px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
             High Correlations
           </h5>
           <div className="space-y-1">
@@ -118,7 +118,7 @@ export function TmFactorHealthReport({ health }: TmFactorHealthReportProps) {
       {/* Recommendations */}
       {health.recommendations?.length > 0 && (
         <div>
-          <h5 className="text-[10px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
+          <h5 className="text-[13px] font-heading tracking-wider text-muted-foreground mb-1 uppercase">
             Recommendations
           </h5>
           <ul className="space-y-1">

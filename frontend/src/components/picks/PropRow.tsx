@@ -24,10 +24,10 @@ export function PropRow({ prop, onTrack }: PropRowProps) {
         <span className="font-heading text-xs tracking-wider text-foreground truncate">
           {prop.player_name}
         </span>
-        <span className="text-[10px] text-muted-foreground ml-2">{prop.team}</span>
+        <span className="text-[13px] text-muted-foreground ml-2">{prop.team}</span>
       </div>
 
-      <span className="text-[10px] font-heading font-semibold tracking-wider px-1.5 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30 w-12 text-center">
+      <span className="text-[13px] font-heading font-semibold tracking-wider px-1.5 py-0.5 rounded-sm bg-secondary/15 text-secondary border border-secondary/30 w-12 text-center">
         {prop.stat_type}
       </span>
 
@@ -47,14 +47,14 @@ export function PropRow({ prop, onTrack }: PropRowProps) {
         {prop.signal}
       </Badge>
 
-      <span className="font-mono text-[10px] text-muted-foreground w-8 text-right">
+      <span className="font-mono text-[13px] text-muted-foreground w-8 text-right">
         {prop.confidence}
       </span>
 
       {onTrack && (
         <button
           onClick={() => onTrack(prop)}
-          className="px-1.5 py-0.5 text-[10px] font-heading text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/15 transition-colors"
+          className="px-1.5 py-0.5 text-[13px] font-heading text-secondary border border-secondary/30 rounded-sm hover:bg-secondary/15 transition-colors"
         >
           +
         </button>

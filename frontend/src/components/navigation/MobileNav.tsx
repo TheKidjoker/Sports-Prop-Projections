@@ -6,12 +6,12 @@ interface MobileNavProps {
 }
 
 const items = [
-  { icon: Home, label: "CMD", id: "command" },
-  { icon: Crosshair, label: "INTEL", id: "intel" },
-  { icon: Users, label: "OPS", id: "operatives" },
-  { icon: Target, label: "STRIKE", id: "strike-ops" },
-  { icon: BookOpen, label: "WAR RM", id: "war-room" },
-  { icon: FileText, label: "LOG", id: "field-log" },
+  { icon: Home, label: "Home", id: "command" },
+  { icon: Crosshair, label: "Picks", id: "intel" },
+  { icon: Users, label: "Props", id: "operatives" },
+  { icon: Target, label: "Parlays", id: "strike-ops" },
+  { icon: BookOpen, label: "Ledger", id: "war-room" },
+  { icon: FileText, label: "Bets", id: "field-log" },
 ];
 
 export function MobileNav({ activeSection, onSelectSection }: MobileNavProps) {
@@ -29,7 +29,7 @@ export function MobileNav({ activeSection, onSelectSection }: MobileNavProps) {
               }`}
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
-              <span className="text-[7px] font-heading tracking-wider truncate">{item.label}</span>
+              <span className="text-[10px] font-heading tracking-wider truncate">{item.label}</span>
               {active && (
                 <div
                   className="absolute -bottom-0 left-1/2 -translate-x-1/2 w-6 h-[2px] bg-primary rounded-full"

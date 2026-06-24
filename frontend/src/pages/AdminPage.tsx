@@ -57,7 +57,7 @@ export function AdminPage({ sport }: AdminPageProps) {
         <button
           onClick={() => approveAll.mutate(activeSport)}
           disabled={approveAll.isPending}
-          className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+          className="hud-btn px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase"
           style={{
             borderColor: `${CHART_COLORS.green}50`,
             color: CHART_COLORS.green,
@@ -98,7 +98,7 @@ export function AdminPage({ sport }: AdminPageProps) {
                       />
                       <div className="text-center">
                         <span
-                          className="font-mono text-[10px] block"
+                          className="font-mono text-[13px] block"
                           style={{ color: oos.roi >= 0 ? CHART_COLORS.green : CHART_COLORS.crimson }}
                         >
                           ROI: {oos.roi >= 0 ? "+" : ""}{oos.roi.toFixed(1)}%
@@ -108,13 +108,13 @@ export function AdminPage({ sport }: AdminPageProps) {
                   ) : (
                     <div className="py-4">
                       <GaugeSkeleton size={70} />
-                      <p className="font-mono text-[9px] text-muted-foreground mt-2 text-center">NO OOS DATA</p>
+                      <p className="font-mono text-[12px] text-muted-foreground mt-2 text-center">NO OOS DATA</p>
                     </div>
                   )}
 
                   {info.overfit_gap != null && (
                     <span
-                      className="font-mono text-[9px]"
+                      className="font-mono text-[12px]"
                       style={{ color: info.overfit_gap > 10 ? CHART_COLORS.crimson : CHART_COLORS.muted }}
                     >
                       GAP: {info.overfit_gap.toFixed(1)}%
@@ -129,17 +129,17 @@ export function AdminPage({ sport }: AdminPageProps) {
 
       {/* ── Pending Picks ── */}
       <HudPanel
-        title={`PENDING MISSIONS / ${activeSport.toUpperCase()}`}
+        title={`PENDING PICKS / ${activeSport.toUpperCase()}`}
         status={isLoading ? "warning" : picksData?.picks?.length ? "online" : "offline"}
         headerRight={
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-[13px] text-muted-foreground">
             {picksData?.picks?.length ?? 0} pending
           </span>
         }
       >
         {isLoading && (
           <div className="text-center py-8">
-            <p className="text-muted-foreground text-[10px] font-heading tracking-widest animate-pulse uppercase">
+            <p className="text-muted-foreground text-[13px] font-heading tracking-widest animate-pulse uppercase">
               Loading pending picks...
             </p>
           </div>
@@ -179,7 +179,7 @@ export function AdminPage({ sport }: AdminPageProps) {
                   <button
                     onClick={() => approve.mutate({ eventId: pick.event_id, sport: activeSport })}
                     disabled={approve.isPending}
-                    className="px-3 py-1 text-[9px] font-heading tracking-widest uppercase border transition-all hover:scale-105"
+                    className="px-3 py-1 text-[12px] font-heading tracking-widest uppercase border transition-all hover:scale-105"
                     style={{
                       borderColor: `${CHART_COLORS.green}50`,
                       color: CHART_COLORS.green,
@@ -192,7 +192,7 @@ export function AdminPage({ sport }: AdminPageProps) {
                   <button
                     onClick={() => reject.mutate({ eventId: pick.event_id, sport: activeSport })}
                     disabled={reject.isPending}
-                    className="px-3 py-1 text-[9px] font-heading tracking-widest uppercase border transition-all hover:scale-105"
+                    className="px-3 py-1 text-[12px] font-heading tracking-widest uppercase border transition-all hover:scale-105"
                     style={{
                       borderColor: `${CHART_COLORS.crimson}50`,
                       color: CHART_COLORS.crimson,
@@ -211,7 +211,7 @@ export function AdminPage({ sport }: AdminPageProps) {
         {picksData?.picks && picksData.picks.length === 0 && (
           <div className="text-center py-8">
             <p className="text-muted-foreground text-xs font-heading tracking-widest">
-              No pending missions for {activeSport.toUpperCase()} theatre
+              No pending picks for {activeSport.toUpperCase()}
             </p>
           </div>
         )}

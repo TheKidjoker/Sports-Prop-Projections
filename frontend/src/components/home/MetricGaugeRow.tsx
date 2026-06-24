@@ -31,7 +31,7 @@ export function MetricGaugeRow({ overall, drawdown, streaks, isLoading }: Metric
       <GaugeRing value={roi} max={50} label="ROI" unit="%" size={80} color={roi >= 0 ? CHART_COLORS.green : CHART_COLORS.crimson} />
       <div className="flex flex-col items-center gap-1">
         <span className="font-mono text-xl text-foreground">{overall.wins}-{overall.losses}-{overall.pushes}</span>
-        <span className="font-heading text-[9px] tracking-wider text-muted-foreground">RECORD</span>
+        <span className="font-heading text-[12px] tracking-wider text-muted-foreground">RECORD</span>
       </div>
       <GaugeRing value={streakVal} max={20} label={`${streaks?.current?.type ?? "W"} STREAK`} unit="" size={80} color={streakColor} />
       <GaugeRing value={Math.abs(ddVal)} max={30} label="DRAWDOWN" unit="%" size={80} color={ddVal > 15 ? CHART_COLORS.crimson : CHART_COLORS.gold} />

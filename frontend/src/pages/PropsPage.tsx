@@ -88,7 +88,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
         <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
           <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
         </div>
-        <span className="font-mono text-[10px] tabular-nums" style={{ color }}>
+        <span className="font-mono text-[13px] tabular-nums" style={{ color }}>
           {edge > 0 ? "+" : ""}{edge.toFixed(1)}
         </span>
       </div>
@@ -101,7 +101,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="font-heading text-lg sm:text-xl tracking-widest text-foreground uppercase">
-            Operative Intelligence{" "}
+            Player Props{" "}
             <span style={{ color: CHART_COLORS.crimson }}>/ Player Props</span>
           </h2>
           <StatusIndicator status={propsAvailable ? "online" : "offline"} label={propsAvailable ? "ACTIVE" : "UNAVAILABLE"} />
@@ -110,7 +110,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
           <button
             onClick={() => { setPage(0); refetch(); }}
             disabled={isLoading}
-            className="hud-btn px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase"
+            className="hud-btn px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase"
             style={{
               borderColor: `${CHART_COLORS.crimson}50`,
               color: CHART_COLORS.crimson,
@@ -124,9 +124,9 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
 
       {/* ── Not available notice ── */}
       {!propsAvailable && (
-        <HudPanel title="SYSTEM NOTICE" status="warning">
+        <HudPanel title="NOTICE" status="warning">
           <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-4">
-            Props intelligence available for NBA, NHL, CBB, and MLB theatres only
+            Player props available for NBA, NHL, CBB, and MLB only
           </p>
         </HudPanel>
       )}
@@ -140,7 +140,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
             </span>
             <button
               onClick={() => refetch()}
-              className="text-[10px] font-heading tracking-widest uppercase hover:underline"
+              className="text-[13px] font-heading tracking-widest uppercase hover:underline"
               style={{ color: CHART_COLORS.crimson }}
             >
               RETRY
@@ -150,12 +150,12 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       )}
 
       {/* ── Loading states ── */}
-      {isLoading && <LogoLoader text="ACQUIRING PROP INTELLIGENCE..." />}
+      {isLoading && <LogoLoader text="LOADING PLAYER PROPS..." />}
 
       {isRefreshing && !isLoading && (
         <div className="text-center py-6">
           <LogoLoader text="COMPUTING PROJECTIONS..." />
-          <p className="text-muted-foreground text-[10px] font-heading tracking-widest mt-2">
+          <p className="text-muted-foreground text-[13px] font-heading tracking-widest mt-2">
             Server-side computation in progress. Auto-refreshing...
           </p>
         </div>
@@ -163,10 +163,10 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
 
       {/* ── Desktop Table ── */}
       {pagedProps.length > 0 && (
-        <HudPanel title={`PROP SIGNALS  [${sortedProps.length}]`} status="online" className="hidden sm:block">
+        <HudPanel title={`PLAYER PROPS  [${sortedProps.length}]`} status="online" className="hidden sm:block">
           {/* Angular header row */}
-          <div className="flex items-center gap-3 px-2 py-1.5 border-b border-white/[0.06] text-[9px] font-heading tracking-widest text-muted-foreground uppercase">
-            <div className="flex-1">OPERATIVE</div>
+          <div className="flex items-center gap-3 px-2 py-1.5 border-b border-white/[0.06] text-[12px] font-heading tracking-widest text-muted-foreground uppercase">
+            <div className="flex-1">PLAYER</div>
             <span className="w-14 text-center">TYPE</span>
             <span className="w-10 text-right">LINE</span>
             <span className="w-12 text-right">PROJ</span>
@@ -187,7 +187,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
                 <span className="font-heading text-xs tracking-wider text-foreground truncate block">
                   {prop.player_name}
                 </span>
-                <span className="text-[9px] text-muted-foreground font-mono">{prop.team} vs {prop.opponent}</span>
+                <span className="text-[12px] text-muted-foreground font-mono">{prop.team} vs {prop.opponent}</span>
               </div>
 
               {/* Stat type hex badge */}
@@ -221,7 +221,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
               </span>
 
               {/* Confidence */}
-              <span className="font-mono text-[10px] text-muted-foreground w-8 text-right tabular-nums">
+              <span className="font-mono text-[13px] text-muted-foreground w-8 text-right tabular-nums">
                 {prop.confidence}
               </span>
 
@@ -230,7 +230,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
                 {onTrackBet && (
                   <button
                     onClick={() => handleTrackProp(prop)}
-                    className="w-5 h-5 flex items-center justify-center text-[10px] font-heading border rounded-sm transition-all hover:scale-110"
+                    className="w-5 h-5 flex items-center justify-center text-[13px] font-heading border rounded-sm transition-all hover:scale-110"
                     style={{
                       borderColor: `${CHART_COLORS.crimson}50`,
                       color: CHART_COLORS.crimson,
@@ -266,7 +266,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
                   <span className="font-heading text-xs tracking-wider text-foreground truncate">
                     {prop.player_name}
                   </span>
-                  <span className="text-[9px] text-muted-foreground font-mono">{prop.team}</span>
+                  <span className="text-[12px] text-muted-foreground font-mono">{prop.team}</span>
                 </div>
                 <HexBadge
                   label={prop.signal}
@@ -285,7 +285,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
                   P:{prop.projection.toFixed(1)}
                 </span>
                 <EdgeBar edge={prop.edge} />
-                <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                <span className="font-mono text-[13px] text-muted-foreground tabular-nums">
                   {prop.confidence}%
                 </span>
               </div>
@@ -293,13 +293,13 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
               {onTrackBet && (
                 <button
                   onClick={() => handleTrackProp(prop)}
-                  className="mt-2 w-full py-1.5 text-[10px] font-heading tracking-widest uppercase border transition-all hover:bg-white/[0.03]"
+                  className="mt-2 w-full py-1.5 text-[13px] font-heading tracking-widest uppercase border transition-all hover:bg-white/[0.03]"
                   style={{
                     borderColor: `${CHART_COLORS.crimson}40`,
                     color: CHART_COLORS.crimson,
                   }}
                 >
-                  + TRACK OPERATIVE
+                  + TRACK PLAYER
                 </button>
               )}
             </HudPanel>
@@ -313,7 +313,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
           <button
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={page === 0}
-            className="px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
+            className="px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
           >
             &laquo; PREV
           </button>
@@ -323,7 +323,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
           <button
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             disabled={page >= totalPages - 1}
-            className="px-4 py-1.5 text-[10px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
+            className="px-4 py-1.5 text-[13px] font-heading tracking-widest uppercase border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 disabled:opacity-20 transition-all"
           >
             NEXT &raquo;
           </button>
@@ -334,7 +334,7 @@ export function PropsPage({ sport, onTrackBet }: PropsPageProps) {
       {!isLoading && !isRefreshing && sortedProps.length === 0 && propsAvailable && (
         <HudPanel title="NO SIGNALS" status="offline">
           <p className="text-muted-foreground text-xs font-heading tracking-wider text-center py-6">
-            No prop intelligence available at this time. Standby for next scan window.
+            No player props available right now. Check back after the next scan.
           </p>
         </HudPanel>
       )}

@@ -30,12 +30,12 @@ function GameItem({ game }: { game: TickerGame }) {
   return (
     <span className="inline-flex items-center gap-2 px-4 whitespace-nowrap">
       <HexBadge label={game.sport.slice(0, 3)} size="sm" active />
-      <span className="font-mono-nums text-[11px] text-foreground">
+      <span className="font-mono-nums text-[14px] text-foreground">
         {game.away}
         <span className="text-muted-foreground mx-1">@</span>
         {game.home}
       </span>
-      <span className="text-[9px] text-muted-foreground font-mono">
+      <span className="text-[12px] text-muted-foreground font-mono">
         {game.dateLabel ? `${game.dateLabel} ` : ""}{game.time}
       </span>
     </span>
@@ -60,8 +60,8 @@ export function GameTicker() {
     return (
       <div className="h-8 border-b border-border bg-muted/20 overflow-hidden relative hex-grid-bg">
         <div className="flex items-center h-full px-4">
-          <span className="text-[10px] text-muted-foreground font-mono">
-            {isLoading ? "LOADING OPERATIONS..." : "NO ACTIVE OPERATIONS"}
+          <span className="text-[13px] text-muted-foreground font-mono">
+            {isLoading ? "LOADING GAMES..." : "NO GAMES RIGHT NOW"}
           </span>
         </div>
       </div>

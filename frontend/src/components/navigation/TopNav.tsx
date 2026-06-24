@@ -13,12 +13,12 @@ interface NavTab {
 }
 
 const TABS: NavTab[] = [
-  { id: "command", label: "COMMAND CENTER", shortLabel: "CMD" },
-  { id: "intel", label: "INTEL", shortLabel: "INTEL" },
-  { id: "operatives", label: "OPERATIVES", shortLabel: "OPS" },
-  { id: "strike-ops", label: "STRIKE OPS", shortLabel: "STRIKE" },
-  { id: "war-room", label: "WAR ROOM", shortLabel: "WAR" },
-  { id: "field-log", label: "FIELD LOG", shortLabel: "LOG" },
+  { id: "command", label: "DASHBOARD", shortLabel: "Dashboard" },
+  { id: "intel", label: "PICKS", shortLabel: "Picks" },
+  { id: "operatives", label: "PLAYER PROPS", shortLabel: "Props" },
+  { id: "strike-ops", label: "PARLAYS", shortLabel: "Parlays" },
+  { id: "war-room", label: "LEDGER", shortLabel: "Ledger" },
+  { id: "field-log", label: "MY BETS", shortLabel: "My Bets" },
 ];
 
 interface TopNavProps {
@@ -45,7 +45,7 @@ export function TopNav({ activeSection, onSelectSection, selectedSport, onSelect
             <button
               onClick={() => onSelectSection("command")}
               className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
-              title="Command Center"
+              title="Dashboard"
             >
               <img src="/static/logo.png" alt="Joker's Edge" className="w-6 h-6 flex-shrink-0" />
               <h1 className="hidden sm:block text-sm font-heading tracking-[0.12em] text-foreground whitespace-nowrap">
@@ -64,7 +64,7 @@ export function TopNav({ activeSection, onSelectSection, selectedSport, onSelect
                 <button
                   key={tab.id}
                   onClick={() => onSelectSection(tab.id)}
-                  className={`relative px-3 py-1.5 text-[10px] font-heading tracking-wider transition-all duration-200 ${
+                  className={`relative px-3 py-1.5 text-[13px] font-heading tracking-wider transition-all duration-200 ${
                     isActive
                       ? "text-primary"
                       : "text-muted-foreground hover:text-foreground"
@@ -93,7 +93,7 @@ export function TopNav({ activeSection, onSelectSection, selectedSport, onSelect
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="flex items-center gap-1 text-foreground"
             >
-              <span className="font-heading text-[10px] tracking-wider text-primary">{activeTab.label}</span>
+              <span className="font-heading text-[13px] tracking-wider text-primary">{activeTab.label}</span>
               {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
           </div>
